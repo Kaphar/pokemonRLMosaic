@@ -15,6 +15,8 @@ from pyboy.utils import WindowEvent
 
 from global_map import local_to_global, GLOBAL_MAP_SHAPE
 
+_V2_DIR = Path(__file__).resolve().parent
+
 event_flags_start = 0xD747
 event_flags_end = 0xD87E # expand for SS Anne # old - 0xD7F6 
 museum_ticket = (0xD754, 0)
@@ -37,6 +39,7 @@ class RedGymEnv(Env):
         self.reward_scale = (
             1 if "reward_scale" not in config else config["reward_scale"]
         )
+        self.noop_button = config.get("noop_button", False)
         self.instance_id = (
             str(uuid.uuid4())[:8]
             if "instance_id" not in config
@@ -79,8 +82,12 @@ class RedGymEnv(Env):
             WindowEvent.RELEASE_BUTTON_START
         ]
 
+        if self.noop_button:
+            self.valid_actions.append(WindowEvent.PASS)
+            self.release_actions.append(None)
+
         # load event names (parsed from https://github.com/pret/pokered/blob/91dc3c9f9c8fd529bb6e8307b58b96efa0bec67e/constants/event_constants.asm)
-        with open("events.json") as f:
+        with open(_V2_DIR / "events.json") as f:
             event_names = json.load(f)
         self.event_names = event_names
 
@@ -89,6 +96,7 @@ class RedGymEnv(Env):
 
         # Set these in ALL subclasses
         self.action_space = spaces.Discrete(len(self.valid_actions))
+        self.noop_button_index = self.valid_actions.index(WindowEvent.PASS) if self.noop_button else -1
         
         self.enc_freqs = 8
 
@@ -247,13 +255,15 @@ class RedGymEnv(Env):
         return obs, new_reward, False, step_limit_reached, {}
     
     def run_action_on_emulator(self, action):
-        # press button then release after some steps
-        self.pyboy.send_input(self.valid_actions[action])
+        event = self.valid_actions[action]
+        if event != WindowEvent.PASS:
+            self.pyboy.send_input(event)
         # disable rendering when we don't need it
         render_screen = self.save_video or not self.headless
         press_step = 8
         self.pyboy.tick(press_step, render_screen)
-        self.pyboy.send_input(self.release_actions[action])
+        if event != WindowEvent.PASS and self.release_actions[action] is not None:
+            self.pyboy.send_input(self.release_actions[action])
         self.pyboy.tick(self.act_freq - press_step - 1, render_screen)
         self.pyboy.tick(1, True)
         if self.save_video and self.fast_video:
@@ -585,3 +595,11 @@ class RedGymEnv(Env):
             return self.essential_map_locations[map_idx]
         else:
             return -1
+
+    @property
+    def current_map_id(self):
+        return self.read_m(0xD35E)
+
+    @property
+    def current_level_sum(self):
+        return sum([self.read_m(a) for a in [0xD18C, 0xD1B8, 0xD1E4, 0xD210, 0xD23C, 0xD268]])
