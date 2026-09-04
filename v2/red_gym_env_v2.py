@@ -155,6 +155,13 @@ class RedGymEnv(Env):
         self.died_count = 0
         self.party_size = 0
         self.step_count = 0
+        self.trainer_wins = 0
+        self.wild_wins = 0
+        self.in_battle = False
+        self.battle_type = 0
+        self.wall_collisions = 0
+        self._same_dir_count = 0
+        self._last_dir = None
 
         self.base_event_flags = sum([
                 self.bit_count(self.read_m(i))
@@ -211,6 +218,9 @@ class RedGymEnv(Env):
         if self.save_video and self.step_count == 0:
             self.start_video()
 
+
+        old_x, old_y, old_map = self.get_game_coords()
+
         self.run_action_on_emulator(action)
         self.append_agent_stats(action)
 
@@ -222,9 +232,13 @@ class RedGymEnv(Env):
 
         self.update_heal_reward()
 
+        self.update_battle_tracking()
+
         self.party_size = self.read_m(0xD163)
 
-        new_reward = self.update_reward()
+        wall_penalty = self._detect_wall_collision(action, old_x, old_y, old_map)
+
+        new_reward = self.update_reward() # + wall_penalty
 
         self.last_health = self.read_hp_fraction()
 
@@ -254,6 +268,20 @@ class RedGymEnv(Env):
 
         return obs, new_reward, False, step_limit_reached, {}
     
+    def _detect_wall_collision(self, action, old_x, old_y, old_map):
+        directional_actions = {0, 1, 2, 3}
+        if action not in directional_actions:
+            return 0.0
+
+        if self.read_m(0xD057) != 0:
+            return 0.0
+
+        new_x, new_y, new_map = self.get_game_coords()
+        if new_x == old_x and new_y == old_y and new_map == old_map:
+            self.wall_collisions += 1
+            return -0.05
+        return 0.0
+    
     def run_action_on_emulator(self, action):
         event = self.valid_actions[action]
         if event != WindowEvent.PASS:
@@ -274,6 +302,9 @@ class RedGymEnv(Env):
         levels = [
             self.read_m(a) for a in [0xD18C, 0xD1B8, 0xD1E4, 0xD210, 0xD23C, 0xD268]
         ]
+        emulator_frames = self.step_count * self.act_freq
+        game_seconds = emulator_frames / 60.0
+        game_minutes = game_seconds / 60.0
         self.agent_stats.append(
             {
                 "step": self.step_count,
@@ -292,6 +323,10 @@ class RedGymEnv(Env):
                 "badge": self.get_badges(),
                 "event": self.progress_reward["event"],
                 "healr": self.total_healing_rew,
+                "trainer_wins": self.trainer_wins,
+                "wild_wins": self.wild_wins,
+                "game_minutes": game_minutes,
+                "wall_collisions": self.wall_collisions,
             }
         )
 
@@ -556,13 +591,26 @@ class RedGymEnv(Env):
 
     def update_heal_reward(self):
         cur_health = self.read_hp_fraction()
-        # if health increased and party size did not change
         if cur_health > self.last_health and self.read_m(0xD163) == self.party_size:
             if self.last_health > 0:
                 heal_amount = cur_health - self.last_health
                 self.total_healing_rew += heal_amount * heal_amount
             else:
                 self.died_count += 1
+
+    def update_battle_tracking(self):
+        cur_battle_type = self.read_m(0xD057)
+        if not self.in_battle and cur_battle_type != 0:
+            self.in_battle = True
+            self.battle_type = cur_battle_type
+        elif self.in_battle and cur_battle_type == 0:
+            self.in_battle = False
+            if self.read_hp_fraction() > 0:
+                if self.battle_type == 1:
+                    self.wild_wins += 1
+                elif self.battle_type >= 2:
+                    self.trainer_wins += 1
+            self.battle_type = 0
 
     def read_hp_fraction(self):
         hp_sum = sum([

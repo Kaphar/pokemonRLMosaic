@@ -12,4 +12,4 @@ session_*
 PokemonRed.gb.state
 venv*
 .python-version
-mosaic_sessions/checkpoints/
+mosaic_sessions/checkpoints/*.zip

@@ -44,10 +44,23 @@ class Mosaic:
                 "color": (0, 180, 0),
                 "hover": (0, 255, 0),
             },
+            "Stats": {
+                "rect": (button_margin, start_y + (button_h + button_gap) * 3, button_w, button_h),
+                "color": (180, 180, 0),
+                "hover": (255, 255, 0),
+            },
+            "Map": {
+                "rect": (button_margin, start_y + (button_h + button_gap) * 4, button_w, button_h),
+                "color": (180, 0, 0),
+                "hover": (255, 0, 0),
+            },
         }
         self.hovered_button: str | None = None
         self.last_action: str | None = None
         self.last_action_target: int | None = None
+        self.control_active: bool = False
+        self.stats_visible = False
+        self.map_visible = False
 
         cv2.namedWindow(self.title)
         cv2.setMouseCallback(self.title, self._on_mouse)
@@ -55,7 +68,7 @@ class Mosaic:
     def _button_at(self, x: int, y: int) -> str | None:
         for name, info in self.buttons.items():
             bx, by, bw, bh = info["rect"]
-            if bx <= x < bx + bw and by <= y < by + bh:
+            if bx + self.panel_x <= x < bx + self.panel_x + bw and by <= y < by + bh:
                 return name
         return None
 
@@ -65,8 +78,9 @@ class Mosaic:
                 button = self._button_at(x, y)
                 if button == "Control":
                     if self.selected_index is not None:
-                        self.last_action = "Control"
-                        self.last_action_target = self.selected_index
+                        self.control_active = not self.control_active
+                        self.last_action = "Control" if self.control_active else None
+                        self.last_action_target = self.selected_index if self.control_active else None
                         self.pending_human_action = None
                 elif button == "Slash":
                     if self.selected_index is not None:
@@ -76,6 +90,10 @@ class Mosaic:
                     if self.selected_index is not None:
                         self.last_action = "Praise"
                         self.last_action_target = self.selected_index
+                elif button == "Stats":
+                    self.stats_visible = not self.stats_visible
+                elif button == "Map":
+                    self.map_visible = not self.map_visible
             else:
                 column = x // TILE_WIDTH
                 row = y // TILE_HEIGHT
@@ -89,7 +107,16 @@ class Mosaic:
             else:
                 self.hovered_button = None
 
-    def render(self, tiles: list[np.ndarray], reward_modifiers: list[float] | None = None) -> None:
+    def render(
+        self,
+        tiles: list[np.ndarray],
+        reward_modifiers: list[float] | None = None,
+        ppo_updates: int = 0,
+        objective_info: list[tuple[str, str | None, float]] | None = None,
+        step_count: int = 0,
+        batch_number: int = 0,
+        model_name: str | None = None,
+    ) -> None:
         cols = min(GRID_COLS, len(tiles))
         rows = (len(tiles) + cols - 1) // cols
         rows_list = []
@@ -102,8 +129,9 @@ class Mosaic:
             rows_list.append(np.hstack(row_tiles))
         grid = np.vstack(rows_list)
 
-        panel = np.full((self.panel_h, self.panel_w, 3), 40, dtype=np.uint8)
-        cv2.rectangle(panel, (0, 0), (self.panel_w - 1, self.panel_h - 1), (80, 80, 80), thickness=2)
+        panel_h = grid.shape[0]
+        panel = np.full((panel_h, self.panel_w, 3), 40, dtype=np.uint8)
+        cv2.rectangle(panel, (0, 0), (self.panel_w - 1, panel_h - 1), (80, 80, 80), thickness=2)
 
         cv2.putText(panel, "Supervisor", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
@@ -112,9 +140,28 @@ class Mosaic:
         else:
             cv2.putText(panel, "No selection", (20, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 150, 150), 1)
 
+        if objective_info is not None and self.selected_index is not None:
+            objective_name, subgoal_name, objective_progress = objective_info[self.selected_index]
+            cv2.putText(panel, f"Objective: {objective_name}", (20, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
+            if subgoal_name:
+                cv2.putText(panel, f"Subgoal: {subgoal_name}", (20, 115), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 0), 1)
+            cv2.putText(panel, f"Progress: {objective_progress:.0%}", (20, 135), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 0), 1)
+
+        cv2.putText(panel, f"PPO updates: {ppo_updates}", (20, 85), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
+
+        cv2.putText(panel, f"Step: {step_count}", (20, 105), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        cv2.putText(panel, f"Batch: {batch_number}", (20, 125), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        if model_name:
+            cv2.putText(panel, f"Model: {model_name}", (20, 145), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+
         for name, info in self.buttons.items():
             bx, by, bw, bh = info["rect"]
-            color = info["hover"] if self.hovered_button == name else info["color"]
+            if name == "Stats":
+                color = info["hover"] if self.stats_visible else info["color"]
+            elif name == "Map":
+                color = info["hover"] if self.map_visible else info["color"]
+            else:
+                color = info["hover"] if self.hovered_button == name else info["color"]
             cv2.rectangle(panel, (bx, by), (bx + bw, by + bh), color, thickness=-1)
             cv2.rectangle(panel, (bx, by), (bx + bw, by + bh), (255, 255, 255), thickness=2)
             text_size = cv2.getTextSize(name, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)[0]
@@ -122,14 +169,17 @@ class Mosaic:
             text_y = by + (bh + text_size[1]) // 2
             cv2.putText(panel, name, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
+        if self.control_active and self.selected_index is not None:
+            cv2.putText(panel, "CONTROL ON", (20, panel_h - 70), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+
         if self.last_action is not None and self.last_action_target is not None:
             action_text = f"{self.last_action} #{self.last_action_target + 1}"
-            cv2.putText(panel, action_text, (20, self.panel_h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 1)
+            cv2.putText(panel, action_text, (20, panel_h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 1)
 
         if reward_modifiers is not None and self.selected_index is not None:
             mod = reward_modifiers[self.selected_index]
             mod_text = f"Reward mod: {mod:+.1f}"
-            cv2.putText(panel, mod_text, (20, self.panel_h - 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
+            cv2.putText(panel, mod_text, (20, panel_h - 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
 
         mosaic = np.hstack([grid, panel])
         cv2.imshow(self.title, mosaic)

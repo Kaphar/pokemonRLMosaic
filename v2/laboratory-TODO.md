@@ -1,6 +1,7 @@
 _____ TODO FOR LATER ____
-a menu with buttons for each emulator (control emulator button. slash control (bad emulator doing bad things !) "praise button" or highlight. a button to indicate something we liked to see (does it make sense to have 3 different levels or proudness/relevancy/oddity perceive? ))
- to have a button that will save the state of one emulator, and use it as a new starting point for one or many emulators.
+a menu with buttons for each emulator (control emulator button. slash control (bad emulator doing bad things !) "praise button" or highlight. a button to indicate something we liked to see (does it make sense to have 3 different levels or proudness/relevancy/oddity perceive? )) ✅ DONE
+ to have a button that will save the state of one emulator, and use it as a new starting point for one or many emulators. ⏳ PENDING
+- Investigate how the original dev generated the global map image so we can extend it later when expanding the world.
 
 
 
@@ -57,7 +58,7 @@ buttons
 The exciting part is that skills can potentially become reusable knowledge.
 
 Our phases
-Phase 1 — Understand V2
+Phase 1 — Understand V2 ✅ COMPLETE
 
 We don't change the learning architecture yet.
 
@@ -88,7 +89,7 @@ how much progress each environment makes
 
 The repository already renders individual game states to the session directory and supports TensorBoard, so we're building a more useful local laboratory around that existing infrastructure.
 
-Phase 2 — The emulator laboratory
+Phase 2 — The emulator laboratory 🔄 IN PROGRESS
 
 Our 12–15 emulator mosaic:
 
@@ -102,7 +103,7 @@ Our 12–15 emulator mosaic:
 │ 13 │ 14 │ 15 │    │
 └────┴────┴────┴────┘
 
-Click one → interactive emulator.
+Click one → interactive emulator. ✅
 
 Initially these are not 15 independent brains.
 
@@ -120,9 +121,21 @@ Explorer     Trainer     Speedrunner
    │             │            │
  Env 1-5       Env 6-10     Env 11-15
 
-while still sharing useful knowledge.
+while still sharing useful knowledge. 🔄 (presets added, per-env assignment pending)
 
-Phase 3 — Objectives and skills
+Phase 2 instrumentation status:
+- ✅ Mosaic display with supervisor panel (Control/Slash/Praise)
+- ✅ Live PPO training inside mosaic
+- ✅ Checkpoints with auto-resume
+- ✅ Batch reports with statistics
+- ✅ Indefinite loop mode
+- ✅ Overlay HUD on emulator tiles
+- ✅ Observation inspector window (screen, HP, level, map, badges, events, actions, reward history)
+- ✅ PPO update counter in panel
+- ✅ Specialization presets (--specialization explorer|trainer|speedrunner)
+- ✅ TensorBoard launch hint
+
+Phase 3 — Objectives and skills 🔄 SCAFFOLDING COMPLETE
 
 Then we introduce things like:
 
@@ -158,6 +171,24 @@ And eventually:
                ACTION
 
 That's where our skill laboratory really starts becoming interesting.
+
+Phase 3 implemented:
+- ✅ Objective base class with subgoals
+- ✅ Subgoal base class with completion check
+- ✅ ExploreObjective (visits new map tiles)
+- ✅ ReachPewterObjective (navigate to Pewter City by map ID, confirmed map ID = 2)
+- ✅ LevelPikachuObjective (get Pikachu to target level)
+- ✅ TrainSquirtleObjective (get Squirtle to target level)
+- ✅ Skill base class
+- ✅ NavigateToSkill (moves toward target map ID)
+- ✅ SkillRegistry
+- ✅ ObjectiveManager (per-env objective tracking)
+- ✅ Mosaic panel shows objective/subgoal/progress for selected env
+- ✅ --objective CLI argument: explore|reach_pewter|level_pikachu|train_squirtle
+- ✅ Bug fix: batch report now accumulates rewards in both training and inference modes
+- ✅ Version/iteration display in mosaic panel (step count, batch number, PPO updates, model name)
+- ✅ Map window (MapWindow) shows overall map with tracked env position using global_map.py
+- ✅ Launcher GUI (tkinter) with mode selection, model dropdown, env count, HUD toggle
 
 So let's start building it
 
