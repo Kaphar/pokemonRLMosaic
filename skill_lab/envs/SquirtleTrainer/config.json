@@ -1,0 +1,10 @@
+{
+  "env_index": 19,
+  "env_name": "SquirtleTrainer",
+  "env_dir": "D:\\workspace\\pokemon AI\\fire\\PokemonRedExperiments\\skill_lab\\envs\\SquirtleTrainer",
+  "directive": "SquirtleTrainer",
+  "target_starter": "Squirtle",
+  "milestone_reward": 10.0,
+  "speed_bonus": true,
+  "description": "Navigate to pick Squirtle (middle ball)"
+}

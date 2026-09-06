@@ -1,0 +1,1 @@
+Add a "Save Checkpoint" button in your mosaic UI that calls recorder.save() only when clicked.

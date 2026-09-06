@@ -1,0 +1,10 @@
+{
+  "env_index": 33,
+  "env_name": "Env034",
+  "env_dir": "D:\\workspace\\pokemon AI\\fire\\PokemonRedExperiments\\skill_lab\\envs\\Env034",
+  "directive": "AnyStarter",
+  "target_starter": null,
+  "milestone_reward": 10.0,
+  "speed_bonus": true,
+  "description": "Pick any starter, focus on speed"
+}

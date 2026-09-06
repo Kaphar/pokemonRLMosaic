@@ -19,7 +19,11 @@ TILE_HEIGHT = 144         # Game Boy screen height
 
 # TILE_WIDTH = 280
 # TILE_HEIGHT = 288
-TOTAL_TILES = 12          # Number of environments in the mosaic
+
+GRID_COLS = 7
+GRID_ROWS = 6
+TOTAL_TILES = GRID_COLS * GRID_ROWS
+
 DEFAULT_MAX_STEPS = 7200  # Max steps per episode
 
 # --- Action Indices (must match v2/red_gym_env_v2.py valid_actions) ---
@@ -43,9 +47,7 @@ REWARD_MODIFIER_PRAISE = 1.0
 REWARD_MODIFIER_SLASH = -1.0
 
 PANEL_WIDTH = 220
-GRID_COLS = 4
-GRID_ROWS = 3
-TOTAL_TILES = GRID_COLS * GRID_ROWS
+
 
 
 SPECIALIZATION_PRESETS = {

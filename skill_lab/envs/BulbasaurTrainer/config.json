@@ -1,0 +1,10 @@
+{
+  "env_index": 29,
+  "env_name": "BulbasaurTrainer",
+  "env_dir": "D:\\workspace\\pokemon AI\\fire\\PokemonRedExperiments\\skill_lab\\envs\\BulbasaurTrainer",
+  "directive": "BulbasaurTrainer",
+  "target_starter": "Bulbasaur",
+  "milestone_reward": 10.0,
+  "speed_bonus": true,
+  "description": "Navigate to pick Bulbasaur (left ball)"
+}

@@ -1,0 +1,11 @@
+{
+  "init_state": "init.state",
+  "total_envs": 42,
+  "envs": {
+    "0": {
+      "total_actions": 239,
+      "actions": [
+        {
+          "step": 1,
+          "action": 6,
+          "masked": 

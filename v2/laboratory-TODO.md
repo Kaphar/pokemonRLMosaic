@@ -1,3 +1,11 @@
+TODO:
+3. Disabling Start and Select
+You asked if disabling these buttons would disturb the model. The answer is: It is actually the best thing you can do!
+In Reinforcement Learning, this is called Action Masking.
+If Start/Select are available in the early game, the model will accidentally press Start, open the pause menu, and just stand there forever because time passes in the menu but it doesn't get punished.
+With Action Masking, the neural network might "think" about pressing Start, but the code sets the probability of that action to 0% before the move is made. The model learns very quickly that it only has 6 valid buttons (Up, Down, Left, Right, A, B) and learns much faster.
+=> so we block the input at the code level and we should be fine.
+
 _____ TODO FOR LATER ____
 a menu with buttons for each emulator (control emulator button. slash control (bad emulator doing bad things !) "praise button" or highlight. a button to indicate something we liked to see (does it make sense to have 3 different levels or proudness/relevancy/oddity perceive? )) ✅ DONE
  to have a button that will save the state of one emulator, and use it as a new starting point for one or many emulators. ⏳ PENDING

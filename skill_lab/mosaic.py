@@ -11,8 +11,10 @@ from skill_lab.config import GRID_COLS, GRID_ROWS, PANEL_WIDTH, TILE_HEIGHT, TIL
 
 
 class Mosaic:
-    def __init__(self, num_tiles: int, title: str = "Pokemon Red V2 Mosaic", foreground: bool = False) -> None:
+    def __init__(self, num_tiles: int, title: str = "Pokemon Red V2 Mosaic", foreground: bool = False,rows: int = 6, cols: int = 7) -> None:
         self.num_tiles = num_tiles
+        self.rows = rows
+        self.cols = cols
         self.title = title
         self.foreground = foreground
         self.selected_index: int | None = None
@@ -51,6 +53,24 @@ class Mosaic:
             },
             "Map": {
                 "rect": (button_margin, start_y + (button_h + button_gap) * 4, button_w, button_h),
+                "color": (180, 0, 0),
+                "hover": (255, 0, 0),
+            },
+            "KILL": {
+               "action": "kill", 
+                "rect": (button_margin, start_y + (button_h + button_gap) * 5, button_w, button_h),
+                "color": (180, 0, 0),
+                "hover": (255, 0, 0),
+            },
+            "RESET": {
+               "action": "reset", 
+                "rect": (button_margin, start_y + (button_h + button_gap) * 6, button_w, button_h),
+                "color": (180, 0, 0),
+                "hover": (255, 0, 0),
+            },
+            "REPLAY": {
+               "action": "replay", 
+                "rect": (button_margin, start_y + (button_h + button_gap) * 7, button_w, button_h),
                 "color": (180, 0, 0),
                 "hover": (255, 0, 0),
             },
@@ -117,6 +137,8 @@ class Mosaic:
         batch_number: int = 0,
         model_name: str | None = None,
     ) -> None:
+
+        
         cols = min(GRID_COLS, len(tiles))
         rows = (len(tiles) + cols - 1) // cols
         rows_list = []
@@ -190,6 +212,27 @@ class Mosaic:
         key = cv2.waitKeyEx(1)
         if key in (ord("q"), 27):
             return key
+
+        # # Q or Escape: quit
+        # if key in (ord("q"), 27):
+        #     raise KeyboardInterrupt
+
+        # # K: Kill selected emulator (reset it)
+        # if key == ord("k") and self.selected_index is not None:
+        #     print(f"[Mosaic] KILLING env {self.selected_index} - resetting...")
+        #     # Reset this specific environment
+        #     env.envs[self.selected_index].reset()
+        #     # Clear its input recording
+        #     if recorder:
+        #         recorder.reset(self.selected_index)
+        #     print(f"[Mosaic] Env {self.selected_index} reset to initial state")
+
+        # # R: Reset selected emulator to a previous checkpoint state
+        # if key == ord("r") and self.selected_index is not None:
+        #     print(f"[Mosaic] RESTART env {self.selected_index} from last checkpoint")
+        #     # You can implement loading a previous state here
+        #     env.envs[self.selected_index].reset()
+        
         if key in (
             ord("1"), ord("2"), ord("3"), ord("4"), ord("5"),
             ord("6"), ord("7"), ord("8"), ord("9"),

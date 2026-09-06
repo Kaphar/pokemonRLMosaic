@@ -16,6 +16,8 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv
 from pyboy.utils import WindowEvent
 
+
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -31,6 +33,10 @@ from skill_lab.map_window import MapWindow
 from skill_lab.mosaic import Mosaic
 from skill_lab.stats_window import StatsWindow
 
+from skill_lab.env_setup import setup_envs
+
+from skill_lab.curriculum import get_stage #, stage_to_config
+from skill_lab.recorder import InputRecorder
 
 class Profile:
     def __init__(self, name: str, count: int, model_path: str | None, explore_weight: float) -> None:
@@ -41,20 +47,34 @@ class Profile:
 
 
 def make_config(profile: Profile, session_path: Path, args: argparse.Namespace) -> dict[str, Any]:
+    from skill_lab.curriculum import get_stage
+
+    stage = get_stage(args.stage)
+
     reward_scale = args.reward_scale
     explore_weight = args.explore_weight
     if args.specialization and args.specialization in SPECIALIZATION_PRESETS:
         preset = SPECIALIZATION_PRESETS[args.specialization]
         reward_scale = preset["reward_scale"]
         explore_weight = preset["explore_weight"]
-    
+
+    # Use stage's init_state and max_steps
+    init_state = Path(stage.init_state)
+    max_steps = stage.max_steps
+
+    # Allow CLI overrides
+    if args.init_state:
+        init_state = args.init_state
+    if args.max_steps:
+        max_steps = args.max_steps
+
     return {
         "headless": True,
         "save_final_state": False,
         "early_stop": False,
         "action_freq": ACTION_FREQ,
-        "init_state": str(args.init_state),
-        "max_steps": args.max_steps,
+        "init_state": str(init_state),
+        "max_steps": max_steps,  # ← Short for starter stage!
         "print_rewards": False,
         "save_video": False,
         "fast_video": True,
@@ -64,10 +84,43 @@ def make_config(profile: Profile, session_path: Path, args: argparse.Namespace) 
         "reward_scale": reward_scale,
         "explore_weight": explore_weight,
         "noop_button": True,
-        # NEW: These get passed through to SkillLabWrapper
-        "disable_start_select": getattr(args, "disable_start_select", True),
-        "milestones_path": str(getattr(args, "milestones_path", PROJECT_ROOT / "skill_lab" / "milestones.json")),
+        "speed": 0,  # ← Double speed!
+        # Stage-specific config
+        "disable_start": stage.disable_start,
+        "disable_select": stage.disable_select,
+        "milestone_reward": stage.milestone_reward,
+        "milestones_path": str(PROJECT_ROOT / "skill_lab" / "milestones.json"),
     }
+
+# def make_config(profile: Profile, session_path: Path, args: argparse.Namespace) -> dict[str, Any]:
+#     reward_scale = args.reward_scale
+#     explore_weight = args.explore_weight
+#     if args.specialization and args.specialization in SPECIALIZATION_PRESETS:
+#         preset = SPECIALIZATION_PRESETS[args.specialization]
+#         reward_scale = preset["reward_scale"]
+#         explore_weight = preset["explore_weight"]
+    
+#     return {
+#         "headless": True,
+#         "speed": 2,  # 1 = normal, 2 = double speed, 0 = unlimited (turbo)
+#         "save_final_state": False,
+#         "early_stop": False,
+#         "action_freq": ACTION_FREQ,
+#         "init_state": str(args.init_state),
+#         "max_steps": args.max_steps,
+#         "print_rewards": False,
+#         "save_video": False,
+#         "fast_video": True,
+#         "session_path": session_path,
+#         "gb_path": str(args.rom),
+#         "debug": False,
+#         "reward_scale": reward_scale,
+#         "explore_weight": explore_weight,
+#         "noop_button": True,
+#         # NEW: These get passed through to SkillLabWrapper
+#         "disable_start_select": getattr(args, "disable_start_select", True),
+#         "milestones_path": str(getattr(args, "milestones_path", PROJECT_ROOT / "skill_lab" / "milestones.json")),
+#     }
 
 
 def load_policy(path: str | None, env: DummyVecEnv, dry_run: bool) -> PPO | None:
@@ -195,6 +248,15 @@ def show_report(stats: BatchStats, profile_name: str) -> None:
 
 def main(args: argparse.Namespace | None = None) -> None:
     if args is None: args = parse_args()
+
+
+
+    # Get stage configuration
+    stage = get_stage(args.stage)
+    print(f"Stage: {stage.name} - {stage.description}")
+    print(f"  Start masked: {stage.disable_start}")
+    print(f"  Select masked: {stage.disable_select}")
+
     if not args.rom.exists(): raise FileNotFoundError(f"ROM not found: {args.rom}")
     if not args.init_state.exists(): raise FileNotFoundError(f"Initial state not found: {args.init_state}")
 
@@ -205,7 +267,18 @@ def main(args: argparse.Namespace | None = None) -> None:
     config = make_config(profile, session_path / profile.name.lower(), args)
     config["session_path"].mkdir(exist_ok=True)
 
+    # Set up environment directives
+    env_configs = setup_envs(num_envs=profile.count, stage=args.stage)
+
+    # Print directive assignments (confirmation in logs)
+    for cfg in env_configs:
+        print(f"  Env {cfg['env_index']:02d} [{cfg['env_name']}]: "
+              f"{cfg['description']} | target={cfg['target_starter']}")
+
+    # Create the vectorized environment
     env = make_vec_env(profile.count, config)
+
+    
     model_path = args.model
     if model_path is None and args.resume:
         latest = find_latest_checkpoint(args.checkpoint_dir)
@@ -222,8 +295,18 @@ def main(args: argparse.Namespace | None = None) -> None:
     args.teacher_log = PROJECT_ROOT / args.teacher_log
     args.teacher_log.parent.mkdir(parents=True, exist_ok=True)
 
+    # Create input recorder
+    recorder = InputRecorder(
+        session_path=config["session_path"],
+        init_state=str(args.init_state),
+    )
     # HRL/Objectives removed! The environment handles rules now.
-    mosaic = Mosaic(num_tiles=env.num_envs, foreground=args.foreground)
+    mosaic = Mosaic(
+        num_tiles=env.num_envs,
+        foreground=args.foreground,
+        rows=getattr(args, "mosaic_rows", 6),
+        cols=getattr(args, "mosaic_cols", 7),
+    )
     inspector = ObservationInspector()
     map_window = MapWindow()
     stats_window = StatsWindow()
@@ -277,9 +360,20 @@ def main(args: argparse.Namespace | None = None) -> None:
                     # REMOVED: boundary.apply() - Environment handles masking now
 
                 # Environment step handles everything: masking, memory reading, milestones
-                next_observation, raw_rewards, _, _ = env.step(actions)
+                next_observation, raw_rewards, _, infos = env.step(actions)
                 raw_rewards = np.array(raw_rewards, dtype=np.float32)
                 batch_stats.update(raw_rewards, env.num_envs)
+
+                # Record all inputs
+                for local_index in range(env.num_envs):
+                    info = infos[local_index] if local_index < len(infos) else {}
+                    masked = info.get("masked_action", False)
+                    recorder.record(
+                        env_index=local_index,
+                        step=int(env.envs[local_index].step_count),
+                        action=int(actions[local_index]),
+                        masked=masked,
+                    )
 
                 if training:
                     dones = np.zeros(env.num_envs, dtype=np.bool_)
@@ -335,6 +429,10 @@ def main(args: argparse.Namespace | None = None) -> None:
                 )
 
                 if step_count % max(1, args.num_envs * 10) == 0: print(f"Progress: {step_count} steps")
+                # Save recordings periodically
+                # if step_count % 10000 < env.num_envs: # see how we handle this, we could just save when we decide to save a state.
+                #     save_path = recorder.save() # run this action from the button
+                #     print(f"[Recorder] Saved inputs to: {save_path}")
 
                 key = mosaic.poll_key()
                 if key in (ord("q"), 27): raise KeyboardInterrupt
