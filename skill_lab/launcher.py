@@ -13,8 +13,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from skill_lab.config import TOTAL_TILES
-from skill_lab.run_mosaic import main
 from skill_lab.curriculum import list_stages, get_stage
 
 
@@ -22,7 +20,7 @@ class Launcher:
     def __init__(self) -> None:
         self.root = tk.Tk()
         self.root.title("Pokemon Red Skill Lab")
-        self.root.geometry("480x420")
+        self.root.geometry("520x520")
         self.root.resizable(False, False)
 
         self.checkpoint_dir = PROJECT_ROOT / "mosaic_sessions" / "checkpoints"
@@ -30,10 +28,13 @@ class Launcher:
 
         self.mode_var = tk.StringVar(value="new" if not self.checkpoints else "train")
         self.model_var = tk.StringVar()
-        self.stage_var = tk.StringVar(value="explore")
+        self.stage_var = tk.StringVar(value="starter")
+        self.training_mode_var = tk.StringVar(value="segment")  # NEW
         self.rows_var = tk.IntVar(value=6)
         self.cols_var = tk.IntVar(value=7)
+        self.max_steps_var = tk.IntVar(value=500)  # NEW: segment length
         self.hud_var = tk.BooleanVar(value=True)
+        self.speed_var = tk.IntVar(value=2)  # NEW: emulator speed
 
         self._build_ui()
 
@@ -47,16 +48,16 @@ class Launcher:
         )
 
     def _build_ui(self) -> None:
-        main_frame = ttk.Frame(self.root, padding=20)
+        main_frame = ttk.Frame(self.root, padding=15)
         main_frame.grid(row=0, column=0, sticky="nsew")
 
         # Title
         ttk.Label(
             main_frame, text="Pokemon Red Skill Lab", font=("", 16, "bold")
-        ).grid(row=0, column=0, columnspan=2, pady=(0, 15))
+        ).grid(row=0, column=0, columnspan=2, pady=(0, 10))
 
-        # Mode selection
-        ttk.Label(main_frame, text="Mode:").grid(row=1, column=0, sticky="w", pady=3)
+        # Row 1: Mode
+        ttk.Label(main_frame, text="Mode:").grid(row=1, column=0, sticky="w", pady=2)
         mode_frame = ttk.Frame(main_frame)
         mode_frame.grid(row=1, column=1, sticky="w")
         ttk.Radiobutton(
@@ -68,67 +69,93 @@ class Launcher:
             value="train", command=self._on_mode_change
         ).pack(side=tk.LEFT, padx=5)
 
-        # Model selection
-        ttk.Label(main_frame, text="Model:").grid(row=2, column=0, sticky="w", pady=3)
+        # Row 2: Model
+        ttk.Label(main_frame, text="Model:").grid(row=2, column=0, sticky="w", pady=2)
         self.model_combo = ttk.Combobox(
             main_frame, textvariable=self.model_var, width=35, state="readonly"
         )
-        self.model_combo.grid(row=2, column=1, pady=3)
+        self.model_combo.grid(row=2, column=1, pady=2)
         if self.checkpoints:
             self.model_combo["values"] = [str(p.name) for p in self.checkpoints]
             self.model_var.set(self.checkpoints[0].name)
 
-        # Stage selection
-        ttk.Label(main_frame, text="Stage:").grid(row=3, column=0, sticky="w", pady=3)
+        # Row 3: Stage
+        ttk.Label(main_frame, text="Stage:").grid(row=3, column=0, sticky="w", pady=2)
         self.stage_combo = ttk.Combobox(
             main_frame, textvariable=self.stage_var,
             values=list_stages(), state="readonly", width=15
         )
-        self.stage_combo.grid(row=3, column=1, pady=3, sticky="w")
+        self.stage_combo.grid(row=3, column=1, pady=2, sticky="w")
         self.stage_combo.bind("<<ComboboxSelected>>", self._on_stage_change)
 
-        # Stage description
+        # Row 4: Training Mode (Segment vs Fullrun)
+        ttk.Label(main_frame, text="Training:").grid(row=4, column=0, sticky="w", pady=2)
+        train_frame = ttk.Frame(main_frame)
+        train_frame.grid(row=4, column=1, sticky="w")
+        ttk.Radiobutton(
+            train_frame, text="Segment (reset after N steps)",
+            variable=self.training_mode_var, value="segment",
+            command=self._on_training_mode_change
+        ).pack(side=tk.LEFT, padx=5)
+        ttk.Radiobutton(
+            train_frame, text="Fullrun (no reset)",
+            variable=self.training_mode_var, value="fullrun",
+            command=self._on_training_mode_change
+        ).pack(side=tk.LEFT, padx=5)
+
+        # Row 5: Segment Steps
+        ttk.Label(main_frame, text="Steps:").grid(row=5, column=0, sticky="w", pady=2)
+        steps_frame = ttk.Frame(main_frame)
+        steps_frame.grid(row=5, column=1, sticky="w")
+        self.steps_spinbox = ttk.Spinbox(
+            steps_frame, from_=100, to=20000,
+            textvariable=self.max_steps_var, width=8
+        )
+        self.steps_spinbox.pack(side=tk.LEFT, padx=5)
+        self.steps_label = ttk.Label(steps_frame, text="(steps per segment before reset)")
+        self.steps_label.pack(side=tk.LEFT)
+
+        # Row 6: Speed
+        ttk.Label(main_frame, text="Speed:").grid(row=6, column=0, sticky="w", pady=2)
+        speed_frame = ttk.Frame(main_frame)
+        speed_frame.grid(row=6, column=1, sticky="w")
+        ttk.Spinbox(speed_frame, from_=1, to=10, textvariable=self.speed_var, width=4).pack(side=tk.LEFT, padx=5)
+        ttk.Label(speed_frame, text="(1=normal, 2=double, 0=turbo)").pack(side=tk.LEFT)
+
+        # Row 7: Layout
+        ttk.Label(main_frame, text="Layout:").grid(row=7, column=0, sticky="w", pady=2)
+        layout_frame = ttk.Frame(main_frame)
+        layout_frame.grid(row=7, column=1, sticky="w")
+        ttk.Label(layout_frame, text="Rows:").pack(side=tk.LEFT)
+        ttk.Spinbox(layout_frame, from_=1, to=10, textvariable=self.rows_var, width=4).pack(side=tk.LEFT, padx=(2, 10))
+        ttk.Label(layout_frame, text="Cols:").pack(side=tk.LEFT)
+        ttk.Spinbox(layout_frame, from_=1, to=12, textvariable=self.cols_var, width=4).pack(side=tk.LEFT, padx=2)
+        self.total_envs_var = tk.StringVar(value="= 42 envs")
+        ttk.Label(layout_frame, textvariable=self.total_envs_var).pack(side=tk.LEFT, padx=5)
+        self.rows_var.trace_add("write", self._update_total)
+        self.cols_var.trace_add("write", self._update_total)
+
+        # Row 8: HUD
+        ttk.Checkbutton(
+            main_frame, text="Use HUD overlay", variable=self.hud_var
+        ).grid(row=8, column=0, columnspan=2, sticky="w", pady=5)
+
+        # Row 9: Stage description
         self.stage_desc_var = tk.StringVar(value="")
         ttk.Label(
             main_frame, textvariable=self.stage_desc_var,
             font=("", 8), foreground="gray"
-        ).grid(row=4, column=0, columnspan=2, sticky="w")
+        ).grid(row=9, column=0, columnspan=2, sticky="w")
 
-        # Layout: Rows and Columns
-        ttk.Label(main_frame, text="Layout:").grid(row=5, column=0, sticky="w", pady=3)
-        layout_frame = ttk.Frame(main_frame)
-        layout_frame.grid(row=5, column=1, sticky="w")
-
-        ttk.Label(layout_frame, text="Rows:").pack(side=tk.LEFT)
-        ttk.Spinbox(
-            layout_frame, from_=1, to=10, textvariable=self.rows_var, width=4
-        ).pack(side=tk.LEFT, padx=(2, 10))
-
-        ttk.Label(layout_frame, text="Cols:").pack(side=tk.LEFT)
-        ttk.Spinbox(
-            layout_frame, from_=1, to=12, textvariable=self.cols_var, width=4
-        ).pack(side=tk.LEFT, padx=2)
-
-        self.total_envs_var = tk.StringVar(value="= 42 envs")
-        ttk.Label(layout_frame, textvariable=self.total_envs_var).pack(side=tk.LEFT, padx=5)
-
-        # Update total when rows/cols change
-        self.rows_var.trace_add("write", self._update_total)
-        self.cols_var.trace_add("write", self._update_total)
-
-        # HUD toggle
-        ttk.Checkbutton(
-            main_frame, text="Use HUD overlay", variable=self.hud_var
-        ).grid(row=6, column=0, columnspan=2, sticky="w", pady=10)
-
-        # Launch button
+        # Row 10: Launch
         ttk.Button(
             main_frame, text="Launch", command=self._launch
-        ).grid(row=7, column=0, columnspan=2, pady=10)
+        ).grid(row=10, column=0, columnspan=2, pady=10)
 
         # Initialize
         self._on_mode_change()
         self._on_stage_change(None)
+        self._on_training_mode_change()
         self._update_total()
 
     def _update_total(self, *args) -> None:
@@ -149,6 +176,14 @@ class Launcher:
         except KeyError:
             self.stage_desc_var.set("")
 
+    def _on_training_mode_change(self) -> None:
+        if self.training_mode_var.get() == "fullrun":
+            self.steps_spinbox.config(state="disabled")
+            self.steps_label.config(text="(no reset in fullrun mode)")
+        else:
+            self.steps_spinbox.config(state="normal")
+            self.steps_label.config(text="(steps per segment before reset)")
+
     def _launch(self) -> None:
         mode = self.mode_var.get()
         rows = self.rows_var.get()
@@ -156,13 +191,15 @@ class Launcher:
         num_envs = rows * cols
         use_hud = self.hud_var.get()
         stage_name = self.stage_var.get()
+        training_mode = self.training_mode_var.get()
+        max_steps = self.max_steps_var.get() if training_mode == "segment" else 999999
 
         args = argparse.Namespace(
             model=None,
             dry_run=False,
             rom=Path("PokemonRed.gb"),
             init_state=Path("init.state"),
-            max_steps=2048 * 80,
+            max_steps=max_steps,
             seed=0,
             foreground=False,
             teacher_bonus=5.0,
@@ -182,11 +219,11 @@ class Launcher:
             resume=False,
             loop=False,
             no_hud=not use_hud,
-            # NEW: Stage and layout
             stage=stage_name,
             mosaic_rows=rows,
             mosaic_cols=cols,
-            disable_start_select=None,  # Let the stage handle this
+            training_mode=training_mode,
+            emulator_speed=self.speed_var.get(),
             milestones_path=Path("skill_lab/milestones.json"),
         )
 
@@ -199,6 +236,8 @@ class Launcher:
                 args.model = str(selected)
 
         self.root.destroy()
+
+        from skill_lab.run_mosaic import main
         main(args)
 
     def run(self) -> None:

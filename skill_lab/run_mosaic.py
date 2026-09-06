@@ -37,6 +37,7 @@ from skill_lab.env_setup import setup_envs
 
 from skill_lab.curriculum import get_stage #, stage_to_config
 from skill_lab.recorder import InputRecorder
+from skill_lab.stats_tracker import StatsTracker
 
 class Profile:
     def __init__(self, name: str, count: int, model_path: str | None, explore_weight: float) -> None:
@@ -58,15 +59,16 @@ def make_config(profile: Profile, session_path: Path, args: argparse.Namespace) 
         reward_scale = preset["reward_scale"]
         explore_weight = preset["explore_weight"]
 
-    # Use stage's init_state and max_steps
-    init_state = Path(stage.init_state)
-    max_steps = stage.max_steps
+    # Determine max_steps based on training mode
+    training_mode = getattr(args, "training_mode", "segment")
+    if training_mode == "fullrun":
+        max_steps = 999999  # Effectively no limit
+    else:
+        max_steps = args.max_steps or stage.max_steps
 
-    # Allow CLI overrides
-    if args.init_state:
+    init_state = Path(stage.init_state)
+    if args.init_state and args.init_state.exists():
         init_state = args.init_state
-    if args.max_steps:
-        max_steps = args.max_steps
 
     return {
         "headless": True,
@@ -74,7 +76,7 @@ def make_config(profile: Profile, session_path: Path, args: argparse.Namespace) 
         "early_stop": False,
         "action_freq": ACTION_FREQ,
         "init_state": str(init_state),
-        "max_steps": max_steps,  # ← Short for starter stage!
+        "max_steps": max_steps,
         "print_rewards": False,
         "save_video": False,
         "fast_video": True,
@@ -84,44 +86,14 @@ def make_config(profile: Profile, session_path: Path, args: argparse.Namespace) 
         "reward_scale": reward_scale,
         "explore_weight": explore_weight,
         "noop_button": True,
-        "speed": 0,  # ← Double speed!
-        # Stage-specific config
+        "speed": getattr(args, "emulator_speed", 2),
+        "training_mode": training_mode,
+        # Stage config
         "disable_start": stage.disable_start,
         "disable_select": stage.disable_select,
         "milestone_reward": stage.milestone_reward,
         "milestones_path": str(PROJECT_ROOT / "skill_lab" / "milestones.json"),
     }
-
-# def make_config(profile: Profile, session_path: Path, args: argparse.Namespace) -> dict[str, Any]:
-#     reward_scale = args.reward_scale
-#     explore_weight = args.explore_weight
-#     if args.specialization and args.specialization in SPECIALIZATION_PRESETS:
-#         preset = SPECIALIZATION_PRESETS[args.specialization]
-#         reward_scale = preset["reward_scale"]
-#         explore_weight = preset["explore_weight"]
-    
-#     return {
-#         "headless": True,
-#         "speed": 2,  # 1 = normal, 2 = double speed, 0 = unlimited (turbo)
-#         "save_final_state": False,
-#         "early_stop": False,
-#         "action_freq": ACTION_FREQ,
-#         "init_state": str(args.init_state),
-#         "max_steps": args.max_steps,
-#         "print_rewards": False,
-#         "save_video": False,
-#         "fast_video": True,
-#         "session_path": session_path,
-#         "gb_path": str(args.rom),
-#         "debug": False,
-#         "reward_scale": reward_scale,
-#         "explore_weight": explore_weight,
-#         "noop_button": True,
-#         # NEW: These get passed through to SkillLabWrapper
-#         "disable_start_select": getattr(args, "disable_start_select", True),
-#         "milestones_path": str(getattr(args, "milestones_path", PROJECT_ROOT / "skill_lab" / "milestones.json")),
-#     }
-
 
 def load_policy(path: str | None, env: DummyVecEnv, dry_run: bool) -> PPO | None:
     if dry_run: return None
@@ -275,10 +247,10 @@ def main(args: argparse.Namespace | None = None) -> None:
         print(f"  Env {cfg['env_index']:02d} [{cfg['env_name']}]: "
               f"{cfg['description']} | target={cfg['target_starter']}")
 
-    # Create the vectorized environment
-    env = make_vec_env(profile.count, config)
+    # Create vectorized environment with per-env configs
+    env = make_vec_env(profile.count, config, env_configs=env_configs)
 
-    
+
     model_path = args.model
     if model_path is None and args.resume:
         latest = find_latest_checkpoint(args.checkpoint_dir)
@@ -300,6 +272,12 @@ def main(args: argparse.Namespace | None = None) -> None:
         session_path=config["session_path"],
         init_state=str(args.init_state),
     )
+
+    # Create stats tracker
+    stats_tracker = StatsTracker(
+        history_path=PROJECT_ROOT / "mosaic_sessions" / "stats_history.json"
+    )
+
     # HRL/Objectives removed! The environment handles rules now.
     mosaic = Mosaic(
         num_tiles=env.num_envs,
@@ -360,11 +338,27 @@ def main(args: argparse.Namespace | None = None) -> None:
                     # REMOVED: boundary.apply() - Environment handles masking now
 
                 # Environment step handles everything: masking, memory reading, milestones
-                next_observation, raw_rewards, _, infos = env.step(actions)
+                next_observation, raw_rewards, dones, infos = env.step(actions)
                 raw_rewards = np.array(raw_rewards, dtype=np.float32)
                 batch_stats.update(raw_rewards, env.num_envs)
 
-                # Record all inputs
+                # Track objective completions
+                for local_index in range(env.num_envs):
+                    info = infos[local_index] if local_index < len(infos) else {}
+                    if "objective_steps" in info:
+                        stats_tracker.record_completion(
+                            env_index=local_index,
+                            env_name=info.get("objective_env_name", f"Env{local_index}"),
+                            directive=info.get("objective_directive", "unknown"),
+                            steps=info["objective_steps"],
+                            success=info.get("objective_success", False),
+                        )
+
+                # Render stats window periodically
+                if step_count % (env.num_envs * 5) == 0:
+                    stats_tracker.render()
+
+                # Record inputs
                 for local_index in range(env.num_envs):
                     info = infos[local_index] if local_index < len(infos) else {}
                     masked = info.get("masked_action", False)
@@ -458,6 +452,7 @@ def main(args: argparse.Namespace | None = None) -> None:
             batch_stats.reset()
     except KeyboardInterrupt: pass
     finally:
+        stats_tracker.save_history()  # Save stats for next run
         env.close()
         inspector.close()
         map_window.close()

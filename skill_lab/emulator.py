@@ -31,20 +31,30 @@ from skill_lab.config import ACTION_FREQ, TILE_HEIGHT, TILE_WIDTH, EVENT_JSON_PA
 from skill_lab.env_wrapper import SkillLabWrapper
 
 
-def make_env(rank: int, env_conf: dict[str, Any]):
-    """Create a single environment factory for DummyVecEnv."""
+def make_env(rank: int, env_conf: dict[str, Any], env_setup_config: dict[str, Any] | None = None):
+    """Create a single environment factory."""
     def _init() -> SkillLabWrapper:
         cfg = dict(env_conf)
         cfg["instance_id"] = f"mosaic-{rank:03d}"
 
-        # Create the base environment
+        # Merge per-env directive config
+        if env_setup_config:
+            cfg["env_index"] = env_setup_config.get("env_index", rank)
+            cfg["env_name"] = env_setup_config.get("env_name", f"Env{rank:03d}")
+            cfg["target_starter"] = env_setup_config.get("target_starter")
+
         base_env = RedGymEnv(cfg)
 
-        # Wrap it with our custom logic
         wrapped_env = SkillLabWrapper(base_env, config={
-            "disable_start_select": cfg.get("disable_start_select", True),
+            "disable_start": cfg.get("disable_start", True),
+            "disable_select": cfg.get("disable_select", True),
             "milestone_reward": cfg.get("milestone_reward", 5.0),
             "milestones_path": cfg.get("milestones_path", None),
+            "speed_bonus": cfg.get("speed_bonus", True),
+            "training_mode": cfg.get("training_mode", "segment"),
+            "target_starter": cfg.get("target_starter"),
+            "env_index": cfg.get("env_index", rank),
+            "env_name": cfg.get("env_name", f"Env{rank:03d}"),
         })
 
         return wrapped_env
@@ -52,10 +62,17 @@ def make_env(rank: int, env_conf: dict[str, Any]):
     return _init
 
 
-def make_vec_env(num_envs: int, env_conf: dict[str, Any]):
-    """Create a vectorized environment with N parallel instances."""
+def make_vec_env(num_envs: int, env_conf: dict[str, Any], env_configs: list[dict] | None = None):
+    """Create vectorized environment with per-env directives."""
     from stable_baselines3.common.vec_env import DummyVecEnv
-    return DummyVecEnv([make_env(i, env_conf) for i in range(num_envs)])
+
+    if env_configs and len(env_configs) == num_envs:
+        return DummyVecEnv([
+            make_env(i, env_conf, env_configs[i])
+            for i in range(num_envs)
+        ])
+    else:
+        return DummyVecEnv([make_env(i, env_conf) for i in range(num_envs)])
 
 
 def observation_frame(observation: dict[str, np.ndarray], index: int) -> np.ndarray:

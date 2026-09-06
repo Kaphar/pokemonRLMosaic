@@ -1,10 +1,4 @@
-"""Gymnasium Wrapper for the Pokemon Red environment.
-
-Fixes:
-1. Action masking for Start/Select (dynamically detects indices)
-2. Milestone rewards (with proper initialization on reset)
-3. Exposes wrapped attributes to fix gymnasium deprecation warnings
-"""
+"""Gymnasium Wrapper with early termination and per-env directives."""
 
 from __future__ import annotations
 
@@ -18,22 +12,26 @@ from skill_lab.milestones import MilestoneTracker
 
 
 class SkillLabWrapper(gymnasium.Wrapper):
-    """Wraps RedGymEnv with action masking and milestone tracking."""
+    """Wraps RedGymEnv with action masking, milestones, and early termination."""
 
     def __init__(self, env, config: dict[str, Any]) -> None:
         super().__init__(env)
 
         # --- Configuration ---
-        self.disable_start_select = config.get("disable_start_select", True)
+        self.disable_start = config.get("disable_start", True)
+        self.disable_select = config.get("disable_select", True)
         self.milestone_reward = config.get("milestone_reward", 5.0)
         self.milestones_path = config.get("milestones_path", None)
         self.speed_bonus_enabled = config.get("speed_bonus", True)
-        self.last_milestone_step = 0
+        self.training_mode = config.get("training_mode", "segment")
+        self.target_starter = config.get("target_starter", None)
+        self.env_index = config.get("env_index", 0)
+        self.env_name = config.get("env_name", f"Env{self.env_index}")
 
-        # --- Dynamically detect Start/Select action indices ---
+        # --- Detect action indices ---
         self.start_action_index = None
         self.select_action_index = None
-        self.noop_action_index = env.noop_button_index  # Use the env's built-in NOOP index
+        self.noop_action_index = env.noop_button_index
 
         valid_actions = env.valid_actions
         for idx, action in enumerate(valid_actions):
@@ -42,12 +40,19 @@ class SkillLabWrapper(gymnasium.Wrapper):
             elif action == WindowEvent.PRESS_BUTTON_SELECT:
                 self.select_action_index = idx
 
-        if self.disable_start_select:
-            print(f"[SkillLab]   NOOP index:   {self.noop_action_index}")
-            print(f"[SkillLab]   START index:  {self.start_action_index} (will be masked)")
-            print(f"[SkillLab]   SELECT index: {self.select_action_index} (will be masked)")
+        # Print directive confirmation
+        if self.target_starter:
+            print(f"[{self.env_name}] Directive: Pick {self.target_starter}")
         else:
-            print(f"[SkillLab] Action masking DISABLED")
+            print(f"[{self.env_name}] Directive: Pick any starter")
+
+        masked = []
+        if self.disable_start and self.start_action_index is not None:
+            masked.append("START")
+        if self.disable_select and self.select_action_index is not None:
+            masked.append("SELECT")
+        if masked:
+            print(f"[{self.env_name}] Masking: {', '.join(masked)}")
 
         # --- Milestone Tracker ---
         self.milestone_tracker: MilestoneTracker | None = None
@@ -60,42 +65,61 @@ class SkillLabWrapper(gymnasium.Wrapper):
         # --- Stats ---
         self.masked_action_count = 0
         self.total_milestone_reward = 0.0
+        self.last_milestone_step = 0
+        self.objective_met = False
+
+    def _should_mask(self, action: int) -> bool:
+        if self.disable_start and action == self.start_action_index:
+            return True
+        if self.disable_select and action == self.select_action_index:
+            return True
+        return False
+
+    def _check_starter_status(self) -> tuple[str, int]:
+        """Check if a starter has been picked and whether it matches the target."""
+        # Read party size
+        party_size = self.env.unwrapped.pyboy.memory[0xD163]
+
+        if party_size == 0:
+            return "none", 0
+
+        # Read first pokemon's species (INTERNAL ID, not Pokédex number!)
+        species = self.env.unwrapped.pyboy.memory[0xD16B]
+
+        # Internal species IDs in Pokemon Red memory
+        starter_ids = {
+            0x99: "Bulbasaur",   # 153 decimal
+            0xB0: "Charmander",  # 176 decimal
+            0xB1: "Squirtle",    # 177 decimal
+        }
+        starter_name = starter_ids.get(species, f"Unknown(0x{species:02X})")
+
+        if self.target_starter is None:
+            return "any", species
+        elif starter_name == self.target_starter:
+            return "correct", species
+        else:
+            return "wrong", species
 
     def step(self, action: int):
-        """Intercept the action, apply masking, then step the real env."""
+        """Intercept action, apply masking, check for early termination."""
 
-        # ========================================
-        # STEP 1: ACTION MASKING
-        # ========================================
         original_action = action
+        if self._should_mask(action):
+            action = self.noop_action_index
+            self.masked_action_count += 1
 
-        if self.disable_start_select:
-            if action == self.start_action_index or action == self.select_action_index:
-                action = self.noop_action_index
-                self.masked_action_count += 1
-
-                # Debug: print every time we mask (remove later for performance)
-                if self.masked_action_count <= 5:
-                    print(f"[SkillLab] MASKED action {original_action} -> NOOP ({self.masked_action_count} total masked)")
-
-        # ========================================
-        # STEP 2: EXECUTE IN THE REAL ENVIRONMENT
-        # ========================================
+        # Execute in real environment
         observation, reward, terminated, truncated, info = self.env.step(action)
 
-        # ========================================
-        # STEP 3: ADD MILESTONE REWARDS + SPEED BONUS
-        # ========================================
+        # Add milestone rewards with speed bonus
         if self.milestone_tracker is not None:
             milestone_reward = self.milestone_tracker.check_and_reward(self.env)
             if milestone_reward > 0:
-                # SPEED BONUS: fewer steps since last milestone = more reward
                 steps_since_last = self.env.unwrapped.step_count - self.last_milestone_step
                 if self.speed_bonus_enabled and steps_since_last > 0:
-                    # Bonus decreases as steps increase (max 2x reward for very fast completion)
                     speed_multiplier = max(1.0, 3.0 - (steps_since_last / 100.0))
                     milestone_reward *= speed_multiplier
-                    print(f"[Speed] Milestone in {steps_since_last} steps → x{speed_multiplier:.1f} bonus")
 
                 reward += milestone_reward
                 self.total_milestone_reward += milestone_reward
@@ -103,30 +127,59 @@ class SkillLabWrapper(gymnasium.Wrapper):
                 info["milestone_reward"] = milestone_reward
 
         # ========================================
-        # STEP 4: ADD DEBUG INFO
+        # EARLY TERMINATION: Check starter status
         # ========================================
+        if not self.objective_met:
+            status, species = self._check_starter_status()
+            
+            if status == "correct":
+                self.objective_met = True
+                reward += 10.0
+                terminated = True
+                info["objective_success"] = True
+                info["objective_steps"] = self.env.unwrapped.step_count
+                info["objective_directive"] = self.target_starter or "any"
+                info["objective_env_name"] = self.env_name
+
+            elif status == "wrong":
+                self.objective_met = True
+                reward -= 5.0
+                terminated = True
+                info["objective_success"] = False
+                info["objective_steps"] = self.env.unwrapped.step_count
+                info["objective_directive"] = self.target_starter or "any"
+                info["objective_env_name"] = self.env_name
+
+            elif status == "any":
+                self.objective_met = True
+                reward += 5.0
+                terminated = True
+                info["objective_success"] = True
+                info["objective_steps"] = self.env.unwrapped.step_count
+                info["objective_directive"] = "any"
+                info["objective_env_name"] = self.env_name
+
         info["masked_action"] = (original_action != action)
-        info["original_action"] = original_action
+        info["objective_met"] = self.objective_met
 
         return observation, reward, terminated, truncated, info
 
+
     def reset(self, **kwargs):
-        """Reset the environment and milestone tracker."""
+        """Reset environment and milestone tracker."""
         observation, info = self.env.reset(**kwargs)
 
-        # KEY FIX: Pass env to milestone tracker so it can read
-        # current memory state and mark already-set events as achieved
         if self.milestone_tracker is not None:
             self.milestone_tracker.reset(self.env)
 
         self.masked_action_count = 0
         self.total_milestone_reward = 0.0
+        self.last_milestone_step = 0
+        self.objective_met = False  # Reset objective flag
 
         return observation, info
 
-    # ========================================
-    # Expose wrapped attributes to fix gymnasium warnings
-    # ========================================
+    # Expose wrapped attributes
     @property
     def step_count(self):
         return self.env.unwrapped.step_count
@@ -153,9 +206,3 @@ class SkillLabWrapper(gymnasium.Wrapper):
     @property
     def pyboy(self):
         return self.env.unwrapped.pyboy
-
-    def get_milestone_progress(self) -> dict[str, Any]:
-        """Get current milestone progress (for UI display)."""
-        if self.milestone_tracker:
-            return self.milestone_tracker.get_progress()
-        return {"total_milestones": 0, "achieved": 0, "achieved_names": []}
