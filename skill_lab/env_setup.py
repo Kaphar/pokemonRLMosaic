@@ -34,28 +34,28 @@ DIRECTIVE_PRESETS = {
     "charmander": {
         "name": "CharmanderTrainer",
         "target_starter": "Charmander",
-        "milestone_reward": 10.0,
+        "milestone_reward": 100.0,
         "speed_bonus": True,
         "description": "Navigate to pick Charmander (right ball)",
     },
     "squirtle": {
         "name": "SquirtleTrainer",
         "target_starter": "Squirtle",
-        "milestone_reward": 10.0,
+        "milestone_reward": 100.0,
         "speed_bonus": True,
         "description": "Navigate to pick Squirtle (middle ball)",
     },
     "bulbasaur": {
         "name": "BulbasaurTrainer",
         "target_starter": "Bulbasaur",
-        "milestone_reward": 10.0,
+        "milestone_reward": 100.0,
         "speed_bonus": True,
         "description": "Navigate to pick Bulbasaur (left ball)",
     },
     "default": {
         "name": "AnyStarter",
         "target_starter": None,  # Any starter is fine
-        "milestone_reward": 10.0,
+        "milestone_reward": 50.0,
         "speed_bonus": True,
         "description": "Pick any starter, focus on speed",
     },

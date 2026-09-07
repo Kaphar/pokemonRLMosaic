@@ -3,12 +3,29 @@ Gen 1 Party Reader - Python adaptation
 Reads Pokémon party data from Gen 1 game memory
 """
 
-import struct
 from typing import Dict, List, Optional, Tuple, Any
+
+
+class PyBoyMemoryReader:
+    """Adapt PyBoy's indexed memory interface to the party reader API."""
+
+    def __init__(self, memory) -> None:
+        self.memory = memory
+
+    def read_byte(self, address: int) -> int:
+        return int(self.memory[address])
+
+    def read_u16_be(self, address: int) -> int:
+        return (self.read_byte(address) << 8) | self.read_byte(address + 1)
 
 
 class Gen1PartyReader:
     """Reader for Gen 1 Pokémon party data"""
+
+    PARTY_ADDRESS = 0xD16B
+    PARTY_SIZE_ADDRESS = 0xD163
+    PARTY_SPECIES_ADDRESS = 0xD164
+    PARTY_NICKNAMES_ADDRESS = 0xD2B5
     
     # Gen1 species list (based on internal species order, not Pokedex order)
     SPECIES_NAMES = [
@@ -99,18 +116,33 @@ class Gen1PartyReader:
         party_addr = addresses['partyAddr']
         party_slots_counter_addr = addresses['partySlotsCounterAddr']
         party_nicknames_addr = addresses.get('partyNicknamesAddr')
+        party_species_addr = addresses.get('partySpeciesAddr', self.PARTY_SPECIES_ADDRESS)
         
-        # Read party size (0-based count)
-        party_slots_counter = self.memory.read_byte(party_slots_counter_addr) - 1
+        # The game stores the number of occupied party slots directly.
+        party_slots_counter = min(max(self.memory.read_byte(party_slots_counter_addr), 0), 6)
         
         party = []
-        for i in range(min(party_slots_counter + 1, 6)):
-            pokemon = self._read_pokemon(party_addr, i, party_nicknames_addr)
+        for i in range(party_slots_counter):
+            species_id = self.memory.read_byte(party_species_addr + i)
+            if species_id == 0:
+                species_id = self.memory.read_byte(party_addr + (i * 0x2C))
+            pokemon = self._read_pokemon(
+                party_addr,
+                i,
+                party_nicknames_addr,
+                species_id=species_id,
+            )
             party.append(pokemon)
         
         return party
     
-    def _read_pokemon(self, party_addr: int, slot: int, party_nicknames_addr: Optional[int]) -> Dict[str, Any]:
+    def _read_pokemon(
+        self,
+        party_addr: int,
+        slot: int,
+        party_nicknames_addr: Optional[int],
+        species_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
         """
         Read a single Pokémon from memory
         
@@ -126,22 +158,23 @@ class Gen1PartyReader:
         pokemon_start = party_addr + (slot * 0x2C)
         
         # Read species ID
-        species_id = self.memory.read_byte(pokemon_start)
+        if species_id is None:
+            species_id = self.memory.read_byte(pokemon_start)
         if species_id == 0:
             return {'speciesID': 0}
         
         # Read basic data
         cur_hp = self.memory.read_u16_be(pokemon_start + 0x1)
-        level = self.memory.read_byte(pokemon_start + 0x21)  # Actual level
-        status = self.memory.read_byte(pokemon_start + 0x4)
-        type1 = self.memory.read_byte(pokemon_start + 0x5)
-        type2 = self.memory.read_byte(pokemon_start + 0x6)
-        catch_rate = self.memory.read_byte(pokemon_start + 0x7)
-        move1 = self.memory.read_byte(pokemon_start + 0x8)
-        move2 = self.memory.read_byte(pokemon_start + 0x9)
-        move3 = self.memory.read_byte(pokemon_start + 0xA)
-        move4 = self.memory.read_byte(pokemon_start + 0xB)
-        otid = self.memory.read_u16_be(pokemon_start + 0xC)
+        level = self.memory.read_byte(pokemon_start + 0x20)  # Actual level
+        status = self.memory.read_byte(pokemon_start + 0x3)
+        type1 = self.memory.read_byte(pokemon_start + 0x4)
+        type2 = self.memory.read_byte(pokemon_start + 0x5)
+        catch_rate = self.memory.read_byte(pokemon_start + 0x6)
+        move1 = self.memory.read_byte(pokemon_start + 0x7)
+        move2 = self.memory.read_byte(pokemon_start + 0x8)
+        move3 = self.memory.read_byte(pokemon_start + 0x9)
+        move4 = self.memory.read_byte(pokemon_start + 0xA)
+        otid = self.memory.read_u16_be(pokemon_start + 0xB)
         
         # Experience (3 bytes, big endian)
         exp_addr = pokemon_start + 0xE
@@ -225,16 +258,16 @@ class Gen1PartyReader:
             'ivSpeed': spe_dv,
             'ivSpAttack': spc_dv,
             'ivSpDefense': spc_dv,
-            'tid': otid,
-            'sid': 0,              # Gen1 doesn't have SID
             'isShiny': is_shiny,
-            'heldItem': "None",    # Gen1 doesn't have held items
-            'friendship': 0,       # Gen1 doesn't have friendship
-            'ability': 0,          # Gen1 doesn't have abilities
-            'abilityName': "None",
-            'abilityID': 0,
-            'hiddenPower': 0,      # Gen1 doesn't have hidden power
-            'hiddenPowerName': "None",
+            'tid': otid,
+            # 'sid': 0,              # Gen1 doesn't have SID
+            # 'heldItem': "None",    # Gen1 doesn't have held items
+            # 'friendship': 0,       # Gen1 doesn't have friendship
+            # 'ability': 0,          # Gen1 doesn't have abilities
+            # 'abilityName': "None",
+            # 'abilityID': 0,
+            # 'hiddenPower': 0,      # Gen1 doesn't have hidden power
+            # 'hiddenPowerName': "None",
             'catchRate': catch_rate,
         }
     

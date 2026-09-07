@@ -33,6 +33,7 @@ from skill_lab.map_window import MapWindow
 from skill_lab.mosaic import Mosaic
 from skill_lab.stats_window import StatsWindow
 
+
 from skill_lab.env_setup import setup_envs
 
 from skill_lab.curriculum import get_stage #, stage_to_config
@@ -133,6 +134,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true", help="Run random actions, no training")
     parser.add_argument("--rom", type=Path, default=DEFAULT_ROM)
     parser.add_argument("--init-state", type=Path, default=DEFAULT_INIT_STATE)
+    parser.add_argument("--stage", type=str, default="starter")
     parser.add_argument("--max-steps", type=int, default=DEFAULT_MAX_STEPS)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--foreground", action="store_true", help="Keep the mosaic window above other windows")
@@ -143,8 +145,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--explore-weight", type=float, default=1.0)
     parser.add_argument("--specialization", type=str, default=None, choices=list(SPECIALIZATION_PRESETS.keys()))
     parser.add_argument("--no-hud", action="store_true", help="Disable HUD overlay on emulator tiles")
+
+    parser.add_argument("--continuous", action="store_true", help="Run indefinitely without batch limits")
     
-    # NEW: Clean Curriculum arguments
     parser.add_argument("--disable-start-select", action="store_true", help="Mask Start/Select buttons in early game")
     
     parser.add_argument("--n-steps", type=int, default=256)
@@ -220,8 +223,6 @@ def show_report(stats: BatchStats, profile_name: str) -> None:
 
 def main(args: argparse.Namespace | None = None) -> None:
     if args is None: args = parse_args()
-
-
 
     # Get stage configuration
     stage = get_stage(args.stage)
@@ -303,6 +304,7 @@ def main(args: argparse.Namespace | None = None) -> None:
     print("Mosaic running. Press Q or Escape in the mosaic window to stop.")
     try:
         print("Entering main loop...")
+        continue_batches = getattr(args, "loop", False) or getattr(args, "continuous", False)
         while True:
             while step_count < (batch_number + 1) * args.total_timesteps:
                 all_tiles = []
@@ -337,12 +339,13 @@ def main(args: argparse.Namespace | None = None) -> None:
                                 log_file.write("\n")
                     # REMOVED: boundary.apply() - Environment handles masking now
 
+
                 # Environment step handles everything: masking, memory reading, milestones
                 next_observation, raw_rewards, dones, infos = env.step(actions)
                 raw_rewards = np.array(raw_rewards, dtype=np.float32)
                 batch_stats.update(raw_rewards, env.num_envs)
 
-                # Track objective completions
+                # Track objective completions (debounced: only updates when event happens)
                 for local_index in range(env.num_envs):
                     info = infos[local_index] if local_index < len(infos) else {}
                     if "objective_steps" in info:
@@ -354,9 +357,12 @@ def main(args: argparse.Namespace | None = None) -> None:
                             success=info.get("objective_success", False),
                         )
 
-                # Render stats window periodically
-                if step_count % (env.num_envs * 5) == 0:
-                    stats_tracker.render()
+                # Render stats window (debounced: only renders when needs_render=True)
+                if not stats_tracker.render():
+                    print("[Stats] Stats window closed by user")
+                # # Render stats window periodically
+                # if step_count % (env.num_envs * 5) == 0:
+                #     stats_tracker.render()
 
                 # Record inputs
                 for local_index in range(env.num_envs):
@@ -447,9 +453,11 @@ def main(args: argparse.Namespace | None = None) -> None:
                     print(f"Saved checkpoint: {checkpoint_path}")
 
             batch_number += 1
-            show_report(batch_stats, profile.name)
-            if not args.loop: break
+            if not getattr(args, "continuous", False):
+                show_report(batch_stats, profile.name)
+            if not continue_batches: break
             batch_stats.reset()
+            print(f"Batch {batch_number} complete. Continuing to next batch...")
     except KeyboardInterrupt: pass
     finally:
         stats_tracker.save_history()  # Save stats for next run

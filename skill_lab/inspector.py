@@ -7,6 +7,8 @@ from typing import Any
 import cv2
 import numpy as np
 
+from skill_lab.party_reader import Gen1PartyReader, PyBoyMemoryReader
+
 
 class ObservationInspector:
     def __init__(self, title: str = "Observation Inspector") -> None:
@@ -55,8 +57,8 @@ class ObservationInspector:
         recent_actions = env.envs[env_index].recent_actions
 
         left_panel_w = 280
-        right_panel_w = 240
-        panel_h = 288
+        right_panel_w = 520
+        panel_h = 420
         panel = np.full((panel_h, left_panel_w + right_panel_w, 3), 30, dtype=np.uint8)
 
         y = 25
@@ -81,19 +83,59 @@ class ObservationInspector:
         cv2.putText(panel, f"Walls: {env.envs[env_index].wall_collisions}", (15, y + 20),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 0), 1)
 
+        party_x = left_panel_w + 15
+        party_y = 22
+        party_width = right_panel_w - 30
+        cv2.rectangle(panel, (left_panel_w, 0), (left_panel_w + right_panel_w - 1, panel_h - 1), (75, 75, 75), 1)
+        cv2.putText(panel, "Party", (party_x, party_y), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
+        party = Gen1PartyReader(
+            PyBoyMemoryReader(env.envs[env_index].pyboy.memory)
+        ).read_party({
+            "partyAddr": Gen1PartyReader.PARTY_ADDRESS,
+            "partySlotsCounterAddr": Gen1PartyReader.PARTY_SIZE_ADDRESS,
+            "partyNicknamesAddr": Gen1PartyReader.PARTY_NICKNAMES_ADDRESS,
+        })
+        if party:
+            row_y = party_y + 20
+            for slot, pokemon in enumerate(party[:6]):
+                if pokemon.get("speciesID", 0) == 0:
+                    continue
+                type_names = pokemon["type1Name"]
+                if pokemon["type2"] != pokemon["type1"]:
+                    type_names += f"/{pokemon['type2Name']}"
+                name = pokemon.get("nickname") or pokemon.get("speciesName", "Unknown")
+                header = f"{slot + 1}. {name} ({pokemon['speciesName']}) Lv{pokemon['level']} {type_names}"
+                stats = (
+                    f"HP {pokemon['curHP']}/{pokemon['maxHP']}  "
+                    f"Atk {pokemon['attack']} Def {pokemon['defense']} "
+                    f"Spe {pokemon['speed']} Sp {pokemon['spAttack']}"
+                )
+                dvs = (
+                    f"DV HP {pokemon['ivHP']} Atk {pokemon['ivAttack']} "
+                    f"Def {pokemon['ivDefense']} Spe {pokemon['ivSpeed']} "
+                    f"Sp {pokemon['ivSpAttack']}"
+                )
+                cv2.putText(panel, header[:74], (party_x, row_y), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 255, 255), 1)
+                cv2.putText(panel, stats[:82], (party_x, row_y + 13), cv2.FONT_HERSHEY_SIMPLEX, 0.32, (180, 220, 255), 1)
+                cv2.putText(panel, dvs[:82], (party_x, row_y + 26), cv2.FONT_HERSHEY_SIMPLEX, 0.32, (180, 255, 180), 1)
+                cv2.line(panel, (party_x, row_y + 32), (party_x + party_width, row_y + 32), (65, 65, 65), 1)
+                row_y += 44
+        else:
+            cv2.putText(panel, "No Pokemon", (party_x, party_y + 24), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (150, 150, 150), 1)
+
         rx = left_panel_w + 15
-        ry = 55
-        cv2.putText(panel, "Recent actions", (rx, ry), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        ry += 20
+        ry = 320
+        cv2.putText(panel, "Recent actions", (rx, ry), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
+        ry += 16
         action_names = ["Down", "Left", "Right", "Up", "A", "B", "Start"]
         for action in recent_actions:
             name = action_names[action] if action < len(action_names) else f"#{action}"
             cv2.putText(panel, f"  {name}", (rx, ry), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1)
             ry += 16
-            if ry > panel_h - 20:
+            if ry > 365:
                 break
 
-        ry = panel_h // 2 + 10
+        ry = 390
         cv2.putText(panel, "Reward history", (rx, ry), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         ry += 20
         if reward_history is not None and reward_history:
@@ -122,7 +164,9 @@ class ObservationInspector:
         else:
             cv2.putText(panel, "  no data", (rx, ry + 15), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (150, 150, 150), 1)
 
-        inspector = np.hstack([screen, panel])
+        screen_canvas = np.full((panel_h, 320, 3), 30, dtype=np.uint8)
+        screen_canvas[:screen.shape[0], :screen.shape[1]] = screen
+        inspector = np.hstack([screen_canvas, panel])
         cv2.imshow(self.title, inspector)
         cv2.setWindowProperty(self.title, cv2.WND_PROP_TOPMOST, 1)
         self._needs_initial_render = False

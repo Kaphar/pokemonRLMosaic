@@ -33,9 +33,10 @@ class Launcher:
         self.rows_var = tk.IntVar(value=6)
         self.cols_var = tk.IntVar(value=7)
         self.max_steps_var = tk.IntVar(value=500)  # NEW: segment length
+        self.batch_iterations_var = tk.IntVar(value=10_000_000)
         self.hud_var = tk.BooleanVar(value=True)
         self.speed_var = tk.IntVar(value=2)  # NEW: emulator speed
-
+        self.continuous_var = tk.BooleanVar(value=False)
         self._build_ui()
 
     def _find_checkpoints(self) -> list[Path]:
@@ -122,7 +123,22 @@ class Launcher:
         ttk.Spinbox(speed_frame, from_=1, to=10, textvariable=self.speed_var, width=4).pack(side=tk.LEFT, padx=5)
         ttk.Label(speed_frame, text="(1=normal, 2=double, 0=turbo)").pack(side=tk.LEFT)
 
-        # Row 7: Layout
+        # Row 7: Continuous
+        ttk.Checkbutton(
+            main_frame, text="Run continuously (repeat batches)",
+            variable=self.continuous_var
+        ).grid(row=8, column=0, columnspan=2, sticky="w", pady=5)
+
+        # Row 8: Batch iterations
+        ttk.Label(main_frame, text="Batch iterations:").grid(row=9, column=0, sticky="w", pady=2)
+        batch_frame = ttk.Frame(main_frame)
+        batch_frame.grid(row=9, column=1, sticky="w")
+        ttk.Entry(
+            batch_frame, textvariable=self.batch_iterations_var, width=12
+        ).pack(side=tk.LEFT, padx=5)
+        ttk.Label(batch_frame, text="(steps before each reset/report)").pack(side=tk.LEFT)
+
+        # Row 9: Layout
         ttk.Label(main_frame, text="Layout:").grid(row=7, column=0, sticky="w", pady=2)
         layout_frame = ttk.Frame(main_frame)
         layout_frame.grid(row=7, column=1, sticky="w")
@@ -135,22 +151,22 @@ class Launcher:
         self.rows_var.trace_add("write", self._update_total)
         self.cols_var.trace_add("write", self._update_total)
 
-        # Row 8: HUD
+        # Row 10: HUD
         ttk.Checkbutton(
             main_frame, text="Use HUD overlay", variable=self.hud_var
-        ).grid(row=8, column=0, columnspan=2, sticky="w", pady=5)
+        ).grid(row=10, column=0, columnspan=2, sticky="w", pady=5)
 
-        # Row 9: Stage description
+        # Row 11: Stage description
         self.stage_desc_var = tk.StringVar(value="")
         ttk.Label(
             main_frame, textvariable=self.stage_desc_var,
             font=("", 8), foreground="gray"
-        ).grid(row=9, column=0, columnspan=2, sticky="w")
+        ).grid(row=11, column=0, columnspan=2, sticky="w")
 
-        # Row 10: Launch
+        # Row 12: Launch
         ttk.Button(
             main_frame, text="Launch", command=self._launch
-        ).grid(row=10, column=0, columnspan=2, pady=10)
+        ).grid(row=12, column=0, columnspan=2, pady=10)
 
         # Initialize
         self._on_mode_change()
@@ -193,6 +209,9 @@ class Launcher:
         stage_name = self.stage_var.get()
         training_mode = self.training_mode_var.get()
         max_steps = self.max_steps_var.get() if training_mode == "segment" else 999999
+        batch_iterations = self.batch_iterations_var.get()
+        if batch_iterations < 1:
+            raise ValueError("Batch iterations must be at least 1")
 
         args = argparse.Namespace(
             model=None,
@@ -213,7 +232,7 @@ class Launcher:
             n_epochs=1,
             gamma=0.997,
             ent_coef=0.01,
-            total_timesteps=1_000_000,
+            total_timesteps=batch_iterations,
             save_freq=100_000,
             checkpoint_dir=Path("mosaic_sessions/checkpoints"),
             resume=False,
@@ -225,6 +244,7 @@ class Launcher:
             training_mode=training_mode,
             emulator_speed=self.speed_var.get(),
             milestones_path=Path("skill_lab/milestones.json"),
+            continuous=self.continuous_var.get(), 
         )
 
         if mode == "train" and self.checkpoints:

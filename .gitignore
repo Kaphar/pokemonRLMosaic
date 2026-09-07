@@ -13,3 +13,4 @@ PokemonRed.gb.state
 venv*
 .python-version
 mosaic_sessions/checkpoints/*.zip
+skill_lab/envs

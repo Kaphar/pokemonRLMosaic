@@ -42,6 +42,7 @@ def make_env(rank: int, env_conf: dict[str, Any], env_setup_config: dict[str, An
             cfg["env_index"] = env_setup_config.get("env_index", rank)
             cfg["env_name"] = env_setup_config.get("env_name", f"Env{rank:03d}")
             cfg["target_starter"] = env_setup_config.get("target_starter")
+            cfg["env_dir"] = env_setup_config.get("env_dir")
 
         base_env = RedGymEnv(cfg)
 
@@ -55,6 +56,10 @@ def make_env(rank: int, env_conf: dict[str, Any], env_setup_config: dict[str, An
             "target_starter": cfg.get("target_starter"),
             "env_index": cfg.get("env_index", rank),
             "env_name": cfg.get("env_name", f"Env{rank:03d}"),
+            "env_dir": cfg.get("env_dir"),
+            "init_state": cfg.get("init_state", ""),
+            "save_objective_states": cfg.get("save_objective_states", True),
+            "perfect_sound": cfg.get("perfect_sound", True),
         })
 
         return wrapped_env

@@ -236,6 +236,9 @@ class RedGymEnv(Env):
 
         self.party_size = self.read_m(0xD163)
 
+
+        # it doesn't detect only wall collisions, it also triggers when there is a dialog or when in menu... has uninteded side effect.
+        # i will keep it
         wall_penalty = self._detect_wall_collision(action, old_x, old_y, old_map)
 
         new_reward = self.update_reward() # + wall_penalty
@@ -279,7 +282,7 @@ class RedGymEnv(Env):
         new_x, new_y, new_map = self.get_game_coords()
         if new_x == old_x and new_y == old_y and new_map == old_map:
             self.wall_collisions += 1
-            return -0.05
+            return -0.01
         return 0.0
     
     def run_action_on_emulator(self, action):

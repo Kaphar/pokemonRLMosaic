@@ -83,11 +83,11 @@ STAGES: dict[str, Stage] = {
         description="Get a starter Pokemon. Short episodes for fast learning.",
         disable_start=True,
         disable_select=True,
-        milestone_reward=10.0,
+        milestone_reward=100.0,
         exploration_reward=0.3,
         combat_reward=0.0,
         init_state="v2/state/init.state",
-        max_steps=500,  # ← SHORT! Just enough to pick the starter
+        max_steps=1200,  # ← SHORT! Just enough to pick the starter
         directives={
             "0": STARTER_DIRECTIVES["charmander"],
             "1": STARTER_DIRECTIVES["squirtle"],
