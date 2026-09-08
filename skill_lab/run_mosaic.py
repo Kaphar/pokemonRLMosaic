@@ -40,6 +40,7 @@ from skill_lab.curriculum import get_stage #, stage_to_config
 from skill_lab.recorder import InputRecorder
 from skill_lab.stats_tracker import StatsTracker
 from skill_lab.rewards import medium_reward
+from skill_lab.throughput import ThroughputLogger
 
 class Profile:
     def __init__(self, name: str, count: int, model_path: str | None, explore_weight: float) -> None:
@@ -299,6 +300,7 @@ def main(args: argparse.Namespace | None = None) -> None:
     reward_modifiers = [0.0 for _ in range(env.num_envs)]
     reward_history: list[list[float]] = [[] for _ in range(env.num_envs)]
     batch_stats = BatchStats(env.num_envs)
+    throughput = ThroughputLogger("mosaic")
     step_count = 0
     batch_number = 0
     ppo_update_count = 0
@@ -390,6 +392,7 @@ def main(args: argparse.Namespace | None = None) -> None:
 
                 observation = next_observation
                 step_count += env.num_envs
+                throughput.update(step_count)
 
                 for idx in range(env.num_envs):
                     reward_history[idx].append(float(raw_rewards[idx]))
