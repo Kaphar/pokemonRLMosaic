@@ -11,6 +11,7 @@ from tkinter import filedialog, messagebox
 import cv2
 import numpy as np
 import tkinter as tk
+import sdl2
 from pyboy import PyBoy
 from pyboy.utils import WindowEvent
 
@@ -28,6 +29,61 @@ DEFAULT_ROM = PROJECT_ROOT / "PokemonRed.gb"
 DEFAULT_INIT_STATE = PROJECT_ROOT / "init.state"
 DEFAULT_MAP_IMAGE = PROJECT_ROOT / "visualization" / "poke_map" / "pokemap_full_calibrated_CROPPED_1.png"
 ACTION_FREQ = 24
+CONTROLS_PATH = PROJECT_ROOT / "skill_lab" / "controls.json"
+# Set to False after diagnosing controller input.
+DEBUG_INPUT = True
+ACTION_NAMES = ["Down", "Left", "Right", "Up", "A", "B", "Start"]
+DEFAULT_CONTROLS = {
+    "keyboard": {
+        "Down": "down", "Left": "left", "Right": "right", "Up": "up",
+        "A": "z", "B": "x", "Start": "return",
+    },
+    "gamepad": {},
+}
+
+
+def initialize_sdl_input() -> None:
+    flags = sdl2.SDL_INIT_VIDEO | sdl2.SDL_INIT_JOYSTICK | sdl2.SDL_INIT_GAMECONTROLLER
+    result = sdl2.SDL_InitSubSystem(flags)
+    if result != 0:
+        print(f"SDL input initialization warning: {sdl2.SDL_GetError().decode('utf-8')}")
+    sdl2.SDL_JoystickEventState(sdl2.SDL_ENABLE)
+    sdl2.SDL_GameControllerEventState(sdl2.SDL_ENABLE)
+
+
+def list_gamepads() -> list[str]:
+    devices = []
+    for index in range(max(0, sdl2.SDL_NumJoysticks())):
+        name = sdl2.SDL_JoystickNameForIndex(index)
+        if name:
+            devices.append(name.decode("utf-8", errors="replace"))
+    return devices
+
+
+def debug_input(message: str) -> None:
+    if DEBUG_INPUT:
+        print(f"[INPUT] {message}", flush=True)
+
+
+def debug_sdl_event(event: sdl2.SDL_Event, source: str) -> None:
+    if not DEBUG_INPUT:
+        return
+    event_type = int(event.type)
+    if event_type == sdl2.SDL_KEYDOWN or event_type == sdl2.SDL_KEYUP:
+        name = sdl2.SDL_GetKeyName(event.key.keysym.sym).decode("utf-8", errors="replace")
+        debug_input(f"{source} {'KEYDOWN' if event_type == sdl2.SDL_KEYDOWN else 'KEYUP'} key={name}")
+    elif event_type in (sdl2.SDL_JOYBUTTONDOWN, sdl2.SDL_JOYBUTTONUP):
+        state = "DOWN" if event_type == sdl2.SDL_JOYBUTTONDOWN else "UP"
+        debug_input(f"{source} JOYBUTTON{state} joystick={event.jbutton.which} button={event.jbutton.button} token=button:{event.jbutton.button}")
+    elif event_type in (sdl2.SDL_CONTROLLERBUTTONDOWN, sdl2.SDL_CONTROLLERBUTTONUP):
+        state = "DOWN" if event_type == sdl2.SDL_CONTROLLERBUTTONDOWN else "UP"
+        debug_input(f"{source} CONTROLLERBUTTON{state} controller={event.cbutton.which} button={event.cbutton.button} token=controller:{event.cbutton.button}")
+    elif event_type == sdl2.SDL_JOYHATMOTION:
+        debug_input(f"{source} JOYHAT hat={event.jhat.hat} value={event.jhat.value} token=hat:{event.jhat.hat}:{event.jhat.value}")
+    elif event_type == sdl2.SDL_JOYAXISMOTION:
+        debug_input(f"{source} JOYAXIS axis={event.jaxis.axis} value={event.jaxis.value}")
+    elif event_type == sdl2.SDL_CONTROLLERAXISMOTION:
+        debug_input(f"{source} CONTROLLERAXIS axis={event.caxis.axis} value={event.caxis.value}")
 
 ACTION_EVENTS = {
     0: (WindowEvent.PRESS_ARROW_DOWN, WindowEvent.RELEASE_ARROW_DOWN),
@@ -67,6 +123,7 @@ class DebugLauncher:
         self.state_var = tk.StringVar(value="none")
         self.state_path_var = tk.StringVar(value="No state: start from the ROM")
         self.replay_path_var = tk.StringVar(value="No replay selected")
+        self.controls = load_controls()
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -114,7 +171,7 @@ class DebugLauncher:
             frame,
             text=(
                 "The emulator opens in player mode at normal speed with sound, in a keyboard-"
-                "controllable SDL2 window. After the replay finishes it keeps running so you can play "
+                "or gamepad-controllable SDL2 window. After the replay finishes it keeps running so you can play "
                 "from where it stopped. Close the emulator window (Escape) or press Q in the inspector "
                 "to stop."
             ),
@@ -122,7 +179,13 @@ class DebugLauncher:
             wraplength=600,
             justify=tk.LEFT,
         ).grid(row=6, column=0, columnspan=3, sticky="w", pady=(0, 12))
-        tk.Button(frame, text="Start", width=16, command=self._start).grid(row=7, column=0, columnspan=3, pady=(4, 0))
+        button_row = tk.Frame(frame)
+        button_row.grid(row=7, column=0, columnspan=3, pady=(4, 0))
+        tk.Button(button_row, text="Configure controls...", command=self._configure_controls).pack(side=tk.LEFT, padx=4)
+        tk.Button(button_row, text="Start", width=16, command=self._start).pack(side=tk.LEFT, padx=4)
+
+    def _configure_controls(self) -> None:
+        ControlsDialog(self.root, self.controls)
 
     def _choose_rom(self) -> None:
         path = filedialog.askopenfilename(
@@ -177,7 +240,152 @@ class DebugLauncher:
             return
 
         self.root.destroy()
-        run_player(rom_path, state_path, replay)
+        run_player(rom_path, state_path, replay, self.controls)
+
+
+def load_controls() -> dict[str, dict[str, str]]:
+    controls = json.loads(json.dumps(DEFAULT_CONTROLS))
+    if CONTROLS_PATH.is_file():
+        try:
+            saved = json.loads(CONTROLS_PATH.read_text(encoding="utf-8"))
+            controls["keyboard"].update(saved.get("keyboard", {}))
+            controls["gamepad"].update(saved.get("gamepad", {}))
+        except (OSError, ValueError):
+            pass
+    return controls
+
+
+class ControlsDialog:
+    def __init__(self, parent: tk.Tk, controls: dict[str, dict[str, str]]) -> None:
+        self.controls = controls
+        self.window = tk.Toplevel(parent)
+        self.window.title("Configure controls")
+        self.window.resizable(False, False)
+        self.pending_action: str | None = None
+        self.keyboard_labels: dict[str, tk.StringVar] = {}
+        self.gamepad_labels: dict[str, tk.StringVar] = {}
+        self.joysticks = self._open_joysticks()
+        self.controllers = self._open_controllers()
+        self.gamepad_status = tk.StringVar()
+
+        tk.Label(self.window, text="Configure controls", font=("Segoe UI", 14, "bold")).grid(
+            row=0, column=0, columnspan=4, padx=14, pady=(14, 10), sticky="w"
+        )
+        tk.Label(self.window, text="Keyboard", font=("Segoe UI", 10, "bold")).grid(row=1, column=1, sticky="w")
+        tk.Label(self.window, text="Gamepad", font=("Segoe UI", 10, "bold")).grid(row=1, column=3, sticky="w")
+        for row, action in enumerate(ACTION_NAMES, start=2):
+            tk.Label(self.window, text=action, width=9, anchor="w").grid(row=row, column=0, padx=(14, 4), pady=3)
+            keyboard = tk.StringVar(value=self.controls["keyboard"].get(action, ""))
+            self.keyboard_labels[action] = keyboard
+            tk.Label(self.window, textvariable=keyboard, width=12, relief=tk.SUNKEN, anchor="w").grid(row=row, column=1, pady=3)
+            tk.Button(self.window, text="Set key", command=lambda name=action: self._capture_key(name)).grid(row=row, column=2, padx=4)
+            gamepad = tk.StringVar(value=self.controls["gamepad"].get(action, ""))
+            self.gamepad_labels[action] = gamepad
+            tk.Label(self.window, textvariable=gamepad, width=12, relief=tk.SUNKEN, anchor="w").grid(row=row, column=3, pady=3)
+            tk.Button(self.window, text="Detect", command=lambda name=action: self._capture_gamepad(name)).grid(row=row, column=4, padx=(4, 14))
+
+        devices = list_gamepads()
+        device_text = "Detected: " + (", ".join(devices) if devices else "no SDL gamepad found")
+        self.gamepad_status.set(device_text)
+        tk.Label(self.window, textvariable=self.gamepad_status, fg="gray", wraplength=600, justify=tk.LEFT).grid(
+            row=10, column=0, columnspan=5, padx=14, pady=(8, 4), sticky="w"
+        )
+        tk.Button(self.window, text="Save", width=12, command=self._save).grid(row=11, column=0, columnspan=5, pady=(4, 14))
+
+    @staticmethod
+    def _open_joysticks() -> list[object]:
+        joysticks = []
+        for index in range(max(0, sdl2.SDL_NumJoysticks())):
+            joystick = sdl2.SDL_JoystickOpen(index)
+            if joystick:
+                joysticks.append(joystick)
+        return joysticks
+
+    @staticmethod
+    def _open_controllers() -> list[object]:
+        controllers = []
+        for index in range(max(0, sdl2.SDL_NumJoysticks())):
+            if sdl2.SDL_IsGameController(index):
+                controller = sdl2.SDL_GameControllerOpen(index)
+                if controller:
+                    controllers.append(controller)
+        return controllers
+
+    def _capture_key(self, action: str) -> None:
+        self.pending_action = action
+        self.window.title(f"Press a key for {action}...")
+        self.window.bind("<KeyPress>", self._on_key)
+        self.window.focus_force()
+
+    def _on_key(self, event: tk.Event) -> str:
+        if self.pending_action is not None:
+            debug_input(f"CAPTURE TK KEY action={self.pending_action} key={event.keysym.lower()}")
+            self.keyboard_labels[self.pending_action].set(event.keysym.lower())
+            self.pending_action = None
+            self.window.title("Configure controls")
+            self.window.unbind("<KeyPress>")
+        return "break"
+
+    def _capture_gamepad(self, action: str) -> None:
+        initialize_sdl_input()
+        devices = list_gamepads()
+        if not devices:
+            self.gamepad_status.set("No SDL gamepad detected. Reconnect it and press Detect again.")
+            debug_input(f"NO GAMEPAD FOUND while trying to bind {action}")
+            return
+        sdl2.SDL_FlushEvents(sdl2.SDL_FIRSTEVENT, sdl2.SDL_LASTEVENT)
+        self.pending_action = action
+        debug_input(f"LISTENING FOR KEY TO BIND {action.upper()} : {', '.join(devices)}")
+        self.window.title(f"Press a gamepad button for {action}...")
+        self.window.after(20, self._poll_gamepad_capture)
+
+    def _finish_gamepad_capture(self, action: str, token: str, event_name: str) -> None:
+        self.gamepad_labels[action].set(token)
+        debug_input(f"GAMEPAD#{action} HAS BEEN PRESSED, SETTING THE KEY: {event_name} -> {token}")
+        self.pending_action = None
+        self.window.title("Configure controls")
+
+    def _poll_gamepad_capture(self) -> None:
+        if self.pending_action is None:
+            return
+        event = sdl2.SDL_Event()
+        while sdl2.SDL_PollEvent(event):
+            debug_sdl_event(event, "CAPTURE")
+            if event.type == sdl2.SDL_JOYBUTTONDOWN:
+                action = self.pending_action
+                self._finish_gamepad_capture(action, f"button:{event.jbutton.button}", "JOYBUTTONDOWN")
+                return
+            if event.type == sdl2.SDL_JOYHATMOTION:
+                value = int(event.jhat.value)
+                if value:
+                    action = self.pending_action
+                    self._finish_gamepad_capture(action, f"hat:{event.jhat.hat}:{value}", "JOYHATMOTION")
+                    return
+            if event.type == sdl2.SDL_CONTROLLERBUTTONDOWN:
+                action = self.pending_action
+                self._finish_gamepad_capture(action, f"controller:{event.cbutton.button}", "CONTROLLERBUTTONDOWN")
+                return
+            if event.type == sdl2.SDL_CONTROLLERAXISMOTION and abs(int(event.caxis.value)) > 16000:
+                direction = "positive" if event.caxis.value > 0 else "negative"
+                action = self.pending_action
+                self._finish_gamepad_capture(action, f"controller_axis:{event.caxis.axis}:{direction}", "CONTROLLERAXISMOTION")
+                return
+            if event.type == sdl2.SDL_JOYAXISMOTION and abs(int(event.jaxis.value)) > 16000:
+                direction = "positive" if event.jaxis.value > 0 else "negative"
+                action = self.pending_action
+                self._finish_gamepad_capture(action, f"axis:{event.jaxis.axis}:{direction}", "JOYAXISMOTION")
+                return
+        self.window.after(20, self._poll_gamepad_capture)
+
+    def _save(self) -> None:
+        self.controls["keyboard"] = {action: value.get() for action, value in self.keyboard_labels.items()}
+        self.controls["gamepad"] = {action: value.get() for action, value in self.gamepad_labels.items() if value.get()}
+        CONTROLS_PATH.write_text(json.dumps(self.controls, indent=2) + "\n", encoding="utf-8")
+        for controller in self.controllers:
+            sdl2.SDL_GameControllerClose(controller)
+        for joystick in self.joysticks:
+            sdl2.SDL_JoystickClose(joystick)
+        self.window.destroy()
 
 
 def load_replay(path: Path | None) -> tuple[list[int], dict[str, object]]:
@@ -220,6 +428,95 @@ def replay_action(pyboy: PyBoy, action: int, action_freq: int) -> None:
         pyboy.send_input(events[1])
     pyboy.tick(action_freq - 8 - 1, True)
     pyboy.tick(1, True)
+
+
+class InputController:
+    def __init__(self, pyboy: PyBoy, controls: dict[str, dict[str, str]]) -> None:
+        self.pyboy = pyboy
+        self.controls = controls
+        self.active: set[str] = set()
+        self.quit_requested = False
+        self.joysticks = []
+        self.controllers = []
+        initialize_sdl_input()
+        for index in range(max(0, sdl2.SDL_NumJoysticks())):
+            joystick = sdl2.SDL_JoystickOpen(index)
+            if joystick:
+                self.joysticks.append(joystick)
+            if sdl2.SDL_IsGameController(index):
+                controller = sdl2.SDL_GameControllerOpen(index)
+                if controller:
+                    self.controllers.append(controller)
+
+    @staticmethod
+    def _normalize_token(token: str) -> str:
+        token = token.lower()
+        if token.startswith("controller:"):
+            return "button:" + token.split(":", 1)[1]
+        return token
+
+    def _action_for_token(self, token: str) -> int | None:
+        normalized_token = self._normalize_token(token)
+        for index, action in enumerate(ACTION_NAMES):
+            if self.controls["keyboard"].get(action, "").lower() == token:
+                return index
+            configured = self.controls["gamepad"].get(action, "")
+            if self._normalize_token(configured) == normalized_token:
+                return index
+        return None
+
+    def _set_token(self, token: str, pressed: bool) -> None:
+        action = self._action_for_token(token)
+        debug_input(f"MAP token={token} pressed={pressed} action={ACTION_NAMES[action] if action is not None else 'UNBOUND'}")
+        if action is None:
+            return
+        if pressed and token not in self.active:
+            self.pyboy.send_input(ACTION_EVENTS[action][0])
+            self.active.add(token)
+        elif not pressed and token in self.active:
+            self.pyboy.send_input(ACTION_EVENTS[action][1])
+            self.active.remove(token)
+
+    def poll(self) -> None:
+        event = sdl2.SDL_Event()
+        while sdl2.SDL_PollEvent(event):
+            debug_sdl_event(event, "PLAY")
+            if event.type == sdl2.SDL_QUIT:
+                self.quit_requested = True
+            elif event.type == sdl2.SDL_KEYDOWN and not event.key.repeat:
+                name = sdl2.SDL_GetKeyName(event.key.keysym.sym).decode("utf-8").lower()
+                self._set_token(name, True)
+            elif event.type == sdl2.SDL_KEYUP:
+                name = sdl2.SDL_GetKeyName(event.key.keysym.sym).decode("utf-8").lower()
+                self._set_token(name, False)
+            elif event.type == sdl2.SDL_JOYBUTTONDOWN:
+                self._set_token(f"button:{event.jbutton.button}", True)
+            elif event.type == sdl2.SDL_JOYBUTTONUP:
+                self._set_token(f"button:{event.jbutton.button}", False)
+            elif event.type == sdl2.SDL_CONTROLLERBUTTONDOWN:
+                self._set_token(f"controller:{event.cbutton.button}", True)
+            elif event.type == sdl2.SDL_CONTROLLERBUTTONUP:
+                self._set_token(f"controller:{event.cbutton.button}", False)
+            elif event.type == sdl2.SDL_CONTROLLERAXISMOTION:
+                value = int(event.caxis.value)
+                self._set_token(f"controller_axis:{event.caxis.axis}:positive", value > 16000)
+                self._set_token(f"controller_axis:{event.caxis.axis}:negative", value < -16000)
+            elif event.type == sdl2.SDL_JOYAXISMOTION:
+                value = int(event.jaxis.value)
+                self._set_token(f"axis:{event.jaxis.axis}:positive", value > 16000)
+                self._set_token(f"axis:{event.jaxis.axis}:negative", value < -16000)
+            elif event.type == sdl2.SDL_JOYHATMOTION:
+                prefix = f"hat:{event.jhat.hat}:"
+                for value in (1, 2, 4, 8):
+                    self._set_token(prefix + str(value), int(event.jhat.value) & value != 0)
+
+    def close(self) -> None:
+        for joystick in self.joysticks:
+            sdl2.SDL_JoystickClose(joystick)
+        for controller in self.controllers:
+            sdl2.SDL_GameControllerClose(controller)
+        self.joysticks.clear()
+        self.controllers.clear()
 
 
 def load_map_image(path: Path | None) -> np.ndarray | None:
@@ -347,7 +644,12 @@ def render_inspector(
     cv2.moveWindow("Pokemon Red Inspector", 820, 80)
 
 
-def run_player(rom_path: Path, state_path: Path | None, replay_path: Path | None) -> None:
+def run_player(
+    rom_path: Path,
+    state_path: Path | None,
+    replay_path: Path | None,
+    controls: dict[str, dict[str, str]] | None = None,
+) -> None:
     actions, replay_data = load_replay(replay_path)
     replay_action_freq = int(replay_data.get("action_freq", ACTION_FREQ))
     if replay_action_freq < 9:
@@ -355,6 +657,7 @@ def run_player(rom_path: Path, state_path: Path | None, replay_path: Path | None
     if state_path is None:
         state_path = resolve_recording_path(replay_data.get("init_state"))
     pyboy = PyBoy(str(rom_path), window="SDL2", sound=True)
+    input_controller = InputController(pyboy, controls or load_controls())
     try:
         if state_path is not None:
             with state_path.open("rb") as state_file:
@@ -377,6 +680,9 @@ def run_player(rom_path: Path, state_path: Path | None, replay_path: Path | None
                 replay_action(pyboy, action, replay_action_freq)
                 frame_count += replay_action_freq
             else:
+                input_controller.poll()
+                if input_controller.quit_requested:
+                    break
                 if not pyboy.tick(1, True):
                     break
                 frame_count += 1
@@ -389,12 +695,19 @@ def run_player(rom_path: Path, state_path: Path | None, replay_path: Path | None
             if key in (ord("q"), 27):
                 break
             time.sleep(0.001)
+    except OSError as error:
+        print(f"PyBoy stopped while closing the SDL window: {error}")
     finally:
-        pyboy.stop()
+        input_controller.close()
+        try:
+            pyboy.stop()
+        except OSError as error:
+            print(f"PyBoy cleanup warning: {error}")
         cv2.destroyAllWindows()
 
 
 def main() -> None:
+    initialize_sdl_input()
     launcher = DebugLauncher()
     launcher.root.mainloop()
 

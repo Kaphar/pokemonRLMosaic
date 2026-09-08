@@ -26,7 +26,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from skill_lab.rewards import bit_reward, huge_reward, medium_reward
+from skill_lab.rewards import big_reward, huge_reward, medium_reward
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ENVS_DIR = PROJECT_ROOT / "skill_lab" / "envs"
@@ -57,7 +57,7 @@ DIRECTIVE_PRESETS = {
     "default": {
         "name": "AnyStarter",
         "target_starter": None,  # Any starter is fine
-        "milestone_reward": bit_reward,
+        "milestone_reward": big_reward,
         "speed_bonus": True,
         "description": "Pick any starter, focus on speed",
     },

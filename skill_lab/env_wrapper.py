@@ -14,7 +14,7 @@ from pyboy.utils import WindowEvent
 
 from skill_lab.milestones import MilestoneTracker
 from skill_lab.party_reader import Gen1PartyReader, PyBoyMemoryReader
-from skill_lab.rewards import huge_reward, medium_reward, wrong_choice_penalty
+from skill_lab.rewards import calculate_starter_reward, medium_reward, wrong_choice_penalty
 
 
 class SkillLabWrapper(gymnasium.Wrapper):
@@ -164,6 +164,25 @@ class SkillLabWrapper(gymnasium.Wrapper):
                 print(f"[{self.env_name}] Warning: could not play perfect-DV sound: {error}")
         return True
 
+    def _read_starter_dvs(self) -> tuple[int, int, int, int] | None:
+        """Read the four stored DVs for the first party Pokemon."""
+        party = self.party_reader.read_party({
+            "partyAddr": Gen1PartyReader.PARTY_ADDRESS,
+            "partySlotsCounterAddr": Gen1PartyReader.PARTY_SIZE_ADDRESS,
+            "partySpeciesAddr": Gen1PartyReader.PARTY_SPECIES_ADDRESS,
+            "partyNicknamesAddr": Gen1PartyReader.PARTY_NICKNAMES_ADDRESS,
+        })
+        if not party:
+            return None
+
+        pokemon = party[0]
+        return (
+            int(pokemon.get("ivAttack", 0)),
+            int(pokemon.get("ivDefense", 0)),
+            int(pokemon.get("ivSpeed", 0)),
+            int(pokemon.get("ivSpAttack", 0)),
+        )
+
     def _should_mask(self, action: int) -> bool:
         if self.disable_start and action == self.start_action_index:
             return True
@@ -273,9 +292,10 @@ class SkillLabWrapper(gymnasium.Wrapper):
             status, species = self._check_starter_status()
 
             if status == "correct":
-                if self._save_objective_state():
+                dvs = self._read_starter_dvs()
+                if dvs is not None and self._save_objective_state():
                     self.objective_met = True
-                    reward += huge_reward
+                    reward += calculate_starter_reward(*dvs)
                     terminated = True
                     print(f"[{self.env_name}] ✅ CORRECT starter (species=0x{species:02X}) at step {self.env.unwrapped.step_count}")
                     info["objective_success"] = True
@@ -295,9 +315,10 @@ class SkillLabWrapper(gymnasium.Wrapper):
                     info["objective_env_name"] = self.env_name
 
             elif status == "any":
-                if self._save_objective_state():
+                dvs = self._read_starter_dvs()
+                if dvs is not None and self._save_objective_state():
                     self.objective_met = True
-                    reward += medium_reward
+                    reward += calculate_starter_reward(*dvs)
                     terminated = True
                     print(f"[{self.env_name}] ✅ Picked a starter (species=0x{species:02X}) at step {self.env.unwrapped.step_count}")
                     info["objective_success"] = True

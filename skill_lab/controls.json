@@ -1,0 +1,20 @@
+{
+  "keyboard": {
+    "Down": "down",
+    "Left": "left",
+    "Right": "right",
+    "Up": "up",
+    "A": "z",
+    "B": "x",
+    "Start": "return"
+  },
+  "gamepad": {
+    "Down": "controller:12",
+    "Left": "controller:13",
+    "Right": "controller:14",
+    "Up": "controller:11",
+    "A": "controller:0",
+    "B": "controller:1",
+    "Start": "controller:6"
+  }
+}

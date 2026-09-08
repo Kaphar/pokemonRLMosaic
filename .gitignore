@@ -14,3 +14,6 @@ venv*
 .python-version
 mosaic_sessions/checkpoints/*.zip
 skill_lab/envs
+skill_lab/envs/Env031/config.json
+
+mosaic_sessions/stats_history.json

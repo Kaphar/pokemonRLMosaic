@@ -14,6 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from skill_lab.curriculum import list_stages, get_stage
+from skill_lab.rewards import medium_reward
 
 
 class Launcher:
@@ -221,7 +222,7 @@ class Launcher:
             max_steps=max_steps,
             seed=0,
             foreground=False,
-            teacher_bonus=5.0,
+            teacher_bonus=medium_reward,
             teacher_log=Path("mosaic_sessions/teacher_actions.jsonl"),
             num_envs=num_envs,
             reward_scale=1.0,

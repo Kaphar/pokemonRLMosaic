@@ -39,6 +39,7 @@ from skill_lab.env_setup import setup_envs
 from skill_lab.curriculum import get_stage #, stage_to_config
 from skill_lab.recorder import InputRecorder
 from skill_lab.stats_tracker import StatsTracker
+from skill_lab.rewards import medium_reward
 
 class Profile:
     def __init__(self, name: str, count: int, model_path: str | None, explore_weight: float) -> None:
@@ -138,7 +139,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-steps", type=int, default=DEFAULT_MAX_STEPS)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--foreground", action="store_true", help="Keep the mosaic window above other windows")
-    parser.add_argument("--teacher-bonus", type=float, default=5.0, help="Logged reward bonus for each human-guided action")
+    parser.add_argument("--teacher-bonus", type=float, default=medium_reward, help="Logged reward bonus for each human-guided action")
     parser.add_argument("--teacher-log", type=Path, default=Path("mosaic_sessions/teacher_actions.jsonl"))
     parser.add_argument("--num-envs", type=int, default=TOTAL_TILES, help="Number of environments to run")
     parser.add_argument("--reward-scale", type=float, default=1.0)
@@ -272,6 +273,9 @@ def main(args: argparse.Namespace | None = None) -> None:
     recorder = InputRecorder(
         session_path=config["session_path"],
         init_state=str(args.init_state),
+        noop_action=env.envs[0].noop_button_index,
+        rom_path=str(args.rom),
+        action_freq=ACTION_FREQ,
     )
 
     # Create stats tracker

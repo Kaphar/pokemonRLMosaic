@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from skill_lab.rewards import bit_reward, huge_reward, medium_reward, small_reward
+from skill_lab.rewards import big_reward, huge_reward, medium_reward, small_reward
 
 
 @dataclass
@@ -127,7 +127,7 @@ STAGES: dict[str, Stage] = {
         description="Full game progression. All milestones active.",
         disable_start=True,
         disable_select=True,
-        milestone_reward=bit_reward,
+        milestone_reward=big_reward,
         exploration_reward=small_reward,
         combat_reward=small_reward,
         init_state="v2/state/init.state",

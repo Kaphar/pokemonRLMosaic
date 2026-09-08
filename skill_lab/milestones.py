@@ -11,6 +11,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from skill_lab.rewards import medium_reward
+
 
 class MilestoneTracker:
     """Tracks game milestones and gives rewards when they're achieved."""
@@ -18,7 +20,7 @@ class MilestoneTracker:
     def __init__(
         self,
         milestones_path: str | Path,
-        reward_per_milestone: float = 5.0,
+        reward_per_milestone: float = medium_reward,
     ) -> None:
         self.reward_per_milestone = reward_per_milestone
         self.milestones: list[dict[str, Any]] = []

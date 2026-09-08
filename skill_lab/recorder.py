@@ -22,10 +22,20 @@ from typing import Any
 class InputRecorder:
     """Records all inputs for each environment."""
 
-    def __init__(self, session_path: Path, init_state: str = "") -> None:
+    def __init__(
+        self,
+        session_path: Path,
+        init_state: str = "",
+        noop_action: int = 7,
+        rom_path: str = "",
+        action_freq: int = 24,
+    ) -> None:
         self.session_path = Path(session_path)
         self.session_path.mkdir(parents=True, exist_ok=True)
         self.init_state = init_state
+        self.noop_action = noop_action
+        self.rom_path = rom_path
+        self.action_freq = action_freq
         self.start_time = time.time()
 
         # Per-environment action logs: {env_index: [(step, action, timestamp), ...]}
@@ -38,7 +48,8 @@ class InputRecorder:
 
         self.logs[env_index].append({
             "step": step,
-            "action": action,
+            "action": self.noop_action if masked else action,
+            "requested_action": action,
             "masked": masked,
             "time": time.time() - self.start_time,
         })
@@ -56,6 +67,9 @@ class InputRecorder:
             data = {
                 "env_index": env_index,
                 "init_state": self.init_state,
+                "rom": self.rom_path,
+                "action_freq": self.action_freq,
+                "noop_action": self.noop_action,
                 "total_actions": len(self.logs.get(env_index, [])),
                 "actions": self.logs.get(env_index, []),
             }
@@ -63,6 +77,9 @@ class InputRecorder:
         else:
             data = {
                 "init_state": self.init_state,
+                "rom": self.rom_path,
+                "action_freq": self.action_freq,
+                "noop_action": self.noop_action,
                 "total_envs": len(self.logs),
                 "envs": {
                     str(idx): {
