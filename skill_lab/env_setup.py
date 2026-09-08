@@ -26,6 +26,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from skill_lab.rewards import bit_reward, huge_reward, medium_reward
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ENVS_DIR = PROJECT_ROOT / "skill_lab" / "envs"
 
@@ -34,35 +36,35 @@ DIRECTIVE_PRESETS = {
     "charmander": {
         "name": "CharmanderTrainer",
         "target_starter": "Charmander",
-        "milestone_reward": 100.0,
+        "milestone_reward": huge_reward,
         "speed_bonus": True,
         "description": "Navigate to pick Charmander (right ball)",
     },
     "squirtle": {
         "name": "SquirtleTrainer",
         "target_starter": "Squirtle",
-        "milestone_reward": 100.0,
+        "milestone_reward": huge_reward,
         "speed_bonus": True,
         "description": "Navigate to pick Squirtle (middle ball)",
     },
     "bulbasaur": {
         "name": "BulbasaurTrainer",
         "target_starter": "Bulbasaur",
-        "milestone_reward": 100.0,
+        "milestone_reward": huge_reward,
         "speed_bonus": True,
         "description": "Navigate to pick Bulbasaur (left ball)",
     },
     "default": {
         "name": "AnyStarter",
         "target_starter": None,  # Any starter is fine
-        "milestone_reward": 50.0,
+        "milestone_reward": bit_reward,
         "speed_bonus": True,
         "description": "Pick any starter, focus on speed",
     },
     "explorer": {
         "name": "Explorer",
         "target_starter": None,
-        "milestone_reward": 2.0,
+        "milestone_reward": medium_reward,
         "speed_bonus": False,  # Explorers don't care about speed
         "description": "Explore freely, discover new areas",
     },

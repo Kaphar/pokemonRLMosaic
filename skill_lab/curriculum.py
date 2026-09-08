@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from skill_lab.rewards import bit_reward, huge_reward, medium_reward, small_reward
+
 
 @dataclass
 class Stage:
@@ -25,8 +27,8 @@ class Stage:
     disable_select: bool = True
 
     # Reward configuration
-    milestone_reward: float = 5.0
-    exploration_reward: float = 0.1
+    milestone_reward: float = medium_reward
+    exploration_reward: float = small_reward
     combat_reward: float = 0.0
 
     # Starting state
@@ -71,8 +73,8 @@ STAGES: dict[str, Stage] = {
         description="Learn basic movement and exploration.",
         disable_start=True,
         disable_select=True,
-        milestone_reward=2.0,
-        exploration_reward=0.5,
+        milestone_reward=medium_reward,
+        exploration_reward=small_reward,
         combat_reward=0.0,
         init_state="v2/state/init.state",
         max_steps=7200,
@@ -83,8 +85,8 @@ STAGES: dict[str, Stage] = {
         description="Get a starter Pokemon. Short episodes for fast learning.",
         disable_start=True,
         disable_select=True,
-        milestone_reward=100.0,
-        exploration_reward=0.3,
+        milestone_reward=huge_reward,
+        exploration_reward=small_reward,
         combat_reward=0.0,
         init_state="v2/state/init.state",
         max_steps=1200,  # ← SHORT! Just enough to pick the starter
@@ -101,9 +103,9 @@ STAGES: dict[str, Stage] = {
         description="Learn to fight wild Pokemon.",
         disable_start=True,
         disable_select=True,
-        milestone_reward=1.0,
+        milestone_reward=medium_reward,
         exploration_reward=0.0,
-        combat_reward=1.0,
+        combat_reward=medium_reward,
         init_state="v2/state/combat_start.state",
         max_steps=3600,
     ),
@@ -113,7 +115,7 @@ STAGES: dict[str, Stage] = {
         description="Learn to navigate menus. Start/Select ENABLED.",
         disable_start=False,   # ← ENABLED for menu learning
         disable_select=False,  # ← ENABLED for menu learning
-        milestone_reward=3.0,
+        milestone_reward=medium_reward,
         exploration_reward=0.0,
         combat_reward=0.0,
         init_state="v2/state/pokemon_center.state",
@@ -125,9 +127,9 @@ STAGES: dict[str, Stage] = {
         description="Full game progression. All milestones active.",
         disable_start=True,
         disable_select=True,
-        milestone_reward=10.0,
-        exploration_reward=0.1,
-        combat_reward=0.5,
+        milestone_reward=bit_reward,
+        exploration_reward=small_reward,
+        combat_reward=small_reward,
         init_state="v2/state/init.state",
         max_steps=14400,
     ),

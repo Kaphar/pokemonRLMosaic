@@ -14,6 +14,7 @@ from pyboy.utils import WindowEvent
 
 from skill_lab.milestones import MilestoneTracker
 from skill_lab.party_reader import Gen1PartyReader, PyBoyMemoryReader
+from skill_lab.rewards import huge_reward, medium_reward, wrong_choice_penalty
 
 
 class SkillLabWrapper(gymnasium.Wrapper):
@@ -31,7 +32,7 @@ class SkillLabWrapper(gymnasium.Wrapper):
         # --- Configuration ---
         self.disable_start = config.get("disable_start", True)
         self.disable_select = config.get("disable_select", True)
-        self.milestone_reward = config.get("milestone_reward", 5.0)
+        self.milestone_reward = config.get("milestone_reward", medium_reward)
         self.milestones_path = config.get("milestones_path", None)
         self.speed_bonus_enabled = config.get("speed_bonus", True)
         self.training_mode = config.get("training_mode", "segment")
@@ -40,6 +41,8 @@ class SkillLabWrapper(gymnasium.Wrapper):
         self.env_name = config.get("env_name", f"Env{self.env_index}")
         self.env_dir = config.get("env_dir")
         self.init_state = config.get("init_state", "")
+        self.rom_path = config.get("rom_path", "")
+        self.action_freq = int(config.get("action_freq", 24))
         self.save_objective_states = config.get("save_objective_states", True)
         self.perfect_sound_enabled = config.get("perfect_sound", True)
 
@@ -139,6 +142,9 @@ class SkillLabWrapper(gymnasium.Wrapper):
             json.dump({
                 "env_index": self.env_index,
                 "init_state": self.init_state,
+                "rom": self.rom_path,
+                "action_freq": self.action_freq,
+                "noop_action": self.noop_action_index,
                 "total_actions": len(self._episode_actions),
                 "actions": self._episode_actions,
             }, inputs_file, indent=2)
@@ -235,7 +241,8 @@ class SkillLabWrapper(gymnasium.Wrapper):
 
         self._episode_actions.append({
             "step": int(self.env.unwrapped.step_count + 1),
-            "action": int(original_action),
+            "action": int(action),
+            "requested_action": int(original_action),
             "masked": bool(original_action != action),
         })
 
@@ -268,7 +275,7 @@ class SkillLabWrapper(gymnasium.Wrapper):
             if status == "correct":
                 if self._save_objective_state():
                     self.objective_met = True
-                    reward += 100.0  # Big positive reward for correct pick
+                    reward += huge_reward
                     terminated = True
                     print(f"[{self.env_name}] ✅ CORRECT starter (species=0x{species:02X}) at step {self.env.unwrapped.step_count}")
                     info["objective_success"] = True
@@ -279,7 +286,7 @@ class SkillLabWrapper(gymnasium.Wrapper):
             elif status == "wrong":
                 if self._save_objective_state():
                     self.objective_met = True
-                    reward -= 5.0  # Penalty for wrong pick
+                    reward += wrong_choice_penalty
                     terminated = True
                     print(f"[{self.env_name}] ❌ WRONG starter (species=0x{species:02X}) at step {self.env.unwrapped.step_count} → continuing for inspection")
                     info["objective_success"] = False
@@ -290,7 +297,7 @@ class SkillLabWrapper(gymnasium.Wrapper):
             elif status == "any":
                 if self._save_objective_state():
                     self.objective_met = True
-                    reward += 5.0  # Moderate reward for any pick
+                    reward += medium_reward
                     terminated = True
                     print(f"[{self.env_name}] ✅ Picked a starter (species=0x{species:02X}) at step {self.env.unwrapped.step_count}")
                     info["objective_success"] = True

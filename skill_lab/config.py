@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+from skill_lab.rewards import medium_reward, reward_penalty, small_reward
+
 
 # --- Paths ---
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -39,12 +41,12 @@ ACTION_SELECT = 7
 ACTION_START = 8
 
 # --- Milestone Rewards ---
-MILESTONE_REWARD = 5.0       # Reward for hitting an event flag
-EXPLORATION_REWARD = 0.1     # Small reward for visiting new coordinates
+MILESTONE_REWARD = medium_reward       # Reward for hitting an event flag
+EXPLORATION_REWARD = small_reward       # Small reward for visiting new coordinates
 
 # --- Teacher/Human Guidance ---
-REWARD_MODIFIER_PRAISE = 1.0
-REWARD_MODIFIER_SLASH = -1.0
+REWARD_MODIFIER_PRAISE = medium_reward
+REWARD_MODIFIER_SLASH = reward_penalty
 
 PANEL_WIDTH = 220
 

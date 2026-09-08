@@ -29,6 +29,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from v2.red_gym_env_v2 import RedGymEnv
 from skill_lab.config import ACTION_FREQ, TILE_HEIGHT, TILE_WIDTH, EVENT_JSON_PATH
 from skill_lab.env_wrapper import SkillLabWrapper
+from skill_lab.rewards import medium_reward
 
 
 def make_env(rank: int, env_conf: dict[str, Any], env_setup_config: dict[str, Any] | None = None):
@@ -49,7 +50,7 @@ def make_env(rank: int, env_conf: dict[str, Any], env_setup_config: dict[str, An
         wrapped_env = SkillLabWrapper(base_env, config={
             "disable_start": cfg.get("disable_start", True),
             "disable_select": cfg.get("disable_select", True),
-            "milestone_reward": cfg.get("milestone_reward", 5.0),
+            "milestone_reward": cfg.get("milestone_reward", medium_reward),
             "milestones_path": cfg.get("milestones_path", None),
             "speed_bonus": cfg.get("speed_bonus", True),
             "training_mode": cfg.get("training_mode", "segment"),
@@ -58,6 +59,8 @@ def make_env(rank: int, env_conf: dict[str, Any], env_setup_config: dict[str, An
             "env_name": cfg.get("env_name", f"Env{rank:03d}"),
             "env_dir": cfg.get("env_dir"),
             "init_state": cfg.get("init_state", ""),
+            "rom_path": cfg.get("gb_path", ""),
+            "action_freq": cfg.get("action_freq", ACTION_FREQ),
             "save_objective_states": cfg.get("save_objective_states", True),
             "perfect_sound": cfg.get("perfect_sound", True),
         })
