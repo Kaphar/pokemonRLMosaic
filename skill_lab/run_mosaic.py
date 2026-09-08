@@ -405,36 +405,40 @@ def main(args: argparse.Namespace | None = None) -> None:
                 mosaic.last_action = None
                 mosaic.last_action_target = None
 
-                for local_index in range(env.num_envs):
-                    all_tiles.append(tile_group(
-                        observation, env, profile.name, local_index, mosaic.selected_index,
-                        model is not None, show_hud=not args.no_hud,
-                    ))
+                visible_indices = mosaic.visible_indices(batch_stats.env_rewards)
+                if not mosaic.display_paused:
+                    for local_index in visible_indices:
+                        all_tiles.append(tile_group(
+                            observation, env, profile.name, local_index, mosaic.selected_index,
+                            model is not None, show_hud=not args.no_hud,
+                        ))
 
                 # UI Rendering Logic (Preserved exactly as you had it)
-                if mosaic.selected_index is not None:
+                if not mosaic.display_paused and mosaic.selected_index is not None:
                     inspector.show()
                     if not inspector.render(env, mosaic.selected_index, reward_history[mosaic.selected_index]):
                         mosaic.selected_index = None
                 else: inspector.hide()
 
-                if mosaic.stats_visible:
+                if not mosaic.display_paused and mosaic.stats_visible:
                     stats_window.show()
                     if not stats_window.render(env, env.num_envs, action_freq=ACTION_FREQ, scores=batch_stats.env_rewards):
                         mosaic.stats_visible = False
                 else: stats_window.hide()
 
-                if mosaic.map_visible and mosaic.selected_index is not None:
+                if not mosaic.display_paused and mosaic.map_visible and mosaic.selected_index is not None:
                     map_window.show()
                     map_window.set_tracked_env(mosaic.selected_index)
                     if not map_window.render(env, mosaic.selected_index): map_window.map_visible = False
                 else: map_window.hide()
 
                 mosaic.pending_human_action = None
-                mosaic.render(
-                    all_tiles, reward_modifiers=reward_modifiers, ppo_updates=ppo_update_count,
-                    objective_info=objective_info, step_count=step_count, batch_number=batch_number, model_name=model_path,
-                )
+                if not mosaic.display_paused:
+                    mosaic.render(
+                        all_tiles, reward_modifiers=reward_modifiers, ppo_updates=ppo_update_count,
+                        objective_info=objective_info, step_count=step_count, batch_number=batch_number,
+                        model_name=model_path, tile_indices=visible_indices,
+                    )
 
                 if step_count % max(1, args.num_envs * 10) == 0: print(f"Progress: {step_count} steps")
                 # Save recordings periodically

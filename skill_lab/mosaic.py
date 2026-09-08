@@ -1,4 +1,4 @@
-"""Mosaic display for the skill lab."""
+"""Dynamic mosaic display for the Skill Lab."""
 
 from __future__ import annotations
 
@@ -7,81 +7,58 @@ from typing import Any
 import cv2
 import numpy as np
 
-from skill_lab.config import GRID_COLS, GRID_ROWS, PANEL_WIDTH, TILE_HEIGHT, TILE_WIDTH
+from skill_lab.config import PANEL_WIDTH, TILE_HEIGHT, TILE_WIDTH
 
 
 class Mosaic:
-    def __init__(self, num_tiles: int, title: str = "Pokemon Red V2 Mosaic", foreground: bool = False,rows: int = 6, cols: int = 7) -> None:
+    def __init__(self, num_tiles: int, title: str = "Pokemon Red V2 Mosaic", foreground: bool = False,
+                 rows: int = 6, cols: int = 7) -> None:
         self.num_tiles = num_tiles
-        self.rows = rows
-        self.cols = cols
+        self.rows = max(1, rows)
+        self.cols = max(1, cols)
         self.title = title
         self.foreground = foreground
+        self.page = 0
+        self.view_mode = "pages"
+        self.display_paused = False
+        self._visible_indices: list[int] = []
         self.selected_index: int | None = None
         self.pending_human_action: int | None = None
-
-        self.panel_x = GRID_COLS * TILE_WIDTH
-        self.panel_y = 0
+        self.panel_x = self.cols * TILE_WIDTH
         self.panel_w = PANEL_WIDTH
-        self.panel_h = GRID_ROWS * TILE_HEIGHT
-
-        button_margin = 20
-        button_w = self.panel_w - button_margin * 2
-        button_h = 60
-        button_gap = 20
-        start_y = 80
-        self.buttons = {
-            "Control": {
-                "rect": (button_margin, start_y, button_w, button_h),
-                "color": (0, 180, 255),
-                "hover": (0, 220, 255),
-            },
-            "Slash": {
-                "rect": (button_margin, start_y + button_h + button_gap, button_w, button_h),
-                "color": (0, 0, 180),
-                "hover": (0, 0, 255),
-            },
-            "Praise": {
-                "rect": (button_margin, start_y + (button_h + button_gap) * 2, button_w, button_h),
-                "color": (0, 180, 0),
-                "hover": (0, 255, 0),
-            },
-            "Stats": {
-                "rect": (button_margin, start_y + (button_h + button_gap) * 3, button_w, button_h),
-                "color": (180, 180, 0),
-                "hover": (255, 255, 0),
-            },
-            "Map": {
-                "rect": (button_margin, start_y + (button_h + button_gap) * 4, button_w, button_h),
-                "color": (180, 0, 0),
-                "hover": (255, 0, 0),
-            },
-            "KILL": {
-               "action": "kill", 
-                "rect": (button_margin, start_y + (button_h + button_gap) * 5, button_w, button_h),
-                "color": (180, 0, 0),
-                "hover": (255, 0, 0),
-            },
-            "RESET": {
-               "action": "reset", 
-                "rect": (button_margin, start_y + (button_h + button_gap) * 6, button_w, button_h),
-                "color": (180, 0, 0),
-                "hover": (255, 0, 0),
-            },
-            "REPLAY": {
-               "action": "replay", 
-                "rect": (button_margin, start_y + (button_h + button_gap) * 7, button_w, button_h),
-                "color": (180, 0, 0),
-                "hover": (255, 0, 0),
-            },
-        }
         self.hovered_button: str | None = None
         self.last_action: str | None = None
         self.last_action_target: int | None = None
-        self.control_active: bool = False
+        self.control_active = False
         self.stats_visible = False
         self.map_visible = False
-
+        margin, width, height, gap = 12, self.panel_w - 24, 42, 5
+        start = 35
+        colors = {
+            "Control": (0, 180, 255), "Slash": (0, 0, 180), "Praise": (0, 180, 0),
+            "Stats": (180, 180, 0), "Map": (180, 0, 0), "KILL": (180, 0, 0),
+            "RESET": (180, 0, 0), "REPLAY": (180, 0, 0),
+        }
+        self.buttons: dict[str, dict[str, Any]] = {}
+        for index, (name, color) in enumerate(colors.items()):
+            self.buttons[name] = {
+                "rect": (margin, start + (height + gap) * index, width, height),
+                "color": color,
+                "hover": tuple(min(255, value + 75) for value in color),
+            }
+        for index, (name, action, color) in enumerate((
+            ("Previous", "previous", (80, 80, 180)),
+            ("Next", "next", (80, 180, 180)),
+            ("Best", "best", (80, 160, 80)),
+            ("Worst", "worst", (160, 80, 80)),
+            ("Pause UI", "pause", (100, 100, 100)),
+        ), start=8):
+            self.buttons[name] = {
+                "action": action,
+                "rect": (margin, start + (height + gap) * index, width, height),
+                "color": color,
+                "hover": tuple(min(255, value + 75) for value in color),
+            }
         cv2.namedWindow(self.title)
         cv2.setMouseCallback(self.title, self._on_mouse)
 
@@ -93,167 +70,121 @@ class Mosaic:
         return None
 
     def _on_mouse(self, event: int, x: int, y: int, flags: int, param: Any) -> None:
-        if event == cv2.EVENT_LBUTTONDOWN:
-            if x >= self.panel_x:
-                button = self._button_at(x, y)
-                if button == "Control":
-                    if self.selected_index is not None:
-                        self.control_active = not self.control_active
-                        self.last_action = "Control" if self.control_active else None
-                        self.last_action_target = self.selected_index if self.control_active else None
-                        self.pending_human_action = None
-                elif button == "Slash":
-                    if self.selected_index is not None:
-                        self.last_action = "Slash"
-                        self.last_action_target = self.selected_index
-                elif button == "Praise":
-                    if self.selected_index is not None:
-                        self.last_action = "Praise"
-                        self.last_action_target = self.selected_index
-                elif button == "Stats":
-                    self.stats_visible = not self.stats_visible
-                elif button == "Map":
-                    self.map_visible = not self.map_visible
-            else:
-                column = x // TILE_WIDTH
-                row = y // TILE_HEIGHT
-                clicked = row * GRID_COLS + column
-                if 0 <= clicked < self.num_tiles:
-                    self.selected_index = None if self.selected_index == clicked else clicked
-                    self.pending_human_action = None
-        elif event == cv2.EVENT_MOUSEMOVE:
-            if x >= self.panel_x:
-                self.hovered_button = self._button_at(x, y)
-            else:
-                self.hovered_button = None
+        if event == cv2.EVENT_MOUSEMOVE:
+            self.hovered_button = self._button_at(x, y) if x >= self.panel_x else None
+            return
+        if event != cv2.EVENT_LBUTTONDOWN:
+            return
+        if x >= self.panel_x:
+            button = self._button_at(x, y)
+            if button == "Control" and self.selected_index is not None:
+                self.control_active = not self.control_active
+                self.last_action = "Control" if self.control_active else None
+                self.last_action_target = self.selected_index if self.control_active else None
+                self.pending_human_action = None
+            elif button == "Slash" and self.selected_index is not None:
+                self.last_action, self.last_action_target = "Slash", self.selected_index
+            elif button == "Praise" and self.selected_index is not None:
+                self.last_action, self.last_action_target = "Praise", self.selected_index
+            elif button == "Stats":
+                self.stats_visible = not self.stats_visible
+            elif button == "Map":
+                self.map_visible = not self.map_visible
+            elif button in ("Previous", "Next", "Best", "Worst", "Pause UI"):
+                self._handle_view_action(self.buttons[button]["action"])
+            return
+        slot = (y // TILE_HEIGHT) * self.cols + (x // TILE_WIDTH)
+        if slot < len(self._visible_indices):
+            clicked = self._visible_indices[slot]
+            self.selected_index = None if self.selected_index == clicked else clicked
+            self.pending_human_action = None
 
-    def render(
-        self,
-        tiles: list[np.ndarray],
-        reward_modifiers: list[float] | None = None,
-        ppo_updates: int = 0,
-        objective_info: list[tuple[str, str | None, float]] | None = None,
-        step_count: int = 0,
-        batch_number: int = 0,
-        model_name: str | None = None,
-    ) -> None:
-
-        
-        cols = min(GRID_COLS, len(tiles))
-        rows = (len(tiles) + cols - 1) // cols
+    def render(self, tiles: list[np.ndarray], reward_modifiers: list[float] | None = None,
+               ppo_updates: int = 0, objective_info: list[tuple[str, str | None, float]] | None = None,
+               step_count: int = 0, batch_number: int = 0, model_name: str | None = None,
+               tile_indices: list[int] | None = None) -> None:
+        tile_indices = tile_indices or list(range(len(tiles)))
+        self._visible_indices = tile_indices
         rows_list = []
-        for row in range(rows):
-            start = row * cols
-            end = min(start + cols, len(tiles))
-            row_tiles = tiles[start:end]
-            while len(row_tiles) < cols:
+        for row in range(self.rows):
+            row_tiles = tiles[row * self.cols:(row + 1) * self.cols]
+            while len(row_tiles) < self.cols:
                 row_tiles.append(np.zeros((TILE_HEIGHT, TILE_WIDTH, 3), dtype=np.uint8))
             rows_list.append(np.hstack(row_tiles))
         grid = np.vstack(rows_list)
-
         panel_h = grid.shape[0]
         panel = np.full((panel_h, self.panel_w, 3), 40, dtype=np.uint8)
-        cv2.rectangle(panel, (0, 0), (self.panel_w - 1, panel_h - 1), (80, 80, 80), thickness=2)
-
-        cv2.putText(panel, "Supervisor", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-
-        if self.selected_index is not None:
-            cv2.putText(panel, f"Selected: {self.selected_index + 1}", (20, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 220, 255), 1)
-        else:
-            cv2.putText(panel, "No selection", (20, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 150, 150), 1)
-
-        if objective_info is not None and self.selected_index is not None:
-            objective_name, subgoal_name, objective_progress = objective_info[self.selected_index]
-            cv2.putText(panel, f"Objective: {objective_name}", (20, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
-            if subgoal_name:
-                cv2.putText(panel, f"Subgoal: {subgoal_name}", (20, 115), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 0), 1)
-            cv2.putText(panel, f"Progress: {objective_progress:.0%}", (20, 135), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 0), 1)
-
+        cv2.rectangle(panel, (0, 0), (self.panel_w - 1, panel_h - 1), (80, 80, 80), 2)
+        cv2.putText(panel, f"Supervisor | {self.view_mode} | page {self.page + 1}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
+        selected_text = f"Selected: {self.selected_index + 1}" if self.selected_index is not None else "No selection"
+        cv2.putText(panel, selected_text, (20, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 220, 255), 1)
         cv2.putText(panel, f"PPO updates: {ppo_updates}", (20, 85), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
-
         cv2.putText(panel, f"Step: {step_count}", (20, 105), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         cv2.putText(panel, f"Batch: {batch_number}", (20, 125), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         if model_name:
             cv2.putText(panel, f"Model: {model_name}", (20, 145), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-
         for name, info in self.buttons.items():
             bx, by, bw, bh = info["rect"]
-            if name == "Stats":
+            if name == "Pause UI":
+                color = info["hover"] if self.display_paused else info["color"]
+            elif name == "Stats":
                 color = info["hover"] if self.stats_visible else info["color"]
             elif name == "Map":
                 color = info["hover"] if self.map_visible else info["color"]
             else:
                 color = info["hover"] if self.hovered_button == name else info["color"]
-            cv2.rectangle(panel, (bx, by), (bx + bw, by + bh), color, thickness=-1)
-            cv2.rectangle(panel, (bx, by), (bx + bw, by + bh), (255, 255, 255), thickness=2)
+            cv2.rectangle(panel, (bx, by), (bx + bw, by + bh), color, -1)
+            cv2.rectangle(panel, (bx, by), (bx + bw, by + bh), (255, 255, 255), 2)
             text_size = cv2.getTextSize(name, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)[0]
-            text_x = bx + (bw - text_size[0]) // 2
-            text_y = by + (bh + text_size[1]) // 2
-            cv2.putText(panel, name, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-
+            cv2.putText(panel, name, (bx + (bw - text_size[0]) // 2, by + (bh + text_size[1]) // 2), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
         if self.control_active and self.selected_index is not None:
             cv2.putText(panel, "CONTROL ON", (20, panel_h - 70), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-
-        if self.last_action is not None and self.last_action_target is not None:
-            action_text = f"{self.last_action} #{self.last_action_target + 1}"
-            cv2.putText(panel, action_text, (20, panel_h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 1)
-
-        if reward_modifiers is not None and self.selected_index is not None:
-            mod = reward_modifiers[self.selected_index]
-            mod_text = f"Reward mod: {mod:+.1f}"
-            cv2.putText(panel, mod_text, (20, panel_h - 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
-
         mosaic = np.hstack([grid, panel])
         cv2.imshow(self.title, mosaic)
         if self.foreground:
             cv2.setWindowProperty(self.title, cv2.WND_PROP_TOPMOST, 1)
 
+    def _handle_view_action(self, action: str) -> None:
+        page_size = self.rows * self.cols
+        pages = max(1, (self.num_tiles + page_size - 1) // page_size)
+        if action == "next":
+            self.view_mode, self.page = "pages", (self.page + 1) % pages
+        elif action == "previous":
+            self.view_mode, self.page = "pages", (self.page - 1) % pages
+        elif action in ("best", "worst"):
+            self.view_mode, self.page = action, 0
+        elif action == "pause":
+            self.display_paused = not self.display_paused
+
+    def visible_indices(self, scores: np.ndarray | None = None) -> list[int]:
+        size = self.rows * self.cols
+        if self.view_mode == "best" and scores is not None:
+            return np.argsort(scores)[::-1].tolist()[:size]
+        if self.view_mode == "worst" and scores is not None:
+            return np.argsort(scores).tolist()[:size]
+        start = self.page * size
+        return list(range(start, min(start + size, self.num_tiles)))
+
     def poll_key(self) -> int | None:
         key = cv2.waitKeyEx(1)
         if key in (ord("q"), 27):
             return key
-
-        # # Q or Escape: quit
-        # if key in (ord("q"), 27):
-        #     raise KeyboardInterrupt
-
-        # # K: Kill selected emulator (reset it)
-        # if key == ord("k") and self.selected_index is not None:
-        #     print(f"[Mosaic] KILLING env {self.selected_index} - resetting...")
-        #     # Reset this specific environment
-        #     env.envs[self.selected_index].reset()
-        #     # Clear its input recording
-        #     if recorder:
-        #         recorder.reset(self.selected_index)
-        #     print(f"[Mosaic] Env {self.selected_index} reset to initial state")
-
-        # # R: Reset selected emulator to a previous checkpoint state
-        # if key == ord("r") and self.selected_index is not None:
-        #     print(f"[Mosaic] RESTART env {self.selected_index} from last checkpoint")
-        #     # You can implement loading a previous state here
-        #     env.envs[self.selected_index].reset()
-        
-        if key in (
-            ord("1"), ord("2"), ord("3"), ord("4"), ord("5"),
-            ord("6"), ord("7"), ord("8"), ord("9"),
-        ):
-            clicked_instance = key - ord("1")
-            self.selected_index = None if self.selected_index == clicked_instance else clicked_instance
-            self.pending_human_action = None
-        elif key in (ord("0"), ord("a"), ord("b")):
-            clicked_instance = {ord("0"): 9, ord("a"): 10, ord("b"): 11}[key]
-            self.selected_index = None if self.selected_index == clicked_instance else clicked_instance
-            self.pending_human_action = None
+        if key in (ord("n"), ord("]")):
+            self._handle_view_action("next")
+        elif key in (ord("p"), ord("[")):
+            self._handle_view_action("previous")
+        elif key == ord("v"):
+            self._handle_view_action("best" if self.view_mode != "best" else "worst")
+        elif key == ord(" "):
+            self._handle_view_action("pause")
+        elif ord("1") <= key <= ord("9"):
+            slot = key - ord("1")
+            if slot < len(self._visible_indices):
+                clicked = self._visible_indices[slot]
+                self.selected_index = None if self.selected_index == clicked else clicked
+                self.pending_human_action = None
         elif self.selected_index is not None:
-            self.pending_human_action = {
-                2490368: 3,
-                2621440: 0,
-                2424832: 1,
-                2555904: 2,
-                ord("z"): 4,
-                ord("x"): 5,
-                ord("s"): 6,
-            }.get(key)
+            self.pending_human_action = {2490368: 3, 2621440: 0, 2424832: 1, 2555904: 2, ord("z"): 4, ord("x"): 5, ord("s"): 6}.get(key)
         return key
 
     def close(self) -> None:

@@ -33,6 +33,7 @@ class Launcher:
         self.training_mode_var = tk.StringVar(value="segment")  # NEW
         self.rows_var = tk.IntVar(value=6)
         self.cols_var = tk.IntVar(value=7)
+        self.num_envs_var = tk.IntVar(value=42)
         self.max_steps_var = tk.IntVar(value=500)  # NEW: segment length
         self.batch_iterations_var = tk.IntVar(value=10_000_000)
         self.hud_var = tk.BooleanVar(value=True)
@@ -124,22 +125,29 @@ class Launcher:
         ttk.Spinbox(speed_frame, from_=1, to=10, textvariable=self.speed_var, width=4).pack(side=tk.LEFT, padx=5)
         ttk.Label(speed_frame, text="(1=normal, 2=double, 0=turbo)").pack(side=tk.LEFT)
 
-        # Row 7: Continuous
+        # Row 8: Worker environments
+        ttk.Label(main_frame, text="Worker environments:").grid(row=8, column=0, sticky="w", pady=2)
+        worker_frame = ttk.Frame(main_frame)
+        worker_frame.grid(row=8, column=1, sticky="w")
+        ttk.Spinbox(worker_frame, from_=1, to=512, textvariable=self.num_envs_var, width=8).pack(side=tk.LEFT, padx=5)
+        ttk.Label(worker_frame, text="(all train; mosaic shows one page)").pack(side=tk.LEFT)
+
+        # Row 9: Continuous
         ttk.Checkbutton(
             main_frame, text="Run continuously (repeat batches)",
             variable=self.continuous_var
-        ).grid(row=8, column=0, columnspan=2, sticky="w", pady=5)
+        ).grid(row=9, column=0, columnspan=2, sticky="w", pady=5)
 
-        # Row 8: Batch iterations
-        ttk.Label(main_frame, text="Batch iterations:").grid(row=9, column=0, sticky="w", pady=2)
+        # Row 10: Batch iterations
+        ttk.Label(main_frame, text="Batch iterations:").grid(row=10, column=0, sticky="w", pady=2)
         batch_frame = ttk.Frame(main_frame)
-        batch_frame.grid(row=9, column=1, sticky="w")
+        batch_frame.grid(row=10, column=1, sticky="w")
         ttk.Entry(
             batch_frame, textvariable=self.batch_iterations_var, width=12
         ).pack(side=tk.LEFT, padx=5)
         ttk.Label(batch_frame, text="(steps before each reset/report)").pack(side=tk.LEFT)
 
-        # Row 9: Layout
+        # Row 7: Layout
         ttk.Label(main_frame, text="Layout:").grid(row=7, column=0, sticky="w", pady=2)
         layout_frame = ttk.Frame(main_frame)
         layout_frame.grid(row=7, column=1, sticky="w")
@@ -152,22 +160,22 @@ class Launcher:
         self.rows_var.trace_add("write", self._update_total)
         self.cols_var.trace_add("write", self._update_total)
 
-        # Row 10: HUD
+        # Row 11: HUD
         ttk.Checkbutton(
             main_frame, text="Use HUD overlay", variable=self.hud_var
-        ).grid(row=10, column=0, columnspan=2, sticky="w", pady=5)
+        ).grid(row=11, column=0, columnspan=2, sticky="w", pady=5)
 
-        # Row 11: Stage description
+        # Row 12: Stage description
         self.stage_desc_var = tk.StringVar(value="")
         ttk.Label(
             main_frame, textvariable=self.stage_desc_var,
             font=("", 8), foreground="gray"
-        ).grid(row=11, column=0, columnspan=2, sticky="w")
+        ).grid(row=12, column=0, columnspan=2, sticky="w")
 
-        # Row 12: Launch
+        # Row 13: Launch
         ttk.Button(
             main_frame, text="Launch", command=self._launch
-        ).grid(row=12, column=0, columnspan=2, pady=10)
+        ).grid(row=13, column=0, columnspan=2, pady=10)
 
         # Initialize
         self._on_mode_change()
@@ -205,7 +213,7 @@ class Launcher:
         mode = self.mode_var.get()
         rows = self.rows_var.get()
         cols = self.cols_var.get()
-        num_envs = rows * cols
+        num_envs = self.num_envs_var.get()
         use_hud = self.hud_var.get()
         stage_name = self.stage_var.get()
         training_mode = self.training_mode_var.get()
