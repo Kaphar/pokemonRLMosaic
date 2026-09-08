@@ -18,3 +18,5 @@ skill_lab/envs/Env031/config.json
 
 mosaic_sessions/stats_history.json
 skill_lab/starter_report.html
+mosaic_sessions/**/*.*
+
