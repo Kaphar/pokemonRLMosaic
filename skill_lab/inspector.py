@@ -7,7 +7,7 @@ from typing import Any
 import cv2
 import numpy as np
 
-from skill_lab.party_reader import Gen1PartyReader, PyBoyMemoryReader
+from skill_lab.panel_data import draw_party_panel, draw_trainer_bag_panel, draw_world_info, read_panel_data
 
 
 class ObservationInspector:
@@ -46,9 +46,11 @@ class ObservationInspector:
             screen = screen[:, :, :3]
         screen = cv2.resize(screen, (320, 288), interpolation=cv2.INTER_NEAREST)
 
-        hp = float(env.envs[env_index].read_hp_fraction())
+        env_instance = env.envs[env_index]
+        panel_data = read_panel_data(env_instance.pyboy.memory)
+        hp = float(env_instance.read_hp_fraction())
         level_sum = int(env.envs[env_index].current_level_sum)
-        map_id = int(env.envs[env_index].current_map_id)
+        map_id = panel_data["map_id"]
         badges = int(env.envs[env_index].read_m(0xD356))
         events = int(np.sum(env.envs[env_index].read_event_bits()))
         steps = int(env.envs[env_index].step_count)
@@ -69,8 +71,8 @@ class ObservationInspector:
         y += 24
         cv2.putText(panel, f"Level sum: {level_sum}", (15, y), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 0), 1)
         y += 20
-        cv2.putText(panel, f"Map ID: {map_id:02X}", (15, y), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 0), 1)
-        y += 20
+        draw_world_info(panel, 15, y, panel_data)
+        y += 36
         cv2.putText(panel, f"Badges: {badges}/8", (15, y), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 0), 1)
         y += 20
         cv2.putText(panel, f"Events: {events}", (15, y), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 0), 1)
@@ -87,41 +89,8 @@ class ObservationInspector:
         party_y = 22
         party_width = right_panel_w - 30
         cv2.rectangle(panel, (left_panel_w, 0), (left_panel_w + right_panel_w - 1, panel_h - 1), (75, 75, 75), 1)
-        cv2.putText(panel, "Party", (party_x, party_y), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
-        party = Gen1PartyReader(
-            PyBoyMemoryReader(env.envs[env_index].pyboy.memory)
-        ).read_party({
-            "partyAddr": Gen1PartyReader.PARTY_ADDRESS,
-            "partySlotsCounterAddr": Gen1PartyReader.PARTY_SIZE_ADDRESS,
-            "partyNicknamesAddr": Gen1PartyReader.PARTY_NICKNAMES_ADDRESS,
-        })
-        if party:
-            row_y = party_y + 20
-            for slot, pokemon in enumerate(party[:6]):
-                if pokemon.get("speciesID", 0) == 0:
-                    continue
-                type_names = pokemon["type1Name"]
-                if pokemon["type2"] != pokemon["type1"]:
-                    type_names += f"/{pokemon['type2Name']}"
-                name = pokemon.get("nickname") or pokemon.get("speciesName", "Unknown")
-                header = f"{slot + 1}. {name} ({pokemon['speciesName']}) Lv{pokemon['level']} {type_names}"
-                stats = (
-                    f"HP {pokemon['curHP']}/{pokemon['maxHP']}  "
-                    f"Atk {pokemon['attack']} Def {pokemon['defense']} "
-                    f"Spe {pokemon['speed']} Sp {pokemon['spAttack']}"
-                )
-                dvs = (
-                    f"DV HP {pokemon['ivHP']} Atk {pokemon['ivAttack']} "
-                    f"Def {pokemon['ivDefense']} Spe {pokemon['ivSpeed']} "
-                    f"Sp {pokemon['ivSpAttack']}"
-                )
-                cv2.putText(panel, header[:74], (party_x, row_y), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 255, 255), 1)
-                cv2.putText(panel, stats[:82], (party_x, row_y + 13), cv2.FONT_HERSHEY_SIMPLEX, 0.32, (180, 220, 255), 1)
-                cv2.putText(panel, dvs[:82], (party_x, row_y + 26), cv2.FONT_HERSHEY_SIMPLEX, 0.32, (180, 255, 180), 1)
-                cv2.line(panel, (party_x, row_y + 32), (party_x + party_width, row_y + 32), (65, 65, 65), 1)
-                row_y += 44
-        else:
-            cv2.putText(panel, "No Pokemon", (party_x, party_y + 24), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (150, 150, 150), 1)
+        draw_party_panel(panel, party_x, party_y, party_width, 275, panel_data["party"])
+        draw_trainer_bag_panel(panel, 15, 250, left_panel_w - 30, panel_data["trainer"], panel_data["bag"])
 
         rx = left_panel_w + 15
         ry = 320

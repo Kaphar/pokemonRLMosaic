@@ -95,6 +95,7 @@ def make_config(profile: Profile, session_path: Path, args: argparse.Namespace) 
         "disable_select": stage.disable_select,
         "milestone_reward": stage.milestone_reward,
         "milestones_path": str(PROJECT_ROOT / "skill_lab" / "milestones.json"),
+        "names_path": str(PROJECT_ROOT / "skill_lab" / "names.json"),
     }
 
 def load_policy(path: str | None, env: DummyVecEnv, dry_run: bool) -> PPO | None:

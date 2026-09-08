@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 import time
 from pathlib import Path
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, simpledialog
+from datetime import datetime
 
 import cv2
 import numpy as np
@@ -22,7 +24,13 @@ if str(V2_DIR) not in sys.path:
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from skill_lab.party_reader import Gen1PartyReader, PyBoyMemoryReader
+from skill_lab.panel_data import (
+    draw_menu_handler_info,
+    draw_party_panel,
+    draw_trainer_bag_panel,
+    draw_world_info,
+    read_panel_data,
+)
 from v2.global_map import local_to_global, GLOBAL_MAP_SHAPE
 
 DEFAULT_ROM = PROJECT_ROOT / "PokemonRed.gb"
@@ -103,14 +111,15 @@ BADGE_COUNT_ADDRESS = 0xD356
 
 # Inspector panel layout
 INSPECTOR_W = 720
-INSPECTOR_H = 520
+INSPECTOR_H = 560
 LEFT_PANEL_W = 320
 RIGHT_PANEL_W = 400
-MAP_LABEL_H = 164
+MAP_LABEL_H = 220
 MAP_DISPLAY_W = 286
 MAP_DISPLAY_H = int(MAP_DISPLAY_W * GLOBAL_MAP_SHAPE[0] / GLOBAL_MAP_SHAPE[1])
 MAP_ORIGIN_X = 16
 MAP_ORIGIN_Y = MAP_LABEL_H
+DEV_STATES_DIR = PROJECT_ROOT / "skill_lab" / "envs" / "dev" / "states"
 
 
 class DebugLauncher:
@@ -241,6 +250,73 @@ class DebugLauncher:
 
         self.root.destroy()
         run_player(rom_path, state_path, replay, self.controls)
+
+
+class RuntimeMenu:
+    """Native menu bar for actions that operate on the live emulator."""
+
+    def __init__(self, pyboy: PyBoy) -> None:
+        self.pyboy = pyboy
+        self.closed = False
+        self.root = tk.Tk()
+        self.root.title("Pokemon Red Debug Controls")
+        self.root.resizable(False, False)
+        self.root.protocol("WM_DELETE_WINDOW", self.close)
+        menu_bar = tk.Menu(self.root)
+        file_menu = tk.Menu(menu_bar, tearoff=False)
+        file_menu.add_command(label="Save State...", command=self.save_state)
+        file_menu.add_command(label="Load State...", command=self.load_state)
+        file_menu.add_separator()
+        file_menu.add_command(label="Close Menu", command=self.close)
+        menu_bar.add_cascade(label="File", menu=file_menu)
+        self.root.config(menu=menu_bar)
+        tk.Label(self.root, text="Use File to save or load the live emulator state.", padx=12, pady=8).pack()
+
+    def save_state(self) -> None:
+        DEV_STATES_DIR.mkdir(parents=True, exist_ok=True)
+        default_name = datetime.now().strftime("state_%Y-%m-%d_%H-%M-%S")
+        name = simpledialog.askstring("Save state", "State name:", initialvalue=default_name, parent=self.root)
+        if not name:
+            return
+        filename = re.sub(r'[<>:"/\\|?*]', "-", Path(name).name).strip(" .")
+        if not filename:
+            filename = default_name
+        if not filename.lower().endswith(".state"):
+            filename += ".state"
+        path = DEV_STATES_DIR / filename
+        try:
+            with path.open("wb") as state_file:
+                self.pyboy.save_state(state_file)
+            messagebox.showinfo("State saved", f"Saved state to:\n{path}", parent=self.root)
+        except OSError as error:
+            messagebox.showerror("Save failed", str(error), parent=self.root)
+
+    def load_state(self) -> None:
+        path = filedialog.askopenfilename(
+            title="Load state", initialdir=str(DEV_STATES_DIR),
+            filetypes=[("PyBoy state", "*.state"), ("All files", "*.*")], parent=self.root,
+        )
+        if not path:
+            return
+        try:
+            with Path(path).open("rb") as state_file:
+                self.pyboy.load_state(state_file)
+            messagebox.showinfo("State loaded", f"Loaded state from:\n{path}", parent=self.root)
+        except OSError as error:
+            messagebox.showerror("Load failed", str(error), parent=self.root)
+
+    def update(self) -> None:
+        if self.closed:
+            return
+        self.root.update_idletasks()
+        self.root.update()
+
+    def close(self) -> None:
+        self.closed = True
+        try:
+            self.root.destroy()
+        except tk.TclError:
+            pass
 
 
 def load_controls() -> dict[str, dict[str, str]]:
@@ -548,9 +624,10 @@ def render_inspector(
 ) -> None:
     """Draw the info-only inspector (party + position/map). No game-screen image."""
     memory = pyboy.memory
-    x_pos = int(memory[X_POS_ADDRESS])
-    y_pos = int(memory[Y_POS_ADDRESS])
-    map_n = int(memory[MAP_N_ADDRESS])
+    panel_data = read_panel_data(memory)
+    x_pos = panel_data["x"]
+    y_pos = panel_data["y"]
+    map_n = panel_data["map_id"]
     badges = int(memory[BADGE_COUNT_ADDRESS])
 
     panel = np.full((INSPECTOR_H, INSPECTOR_W, 3), 26, dtype=np.uint8)
@@ -570,10 +647,10 @@ def render_inspector(
     y += 22
     cv2.putText(panel, f"Frames: {frame_count}", (15, y), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (190, 210, 220), 1)
     y += 20
-    cv2.putText(panel, f"Map ID: {map_n:02X} ({map_n})", (15, y), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 0), 1)
-    y += 20
-    cv2.putText(panel, f"Position: X={x_pos}  Y={y_pos}", (15, y), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 0), 1)
-    y += 20
+    draw_world_info(panel, 15, y, panel_data)
+    y += 36
+    draw_menu_handler_info(panel, 15, y, memory)
+    y += 36
     cv2.putText(panel, f"Badges: {badges}/8", (15, y), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 0), 1)
 
     gh, gw = GLOBAL_MAP_SHAPE
@@ -597,42 +674,8 @@ def render_inspector(
     # ---- Right panel: party ----
     rx = LEFT_PANEL_W + 16
     ry = 26
-    cv2.putText(panel, "Party", (rx, ry), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-    ry += 24
-    party = Gen1PartyReader(PyBoyMemoryReader(memory)).read_party({
-        "partyAddr": Gen1PartyReader.PARTY_ADDRESS,
-        "partySlotsCounterAddr": Gen1PartyReader.PARTY_SIZE_ADDRESS,
-        "partyNicknamesAddr": Gen1PartyReader.PARTY_NICKNAMES_ADDRESS,
-    })
-    if party:
-        party_width = RIGHT_PANEL_W - 32
-        for slot, pokemon in enumerate(party[:6]):
-            if pokemon.get("speciesID", 0) == 0:
-                continue
-            type_names = pokemon["type1Name"]
-            if pokemon["type2"] != pokemon["type1"]:
-                type_names += f"/{pokemon['type2Name']}"
-            name = pokemon.get("nickname") or pokemon.get("speciesName", "Unknown")
-            header = f"{slot + 1}. {name} ({pokemon['speciesName']}) Lv{pokemon['level']} {type_names}"
-            stats = (
-                f"HP {pokemon['curHP']}/{pokemon['maxHP']}  "
-                f"Atk {pokemon['attack']} Def {pokemon['defense']} "
-                f"Spe {pokemon['speed']} Sp {pokemon['spAttack']}"
-            )
-            dvs = (
-                f"DV HP {pokemon['ivHP']} Atk {pokemon['ivAttack']} "
-                f"Def {pokemon['ivDefense']} Spe {pokemon['ivSpeed']} "
-                f"Sp {pokemon['ivSpAttack']}"
-            )
-            cv2.putText(panel, header[:78], (rx, ry), cv2.FONT_HERSHEY_SIMPLEX, 0.36, (255, 255, 255), 1)
-            cv2.putText(panel, stats[:86], (rx, ry + 13), cv2.FONT_HERSHEY_SIMPLEX, 0.33, (180, 220, 255), 1)
-            cv2.putText(panel, dvs[:86], (rx, ry + 26), cv2.FONT_HERSHEY_SIMPLEX, 0.33, (180, 255, 180), 1)
-            cv2.line(panel, (rx, ry + 33), (rx + party_width, ry + 33), (65, 65, 65), 1)
-            ry += 44
-            if ry + 44 > INSPECTOR_H - 24:
-                break
-    else:
-        cv2.putText(panel, "No Pokemon", (rx, ry + 12), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (150, 150, 150), 1)
+    draw_party_panel(panel, rx, ry, RIGHT_PANEL_W - 32, 285, panel_data["party"])
+    draw_trainer_bag_panel(panel, rx, 315, RIGHT_PANEL_W - 32, panel_data["trainer"], panel_data["bag"])
 
     cv2.putText(
         panel,
@@ -658,6 +701,7 @@ def run_player(
         state_path = resolve_recording_path(replay_data.get("init_state"))
     pyboy = PyBoy(str(rom_path), window="SDL2", sound=True)
     input_controller = InputController(pyboy, controls or load_controls())
+    runtime_menu = RuntimeMenu(pyboy)
     try:
         if state_path is not None:
             with state_path.open("rb") as state_file:
@@ -672,6 +716,7 @@ def run_player(
         render_inspector(pyboy, frame_count, replay_index, len(actions), replay_finished, map_base)
 
         while True:
+            runtime_menu.update()
             # Play back the next queued action at normal speed, one frame at a time, so the
             # audio/video stay in sync and the player can start controlling as soon as it ends.
             if replay_index < len(actions):
@@ -691,6 +736,7 @@ def run_player(
                 replay_finished = True
 
             render_inspector(pyboy, frame_count, replay_index, len(actions), replay_finished, map_base)
+            runtime_menu.update()
             key = cv2.waitKeyEx(1)
             if key in (ord("q"), 27):
                 break
@@ -698,6 +744,7 @@ def run_player(
     except OSError as error:
         print(f"PyBoy stopped while closing the SDL window: {error}")
     finally:
+        runtime_menu.close()
         input_controller.close()
         try:
             pyboy.stop()
