@@ -6,7 +6,10 @@
     "Up": "up",
     "A": "z",
     "B": "x",
-    "Start": "return"
+    "Start": "return",
+    "SpeedUp": "pageup",
+    "SpeedDown": "pagedown",
+    "Pause": "p"
   },
   "gamepad": {
     "Down": "controller:12",
@@ -15,6 +18,8 @@
     "Up": "controller:11",
     "A": "controller:0",
     "B": "controller:1",
-    "Start": "controller:6"
+    "Start": "controller:6",
+    "SpeedUp": "controller:10",
+    "SpeedDown": "controller:9"
   }
 }

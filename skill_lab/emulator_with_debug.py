@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import time
@@ -25,9 +26,17 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from skill_lab.panel_data import (
+    MemoryWatchTracker,
+    MemoryWatchWindow,
+    address_range,
+    draw_bag_panel,
+    draw_memory_watch_panel,
     draw_menu_handler_info,
     draw_party_panel,
-    draw_trainer_bag_panel,
+    get_screen_size,
+    positioned_windows,
+    draw_stats_panel,
+    draw_trainer_panel,
     draw_world_info,
     read_panel_data,
 )
@@ -39,12 +48,13 @@ DEFAULT_MAP_IMAGE = PROJECT_ROOT / "visualization" / "poke_map" / "pokemap_full_
 ACTION_FREQ = 24
 CONTROLS_PATH = PROJECT_ROOT / "skill_lab" / "controls.json"
 # Set to False after diagnosing controller input.
-DEBUG_INPUT = True
-ACTION_NAMES = ["Down", "Left", "Right", "Up", "A", "B", "Start"]
+DEBUG_INPUT = False
+ACTION_NAMES = ["Down", "Left", "Right", "Up", "A", "B", "Start", "SpeedUp", "SpeedDown", "Pause"]
 DEFAULT_CONTROLS = {
     "keyboard": {
         "Down": "down", "Left": "left", "Right": "right", "Up": "up",
         "A": "z", "B": "x", "Start": "return",
+        "SpeedUp": "pageup", "SpeedDown": "pagedown", "Pause": "p",
     },
     "gamepad": {},
 }
@@ -255,22 +265,42 @@ class DebugLauncher:
 class RuntimeMenu:
     """Native menu bar for actions that operate on the live emulator."""
 
-    def __init__(self, pyboy: PyBoy) -> None:
+    def __init__(self, pyboy: PyBoy, close_callback: callable | None = None) -> None:
         self.pyboy = pyboy
         self.closed = False
+        self.close_callback = close_callback
         self.root = tk.Tk()
         self.root.title("Pokemon Red Debug Controls")
         self.root.resizable(False, False)
+        self.root.geometry("+0+0")
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         menu_bar = tk.Menu(self.root)
         file_menu = tk.Menu(menu_bar, tearoff=False)
         file_menu.add_command(label="Save State...", command=self.save_state)
         file_menu.add_command(label="Load State...", command=self.load_state)
         file_menu.add_separator()
-        file_menu.add_command(label="Close Menu", command=self.close)
+        file_menu.add_command(label="Close Emulator", command=self.close)
+        file_menu.add_command(label="Close Menu", command=self.close_menu)
         menu_bar.add_cascade(label="File", menu=file_menu)
         self.root.config(menu=menu_bar)
         tk.Label(self.root, text="Use File to save or load the live emulator state.", padx=12, pady=8).pack()
+
+    def close_menu(self) -> None:
+        self.close()
+
+    def close(self) -> None:
+        if self.closed:
+            return
+        self.closed = True
+        if self.close_callback is not None:
+            try:
+                self.close_callback()
+            except Exception:
+                pass
+        try:
+            self.root.destroy()
+        except tk.TclError:
+            pass
 
     def save_state(self) -> None:
         DEV_STATES_DIR.mkdir(parents=True, exist_ok=True)
@@ -311,12 +341,6 @@ class RuntimeMenu:
         self.root.update_idletasks()
         self.root.update()
 
-    def close(self) -> None:
-        self.closed = True
-        try:
-            self.root.destroy()
-        except tk.TclError:
-            pass
 
 
 def load_controls() -> dict[str, dict[str, str]]:
@@ -512,6 +536,8 @@ class InputController:
         self.controls = controls
         self.active: set[str] = set()
         self.quit_requested = False
+        self.paused = False
+        self.emulation_speed = 1.0
         self.joysticks = []
         self.controllers = []
         initialize_sdl_input()
@@ -523,6 +549,25 @@ class InputController:
                 controller = sdl2.SDL_GameControllerOpen(index)
                 if controller:
                     self.controllers.append(controller)
+
+    def _handle_special_action(self, action: int, pressed: bool) -> None:
+        if action not in (7, 8, 9):
+            return
+        if not pressed:
+            return
+
+        name = ACTION_NAMES[action]
+        if name == "Pause":
+            self.paused = not self.paused
+            self.pyboy.set_emulation_speed(0.0 if self.paused else self.emulation_speed)
+            return
+
+        if name == "SpeedUp":
+            self.emulation_speed = min(8.0, max(0.5, self.emulation_speed * 2.0))
+        elif name == "SpeedDown":
+            self.emulation_speed = max(0.5, self.emulation_speed / 2.0)
+
+        self.pyboy.set_emulation_speed(0.0 if self.paused else self.emulation_speed)
 
     @staticmethod
     def _normalize_token(token: str) -> str:
@@ -541,10 +586,16 @@ class InputController:
                 return index
         return None
 
+    def request_quit(self) -> None:
+        self.quit_requested = True
+
     def _set_token(self, token: str, pressed: bool) -> None:
         action = self._action_for_token(token)
         debug_input(f"MAP token={token} pressed={pressed} action={ACTION_NAMES[action] if action is not None else 'UNBOUND'}")
         if action is None:
+            return
+        if action in (7, 8, 9):
+            self._handle_special_action(action, pressed)
             return
         if pressed and token not in self.active:
             self.pyboy.send_input(ACTION_EVENTS[action][0])
@@ -621,8 +672,13 @@ def render_inspector(
     replay_total: int,
     replay_finished: bool,
     map_base: np.ndarray | None,
-) -> None:
-    """Draw the info-only inspector (party + position/map). No game-screen image."""
+    watch_snapshot: dict[int, dict[str, Any]] | None = None,
+) -> tuple[int, int, int, int] | None:
+    """Draw the info-only inspector with split party, trainer, bag, stats, and memory-watch sections.
+
+    Returns the (x, y, w, h) rectangle of the "Show more" button when present,
+    or None when the button is not rendered.
+    """
     memory = pyboy.memory
     panel_data = read_panel_data(memory)
     x_pos = panel_data["x"]
@@ -647,44 +703,61 @@ def render_inspector(
     y += 22
     cv2.putText(panel, f"Frames: {frame_count}", (15, y), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (190, 210, 220), 1)
     y += 20
-    draw_world_info(panel, 15, y, panel_data)
-    y += 36
-    draw_menu_handler_info(panel, 15, y, memory)
-    y += 36
+    # Temporarily disabled until the map overlay can be toggled cleanly.
+    # draw_world_info(panel, 15, y, panel_data)
+    # y += 50
     cv2.putText(panel, f"Badges: {badges}/8", (15, y), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 0), 1)
+    y += 22
 
-    gh, gw = GLOBAL_MAP_SHAPE
-    if map_base is not None:
-        map_img = map_base.copy()
-        gy, gx = local_to_global(y_pos, x_pos, map_n)
-        gx = min(max(gx, 0), gw - 1)
-        gy = min(max(gy, 0), gh - 1)
-        mx = int(gx * MAP_DISPLAY_W / gw)
-        my = int(gy * MAP_DISPLAY_H / gh)
-        cv2.circle(map_img, (mx, my), 5, (0, 0, 0), -1)
-        cv2.circle(map_img, (mx, my), 5, (0, 0, 255), 1)
-        cv2.putText(map_img, "you", (mx + 7, my + 4), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 0, 255), 1)
-    else:
-        map_img = np.full((MAP_DISPLAY_H, MAP_DISPLAY_W, 3), 26, dtype=np.uint8)
-        cv2.putText(map_img, "map image missing", (8, MAP_DISPLAY_H // 2),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (150, 150, 150), 1)
+    # Temporarily disabled until the map overlay can be toggled cleanly.
+    # gh, gw = GLOBAL_MAP_SHAPE
+    # if map_base is not None:
+    #     map_img = map_base.copy()
+    #     gy, gx = local_to_global(y_pos, x_pos, map_n)
+    #     gx = min(max(gx, 0), gw - 1)
+    #     gy = min(max(gy, 0), gh - 1)
+    #     mx = int(gx * MAP_DISPLAY_W / gw)
+    #     my = int(gy * MAP_DISPLAY_H / gh)
+    #     cv2.circle(map_img, (mx, my), 5, (0, 0, 0), -1)
+    #     cv2.circle(map_img, (mx, my), 5, (0, 0, 255), 1)
+    #     cv2.putText(map_img, "you", (mx + 7, my + 4), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 0, 255), 1)
+    # else:
+    #     map_img = np.full((MAP_DISPLAY_H, MAP_DISPLAY_W, 3), 26, dtype=np.uint8)
+    #     cv2.putText(map_img, "map image missing", (8, MAP_DISPLAY_H // 2),
+    #                 cv2.FONT_HERSHEY_SIMPLEX, 0.45, (150, 150, 150), 1)
+    # panel[MAP_ORIGIN_Y:MAP_ORIGIN_Y + MAP_DISPLAY_H, MAP_ORIGIN_X:MAP_ORIGIN_X + MAP_DISPLAY_W] = map_img
 
-    panel[MAP_ORIGIN_Y:MAP_ORIGIN_Y + MAP_DISPLAY_H, MAP_ORIGIN_X:MAP_ORIGIN_X + MAP_DISPLAY_W] = map_img
-
-    # ---- Right panel: party ----
     rx = LEFT_PANEL_W + 16
-    ry = 26
-    draw_party_panel(panel, rx, ry, RIGHT_PANEL_W - 32, 285, panel_data["party"])
-    draw_trainer_bag_panel(panel, rx, 315, RIGHT_PANEL_W - 32, panel_data["trainer"], panel_data["bag"])
+    ry = 24
+    draw_party_panel(panel, rx, ry, RIGHT_PANEL_W - 32, 170, panel_data.get("party"))
+    draw_trainer_panel(panel, rx, 200, RIGHT_PANEL_W - 32, panel_data.get("trainer"))
+    draw_bag_panel(panel, rx, 240, RIGHT_PANEL_W - 32, panel_data.get("bag"))
+    draw_stats_panel(panel, rx, 300, RIGHT_PANEL_W - 32, {
+        "badges": panel_data.get("badges", badges),
+        "events": "n/a",
+        "steps": frame_count,
+        "hp": "n/a",
+        "env": "live",
+    })
+    button_rect: tuple[int, int, int, int] | None = None
+    if watch_snapshot:
+        button_rect = draw_memory_watch_panel(panel, 15, 280, 260, watch_snapshot, title="Addr watch")
 
     cv2.putText(
         panel,
-        "Q/Esc: quit | Arrows/A/S/Start: move & buttons | +/-: speed | P: pause | Esc(emulator): quit",
+        "Q/Esc: quit | M: toggle watch | Show more: full watch | Arrows/A/S/Start: move & buttons | +/-: speed | P: pause",
         (15, INSPECTOR_H - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.34, (120, 120, 120), 1,
     )
 
+    cv2.namedWindow("Pokemon Red Inspector", cv2.WINDOW_NORMAL)
     cv2.imshow("Pokemon Red Inspector", panel)
-    cv2.moveWindow("Pokemon Red Inspector", 820, 80)
+    if "Pokemon Red Inspector" not in positioned_windows:
+        screen_w, _ = get_screen_size()
+        win_x = max(0, screen_w - INSPECTOR_W - 20)
+        cv2.moveWindow("Pokemon Red Inspector", win_x, 40)
+        positioned_windows.add("Pokemon Red Inspector")
+
+    return button_rect
 
 
 def run_player(
@@ -699,21 +772,55 @@ def run_player(
         raise ValueError(f"Replay action frequency must be at least 9, got {replay_action_freq}")
     if state_path is None:
         state_path = resolve_recording_path(replay_data.get("init_state"))
+
+    os.environ.setdefault("SDL_VIDEO_WINDOW_POS", "0,0")
     pyboy = PyBoy(str(rom_path), window="SDL2", sound=True)
     input_controller = InputController(pyboy, controls or load_controls())
-    runtime_menu = RuntimeMenu(pyboy)
+
+    def close_emulator() -> None:
+        input_controller.request_quit()
+        try:
+            pyboy.stop()
+        except OSError:
+            pass
+
+    runtime_menu = RuntimeMenu(pyboy, close_callback=close_emulator)
+    watch_addresses = [
+        *address_range(MAP_N_ADDRESS, MAP_N_ADDRESS),
+        *address_range(X_POS_ADDRESS, Y_POS_ADDRESS),
+        *address_range(BADGE_COUNT_ADDRESS, BADGE_COUNT_ADDRESS),
+        *address_range(0xCC06, 0xCC2F),
+    ]
+    watcher = MemoryWatchTracker(watch_addresses)
     try:
         if state_path is not None:
             with state_path.open("rb") as state_file:
                 pyboy.load_state(state_file)
 
-        pyboy.set_emulation_speed(1)  # normal real-time speed
+        pyboy.set_emulation_speed(1.0)  # normal real-time speed
+        input_controller.emulation_speed = 1.0
         map_base = _prepare_map_base(load_map_image(DEFAULT_MAP_IMAGE))
 
         frame_count = 0
         replay_index = 0
         replay_finished = len(actions) == 0
-        render_inspector(pyboy, frame_count, replay_index, len(actions), replay_finished, map_base)
+        show_more_state: dict[str, tuple[int, int, int, int] | None] = {"rect": None}
+        watch_window = MemoryWatchWindow()
+
+        def _on_inspector_click(event: int, x: int, y: int, flags: int, param: Any) -> None:
+            if event != cv2.EVENT_LBUTTONDOWN:
+                return
+            rect = show_more_state["rect"]
+            if rect is None:
+                return
+            bx, by, bw, bh = rect
+            if bx <= x <= bx + bw and by <= y <= by + bh:
+                watch_window.show()
+
+        initial_snapshot = watcher.record(pyboy.memory)
+        initial_button_rect = render_inspector(pyboy, frame_count, replay_index, len(actions), replay_finished, map_base, watch_snapshot=initial_snapshot)
+        show_more_state["rect"] = initial_button_rect
+        cv2.setMouseCallback("Pokemon Red Inspector", _on_inspector_click)
 
         while True:
             runtime_menu.update()
@@ -729,23 +836,44 @@ def run_player(
                 if input_controller.quit_requested:
                     break
                 if not pyboy.tick(1, True):
+                    input_controller.request_quit()
                     break
                 frame_count += 1
 
             if replay_index >= len(actions):
                 replay_finished = True
 
-            render_inspector(pyboy, frame_count, replay_index, len(actions), replay_finished, map_base)
+            watch_snapshot = watcher.record(pyboy.memory)
+            button_rect = render_inspector(pyboy, frame_count, replay_index, len(actions), replay_finished, map_base, watch_snapshot=watch_snapshot)
+            show_more_state["rect"] = button_rect
+            if watch_window.visible:
+                watch_window.render(watch_snapshot)
             runtime_menu.update()
+
+            try:
+                inspector_visible = cv2.getWindowProperty("Pokemon Red Inspector", cv2.WND_PROP_VISIBLE) >= 1
+            except cv2.error:
+                inspector_visible = False
+            if not inspector_visible:
+                input_controller.request_quit()
+                break
+
             key = cv2.waitKeyEx(1)
             if key in (ord("q"), 27):
+                input_controller.request_quit()
                 break
+            if key == ord("m"):
+                if watch_window.visible:
+                    watch_window.hide()
+                else:
+                    watch_window.show()
             time.sleep(0.001)
     except OSError as error:
         print(f"PyBoy stopped while closing the SDL window: {error}")
     finally:
-        runtime_menu.close()
+        runtime_menu.close_menu()
         input_controller.close()
+        watch_window.close()
         try:
             pyboy.stop()
         except OSError as error:
@@ -756,6 +884,7 @@ def run_player(
 def main() -> None:
     initialize_sdl_input()
     launcher = DebugLauncher()
+    launcher.root.geometry("+0+0")
     launcher.root.mainloop()
 
 

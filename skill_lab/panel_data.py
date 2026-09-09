@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from typing import Any
+
+import math
+import time
 
 import cv2
 import numpy as np
@@ -24,12 +28,88 @@ PARTY_ADDRESSES = {
     "partyNicknamesAddr": Gen1PartyReader.PARTY_NICKNAMES_ADDRESS,
 }
 
+positioned_windows: set[str] = set()
+
+
+def get_screen_size() -> tuple[int, int]:
+    """Return the primary screen dimensions (width, height) in pixels."""
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        return user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
+    except (AttributeError, OSError):
+        return 1920, 1080
+
+
+def address_range(start: int, end: int | None = None, *, offsets: Sequence[int] | None = None) -> list[int]:
+    """Return a list of addresses from a start address, a range, or an explicit offset list."""
+    start = int(start)
+    if offsets is not None:
+        return [start + int(offset) for offset in offsets]
+    if end is None:
+        return [start]
+    end = int(end)
+    if start <= end:
+        return list(range(start, end + 1))
+    return list(range(start, end - 1, -1))
+
+
+def read_memory_values(memory: Any, addresses: Sequence[int]) -> dict[int, int]:
+    """Read a list of addresses into a stable dictionary keyed by address."""
+    values: dict[int, int] = {}
+    for address in addresses:
+        numeric_address = int(address)
+        if hasattr(memory, "get"):
+            value = memory.get(numeric_address, 0)
+        else:
+            value = memory[numeric_address]
+        values[numeric_address] = int(value)
+    return values
+
+
+class MemoryWatchTracker:
+    """Track address values and highlight when the value changed since the last read."""
+
+    def __init__(self, addresses: Sequence[int] | None = None) -> None:
+        self.addresses = list(dict.fromkeys(int(address) for address in (addresses or [])))
+        self._last_values: dict[int, int] = {}
+        self._flash_until: dict[int, float] = {}
+
+    def record(self, memory_or_values: Any) -> dict[int, dict[str, Any]]:
+        if isinstance(memory_or_values, Mapping):
+            current = {int(address): int(value) for address, value in memory_or_values.items()}
+        else:
+            current = read_memory_values(memory_or_values, self.addresses)
+
+        now = time.monotonic()
+        snapshot: dict[int, dict[str, Any]] = {}
+        for address in self.addresses:
+            value = int(current.get(address, 0))
+            previous = self._last_values.get(address)
+            changed = previous is None or previous != value
+            if changed:
+                self._flash_until[address] = now + 0.75
+            flash = now < self._flash_until.get(address, 0.0)
+            snapshot[address] = {
+                "address": address,
+                "value": value,
+                "previous": previous,
+                "changed": changed,
+                "flash": flash,
+            }
+            self._last_values[address] = value
+        return snapshot
+
+    def clear(self) -> None:
+        self._last_values.clear()
+
 
 def read_panel_data(memory: Any) -> dict[str, Any]:
     """Read the common live data displayed by both inspectors."""
     party_reader = Gen1PartyReader(PyBoyMemoryReader(memory))
     player_reader = Gen1PlayerReader(PyBoyMemoryReader(memory))
     trainer = player_reader.update_trainer_info()
+    bag = player_reader.read_bag().get("items", [])
     return {
         "map_id": int(memory[MAP_N_ADDRESS]),
         "map_address": MAP_N_ADDRESS,
@@ -39,7 +119,10 @@ def read_panel_data(memory: Any) -> dict[str, Any]:
         "badges": int(memory[BADGE_COUNT_ADDRESS]).bit_count(),
         "party": party_reader.read_party(PARTY_ADDRESSES),
         "trainer": trainer or {},
-        "bag": player_reader.read_bag().get("items", []),
+        "bag": bag,
+        "stats": {
+            "badges": int(memory[BADGE_COUNT_ADDRESS]).bit_count(),
+        },
     }
 
 
@@ -49,9 +132,10 @@ def draw_party_panel(
     y: int,
     width: int,
     height: int,
-    party: list[dict[str, Any]],
+    party: list[dict[str, Any]] | None,
 ) -> None:
     """Draw the shared party presentation into an existing image."""
+    party = party or []
     cv2.putText(image, "Party", (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.58, (255, 255, 255), 1)
     row_y = y + 22
     for slot, pokemon in enumerate(party[:6]):
@@ -83,34 +167,267 @@ def draw_party_panel(
         cv2.putText(image, "No Pokemon", (x, y + 22), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (150, 150, 150), 1)
 
 
-def draw_trainer_bag_panel(
+def draw_trainer_panel(
     image: np.ndarray,
     x: int,
     y: int,
     width: int,
-    trainer: dict[str, Any],
-    bag: list[dict[str, Any]],
+    trainer: dict[str, Any] | None,
 ) -> None:
-    """Draw trainer identity, economy, badges, and bag contents consistently."""
+    """Render trainer details in a dedicated, reusable block."""
+    trainer = trainer or {}
     cv2.putText(image, "Trainer", (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
     trainer_line = (
         f"{trainer.get('name', '?')}  ${trainer.get('money', 0)}  "
         f"Coins {trainer.get('coins', 0)}  Badges {trainer.get('badge_count', 0)}/8"
     )
+    if not trainer:
+        trainer_line = "Not available in this view"
     cv2.putText(image, trainer_line[: max(1, width // 7)], (x, y + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.32, (255, 230, 160), 1)
-    cv2.putText(image, "Bag", (x, y + 38), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-    bag_line = ", ".join(f"{item['name']} x{item['quantity']}" for item in bag) or "Empty"
-    cv2.putText(image, bag_line[: max(1, width // 6)], (x, y + 56), cv2.FONT_HERSHEY_SIMPLEX, 0.31, (200, 220, 255), 1)
+
+
+def draw_bag_panel(
+    image: np.ndarray,
+    x: int,
+    y: int,
+    width: int,
+    bag: list[dict[str, Any]] | None,
+) -> None:
+    """Render the bag contents in a dedicated section."""
+    bag = bag or []
+    cv2.putText(image, "Bag", (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+    bag_line = ", ".join(f"{item.get('name', '?')} x{item.get('quantity', 0)}" for item in bag) or "Empty"
+    if not bag:
+        bag_line = "No bag data available"
+    cv2.putText(image, bag_line[: max(1, width // 6)], (x, y + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.31, (200, 220, 255), 1)
+
+
+def draw_trainer_bag_panel(
+    image: np.ndarray,
+    x: int,
+    y: int,
+    width: int,
+    trainer: dict[str, Any] | None,
+    bag: list[dict[str, Any]] | None,
+) -> None:
+    """Backward-compatible combined trainer+bag block."""
+    draw_trainer_panel(image, x, y, width, trainer)
+    draw_bag_panel(image, x, y + 35, width, bag)
 
 
 def draw_world_info(image: np.ndarray, x: int, y: int, data: dict[str, Any]) -> None:
     """Draw map identity and player coordinates using shared labels."""
     lines = (
-        f"Map {data['map_id']:02X} ({data['map_id']}) @ 0x{data['map_address']:04X}",
-        f"Position X={data['x']} Y={data['y']} @ 0x{data['position_addresses']['x']:04X}/0x{data['position_addresses']['y']:04X}",
+        f"Map {data.get('map_id', 0):02X} ({data.get('map_id', 0)}) @ 0x{data.get('map_address', 0):04X}",
+        f"Position X={data.get('x', 0)} Y={data.get('y', 0)} @ 0x{data.get('position_addresses', {}).get('x', 0):04X}/0x{data.get('position_addresses', {}).get('y', 0):04X}",
     )
     for offset, line in enumerate(lines):
         cv2.putText(image, line, (x, y + offset * 18), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 255, 0), 1)
+
+
+def draw_stats_panel(
+    image: np.ndarray,
+    x: int,
+    y: int,
+    width: int,
+    stats: dict[str, Any] | None,
+) -> None:
+    """Render environment or session statistics in a dedicated panel section."""
+    cv2.putText(image, "Stats / Env", (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (255, 255, 255), 1)
+    if not stats:
+        cv2.putText(image, "Not available", (x, y + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.32, (180, 180, 180), 1)
+        return
+    lines = [
+        f"Badges: {stats.get('badges', 0)}/8",
+        f"Events: {stats.get('events', 'n/a')}",
+        f"Steps: {stats.get('steps', 'n/a')}",
+        f"HP: {stats.get('hp', 'n/a')}",
+        f"Env: {stats.get('env', 'n/a')}",
+    ]
+    for index, line in enumerate(lines):
+        cv2.putText(image, line[: max(1, width // 7)], (x, y + 18 + index * 16), cv2.FONT_HERSHEY_SIMPLEX, 0.31, (200, 240, 255), 1)
+
+
+class MemoryWatchWindow:
+    """Persistent, updating memory-watch window with pagination and change feedback.
+
+    Unlike the one-shot ``open_memory_watch_window``, this class is designed to be
+    rendered every frame so that values update live.  When there are more
+    addresses than fit on a single page, clickable *Prev* / *Next* buttons let
+    the user page through the full list.  Each address cell mirrors the visual
+    feedback of the compact ``draw_memory_watch_panel``: red text for just-changed
+    (flash) values, green borders for changed values, and gray borders otherwise.
+    """
+
+    PAGE_SIZE = 40
+    COLS = 3
+    CELL_W = 180
+    CELL_H = 22
+    PAD_X = 18
+    PAD_Y = 26
+
+    def __init__(self, title: str = "Memory watch details") -> None:
+        self.title = title
+        self._visible = False
+        self._window_created = False
+        self._page = 0
+        self._button_rects: dict[str, tuple[int, int, int, int]] = {}
+
+    @property
+    def visible(self) -> bool:
+        return self._visible
+
+    def show(self) -> None:
+        self._visible = True
+        self._page = 0
+        if not self._window_created:
+            cv2.namedWindow(self.title, cv2.WINDOW_NORMAL)
+            cv2.setMouseCallback(self.title, self._on_mouse)
+            self._window_created = True
+
+    def hide(self) -> None:
+        self._visible = False
+
+    def is_open(self) -> bool:
+        if not self._window_created:
+            return False
+        try:
+            return cv2.getWindowProperty(self.title, cv2.WND_PROP_VISIBLE) >= 1
+        except cv2.error:
+            return False
+
+    def close(self) -> None:
+        self._visible = False
+        self._window_created = False
+        self._button_rects.clear()
+        try:
+            cv2.destroyWindow(self.title)
+        except cv2.error:
+            pass
+
+    def _on_mouse(self, event: int, x: int, y: int, flags: int, param: Any) -> None:
+        if event != cv2.EVENT_LBUTTONDOWN:
+            return
+        for name, rect in self._button_rects.items():
+            bx, by, bw, bh = rect
+            if bx <= x <= bx + bw and by <= y <= by + bh:
+                if name == "prev":
+                    self._page = max(0, self._page - 1)
+                elif name == "next":
+                    self._page += 1
+                return
+
+    def render(self, watch_snapshot: dict[int, dict[str, Any]]) -> None:
+        """Redraw the watch window with fresh data.  Call every frame while visible."""
+        if not self._visible:
+            return
+        if not self.is_open():
+            self._visible = False
+            self._window_created = False
+            self._button_rects.clear()
+            return
+
+        addresses = sorted(watch_snapshot)
+        if not addresses:
+            return
+
+        cols = self.COLS
+        cell_w = self.CELL_W
+        cell_h = self.CELL_H
+        pad_x = self.PAD_X
+        pad_y = self.PAD_Y
+
+        start = self._page * self.PAGE_SIZE
+        page_addresses = addresses[start:start + self.PAGE_SIZE]
+        has_next = start + self.PAGE_SIZE < len(addresses)
+        has_prev = self._page > 0
+
+        max_rows = math.ceil(self.PAGE_SIZE / cols)
+        panel_h = max_rows * cell_h + pad_y + 50
+        panel_w = cols * cell_w + pad_x * 2
+        panel = np.full((panel_h, panel_w, 3), 26, dtype=np.uint8)
+
+        self._button_rects.clear()
+
+        for index, address in enumerate(page_addresses):
+            row = index // cols
+            col = index % cols
+            cell_x = pad_x + col * cell_w
+            cell_y = pad_y + row * cell_h
+            entry = watch_snapshot[address]
+            value = int(entry["value"])
+            text_color = (0, 0, 255) if entry.get("flash", False) else (255, 255, 255)
+            border_color = (0, 255, 0) if entry["changed"] else (90, 90, 90)
+            cv2.putText(panel, f"0x{address:04X}", (cell_x, cell_y), cv2.FONT_HERSHEY_SIMPLEX, 0.41, text_color, 1)
+            cv2.putText(panel, f"={value:02X}", (cell_x + 92, cell_y), cv2.FONT_HERSHEY_SIMPLEX, 0.41, text_color, 1)
+            if entry["changed"]:
+                cv2.rectangle(panel, (cell_x - 6, cell_y - 12), (cell_x + 150, cell_y + 8), border_color, 1)
+
+        button_y = max_rows * cell_h + pad_y + 10
+        if has_prev:
+            self._button_rects["prev"] = (pad_x, button_y, 80, 22)
+            cv2.rectangle(panel, (pad_x, button_y), (pad_x + 80, button_y + 22), (200, 200, 200), 1)
+            cv2.putText(panel, "Prev", (pad_x + 10, button_y + 15), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 255, 255), 1)
+        if has_next:
+            next_x = pad_x + 90 if has_prev else pad_x
+            self._button_rects["next"] = (next_x, button_y, 80, 22)
+            cv2.rectangle(panel, (next_x, button_y), (next_x + 80, button_y + 22), (200, 200, 200), 1)
+            cv2.putText(panel, "Next", (next_x + 10, button_y + 15), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 255, 255), 1)
+
+        total = len(addresses)
+        page_num = self._page + 1
+        total_pages = math.ceil(total / self.PAGE_SIZE)
+        info = f"Page {page_num}/{total_pages} ({total} addresses)"
+        cv2.putText(panel, info, (pad_x, button_y + 38), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (180, 180, 180), 1)
+
+        cv2.imshow(self.title, panel)
+        if self.title not in positioned_windows:
+            screen_w, _ = get_screen_size()
+            win_x = max(0, screen_w - panel_w - 20)
+            cv2.moveWindow(self.title, win_x, 40)
+            positioned_windows.add(self.title)
+
+
+def draw_memory_watch_panel(
+    image: np.ndarray,
+    x: int,
+    y: int,
+    width: int,
+    watch_snapshot: dict[int, dict[str, Any]],
+    title: str = "Memory watch",
+    max_rows: int = 10,
+) -> tuple[int, int, int, int] | None:
+    """Render a compact table with address/value labels and a Show more overflow trigger.
+
+    Returns the (x, y, w, h) rectangle of the "Show more" button when there are
+    more addresses than ``max_rows``, otherwise None.
+    """
+    addresses = sorted(watch_snapshot)
+    cv2.putText(image, title, (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.60, (255, 255, 255), 1)
+    row_y = y + 28
+    visible = addresses[:max_rows]
+    overflowed = len(addresses) > max_rows
+
+    for address in visible:
+        entry = watch_snapshot[address]
+        value = int(entry["value"])
+        text_color = (0, 0, 255) if entry.get("flash", False) else (255, 255, 255)
+        border_color = (0, 255, 0) if entry["changed"] else (90, 90, 90)
+        cv2.putText(image, f"0x{address:04X}", (x, row_y), cv2.FONT_HERSHEY_SIMPLEX, 0.44, text_color, 1)
+        cv2.putText(image, f": {value:02X}", (x + 96, row_y), cv2.FONT_HERSHEY_SIMPLEX, 0.44, text_color, 1)
+        if entry["changed"]:
+            cv2.rectangle(image, (x, row_y - 10), (x + min(width, 190), row_y + 10), border_color, 1)
+        row_y += 18
+
+    if overflowed:
+        button_x = x
+        button_y = row_y + 8
+        button_w = min(width, 160)
+        button_h = 18
+        cv2.rectangle(image, (button_x, button_y), (button_x + button_w, button_y + button_h), (200, 200, 200), 1)
+        cv2.putText(image, "Show more", (button_x + 10, button_y + 13), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 255, 255), 1)
+        return (button_x, button_y, button_w, button_h)
+    return None
 
 
 def read_menu_handler_bytes(memory: Any) -> dict[int, int]:
@@ -124,6 +441,5 @@ def read_menu_handler_bytes(memory: Any) -> dict[int, int]:
 def draw_menu_handler_info(image: np.ndarray, x: int, y: int, memory: Any) -> None:
     """Draw raw CC26-CC2F values without assuming their exact meanings."""
     values = read_menu_handler_bytes(memory)
-    cv2.putText(image, "WRAM menu/text probe (raw)", (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (190, 220, 255), 1)
-    row = " ".join(f"{address:04X}:{value:02X}" for address, value in values.items())
-    cv2.putText(image, row, (x, y + 17), cv2.FONT_HERSHEY_SIMPLEX, 0.32, (190, 220, 255), 1)
+    watch_snapshot = {address: {"address": address, "value": value, "previous": None, "changed": True} for address, value in values.items()}
+    draw_memory_watch_panel(image, x, y, 280, watch_snapshot, title="WRAM probe")
