@@ -745,7 +745,7 @@ def render_inspector(
 
     cv2.putText(
         panel,
-        "Q/Esc: quit | M: toggle watch | Show more: full watch | Arrows/A/S/Start: move & buttons | +/-: speed | P: pause",
+        "Q/Esc: quit | M: toggle watch | R: set range | Show more: full watch | Arrows/A/S/Start: move & buttons | +/-: speed | P: pause",
         (15, INSPECTOR_H - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.34, (120, 120, 120), 1,
     )
 
@@ -758,6 +758,31 @@ def render_inspector(
         positioned_windows.add("Pokemon Red Inspector")
 
     return button_rect
+
+
+def _set_watch_range(parent: tk.Tk, watch_window: MemoryWatchWindow) -> None:
+    """Prompt the user for a new hex address range and apply it to *watch_window*."""
+    start_hex = simpledialog.askstring(
+        "Watch Range", "Start address (hex, e.g. CC06):",
+        initialvalue=f"{watch_window.start_address:04X}", parent=parent,
+    )
+    if not start_hex:
+        return
+    end_hex = simpledialog.askstring(
+        "Watch Range", "End address (hex, e.g. D362):",
+        initialvalue=f"{watch_window.end_address:04X}", parent=parent,
+    )
+    if not end_hex:
+        return
+    try:
+        start = int(start_hex, 16)
+        end = int(end_hex, 16)
+    except ValueError:
+        messagebox.showerror("Invalid range", "Please enter valid hexadecimal addresses.", parent=parent)
+        return
+    watch_window.set_range(start, end)
+    if watch_window.visible:
+        watch_window.show()
 
 
 def run_player(
@@ -847,7 +872,7 @@ def run_player(
             button_rect = render_inspector(pyboy, frame_count, replay_index, len(actions), replay_finished, map_base, watch_snapshot=watch_snapshot)
             show_more_state["rect"] = button_rect
             if watch_window.visible:
-                watch_window.render(watch_snapshot)
+                watch_window.render(pyboy.memory)
             runtime_menu.update()
 
             try:
@@ -867,6 +892,8 @@ def run_player(
                     watch_window.hide()
                 else:
                     watch_window.show()
+            if key == ord("r"):
+                _set_watch_range(runtime_menu.root, watch_window)
             time.sleep(0.001)
     except OSError as error:
         print(f"PyBoy stopped while closing the SDL window: {error}")
@@ -890,3 +917,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+

@@ -77,7 +77,7 @@ class MemoryWatchTracker:
 
     def record(self, memory_or_values: Any) -> dict[int, dict[str, Any]]:
         if isinstance(memory_or_values, Mapping):
-            current = {int(address): int(value) for address, value in memory_or_values.items()}
+            current = {address: int(memory_or_values.get(address, 0)) for address in self.addresses}
         else:
             current = read_memory_values(memory_or_values, self.addresses)
 
@@ -102,6 +102,20 @@ class MemoryWatchTracker:
 
     def clear(self) -> None:
         self._last_values.clear()
+
+    def add_addresses(self, addresses: Sequence[int]) -> None:
+        """Add new addresses to track.  Already-present addresses are preserved."""
+        for address in addresses:
+            address = int(address)
+            if address not in self.addresses:
+                self.addresses.append(address)
+
+    def remove_addresses(self, addresses: Sequence[int]) -> None:
+        """Remove addresses from tracking."""
+        address_set = {int(a) for a in addresses}
+        self.addresses = [a for a in self.addresses if a not in address_set]
+        self._last_values = {k: v for k, v in self._last_values.items() if k not in address_set}
+        self._flash_until = {k: v for k, v in self._flash_until.items() if k not in address_set}
 
 
 def read_panel_data(memory: Any) -> dict[str, Any]:
@@ -248,6 +262,17 @@ def draw_stats_panel(
         cv2.putText(image, line[: max(1, width // 7)], (x, y + 18 + index * 16), cv2.FONT_HERSHEY_SIMPLEX, 0.31, (200, 240, 255), 1)
 
 
+def _copy_to_clipboard(text: str) -> bool:
+    """Attempt to copy text to the system clipboard.  Returns True on success."""
+    if hasattr(cv2, "setClipboard"):
+        try:
+            cv2.setClipboard(text)
+            return True
+        except Exception:
+            pass
+    return False
+
+
 class MemoryWatchWindow:
     """Persistent, updating memory-watch window with pagination and change feedback.
 
@@ -257,14 +282,19 @@ class MemoryWatchWindow:
     the user page through the full list.  Each address cell mirrors the visual
     feedback of the compact ``draw_memory_watch_panel``: red text for just-changed
     (flash) values, green borders for changed values, and gray borders otherwise.
+    Double-clicking a cell copies ``0xADDR=VALUE`` to the system clipboard.
+    Left-clicking a cell tags it with a deep-purple border; changes to tagged
+    addresses are logged to the terminal.  Use ``set_range`` to narrow or expand
+    the watched range while preserving previously tagged addresses.
     """
 
     PAGE_SIZE = 40
-    COLS = 3
-    CELL_W = 180
-    CELL_H = 22
+    COLS = 4
+    CELL_W = 200
+    CELL_H = 28
     PAD_X = 18
     PAD_Y = 26
+    SELECT_COLOR = (100, 0, 200)
 
     def __init__(self, title: str = "Memory watch details") -> None:
         self.title = title
@@ -272,10 +302,39 @@ class MemoryWatchWindow:
         self._window_created = False
         self._page = 0
         self._button_rects: dict[str, tuple[int, int, int, int]] = {}
+        self._cell_rects: dict[int, tuple[int, int, int, int]] = {}
+        self._last_snapshot: dict[int, dict[str, Any]] | None = None
+        self._selected_addresses: set[int] = set()
+        self._selected_values: dict[int, int] = {}
+        self._range_addresses: set[int] = set()
+        self._start_address: int = 0xCC06
+        self._end_address: int = 0xD362
+        self._watcher = MemoryWatchTracker()
+        self.set_range(self._start_address, self._end_address)
 
     @property
     def visible(self) -> bool:
         return self._visible
+
+    @property
+    def start_address(self) -> int:
+        return self._start_address
+
+    @property
+    def end_address(self) -> int:
+        return self._end_address
+
+    def set_range(self, start_address: int, end_address: int) -> None:
+        """Set the address range to watch, preserving previously tagged addresses."""
+        self._start_address = int(start_address)
+        self._end_address = int(end_address)
+        new_addresses = set(address_range(self._start_address, self._end_address))
+        to_remove = self._range_addresses - new_addresses
+        to_remove -= self._selected_addresses
+        self._watcher.remove_addresses(to_remove)
+        self._watcher.add_addresses(new_addresses)
+        self._range_addresses = new_addresses
+        self._page = 0
 
     def show(self) -> None:
         self._visible = True
@@ -287,6 +346,7 @@ class MemoryWatchWindow:
 
     def hide(self) -> None:
         self._visible = False
+        self._page = 0
 
     def is_open(self) -> bool:
         if not self._window_created:
@@ -300,12 +360,26 @@ class MemoryWatchWindow:
         self._visible = False
         self._window_created = False
         self._button_rects.clear()
+        self._cell_rects.clear()
+        self._last_snapshot = None
+        self._selected_addresses.clear()
+        self._selected_values.clear()
         try:
             cv2.destroyWindow(self.title)
         except cv2.error:
             pass
 
     def _on_mouse(self, event: int, x: int, y: int, flags: int, param: Any) -> None:
+        if event == cv2.EVENT_LBUTTONDBLCLK:
+            for address, rect in self._cell_rects.items():
+                bx, by, bw, bh = rect
+                if bx <= x <= bx + bw and by <= y <= by + bh:
+                    if self._last_snapshot is not None and address in self._last_snapshot:
+                        value = int(self._last_snapshot[address]["value"])
+                        text = f"0x{address:04X}={value:02X}"
+                        if _copy_to_clipboard(text):
+                            print(f"Copied {text} to clipboard", flush=True)
+                    return
         if event != cv2.EVENT_LBUTTONDOWN:
             return
         for name, rect in self._button_rects.items():
@@ -316,16 +390,38 @@ class MemoryWatchWindow:
                 elif name == "next":
                     self._page += 1
                 return
+        for address, rect in self._cell_rects.items():
+            bx, by, bw, bh = rect
+            if bx <= x <= bx + bw and by <= y <= by + bh:
+                if address in self._selected_addresses:
+                    self._selected_addresses.discard(address)
+                    self._selected_values.pop(address, None)
+                else:
+                    self._selected_addresses.add(address)
+                return
 
-    def render(self, watch_snapshot: dict[int, dict[str, Any]]) -> None:
-        """Redraw the watch window with fresh data.  Call every frame while visible."""
+    def render(self, memory: Any) -> None:
+        """Redraw the watch window with fresh data read from *memory*.  Call every frame while visible."""
         if not self._visible:
             return
         if not self.is_open():
             self._visible = False
             self._window_created = False
             self._button_rects.clear()
+            self._cell_rects.clear()
+            self._last_snapshot = None
             return
+
+        watch_snapshot = self._watcher.record(memory)
+        self._last_snapshot = watch_snapshot
+
+        for address in self._selected_addresses:
+            if address in watch_snapshot:
+                current_value = int(watch_snapshot[address]["value"])
+                previous_value = self._selected_values.get(address)
+                if previous_value is not None and previous_value != current_value:
+                    print(f"Select Watched address 0x{address:04X} value was {previous_value} and switch to {current_value}", flush=True)
+                self._selected_values[address] = current_value
 
         addresses = sorted(watch_snapshot)
         if not addresses:
@@ -348,6 +444,7 @@ class MemoryWatchWindow:
         panel = np.full((panel_h, panel_w, 3), 26, dtype=np.uint8)
 
         self._button_rects.clear()
+        self._cell_rects.clear()
 
         for index, address in enumerate(page_addresses):
             row = index // cols
@@ -358,30 +455,34 @@ class MemoryWatchWindow:
             value = int(entry["value"])
             text_color = (0, 0, 255) if entry.get("flash", False) else (255, 255, 255)
             border_color = (0, 255, 0) if entry["changed"] else (90, 90, 90)
-            cv2.putText(panel, f"0x{address:04X}", (cell_x, cell_y), cv2.FONT_HERSHEY_SIMPLEX, 0.41, text_color, 1)
-            cv2.putText(panel, f"={value:02X}", (cell_x + 92, cell_y), cv2.FONT_HERSHEY_SIMPLEX, 0.41, text_color, 1)
+            self._cell_rects[address] = (cell_x, cell_y - 14, cell_w - 12, cell_h)
+            cv2.putText(panel, f"0x{address:04X}", (cell_x, cell_y), cv2.FONT_HERSHEY_SIMPLEX, 0.50, text_color, 1)
+            cv2.putText(panel, f"={value:02X}", (cell_x + 65, cell_y), cv2.FONT_HERSHEY_SIMPLEX, 0.50, text_color, 1)
             if entry["changed"]:
-                cv2.rectangle(panel, (cell_x - 6, cell_y - 12), (cell_x + 150, cell_y + 8), border_color, 1)
+                cv2.rectangle(panel, (cell_x - 6, cell_y - 14), (cell_x + cell_w - 8, cell_y + 10), border_color, 1)
+            if address in self._selected_addresses:
+                cv2.rectangle(panel, (cell_x - 3, cell_y - 12), (cell_x + cell_w - 5, cell_y + 8), self.SELECT_COLOR, 1)
 
-        button_y = max_rows * cell_h + pad_y + 10
+        button_y = max_rows * cell_h + pad_y + 12
         if has_prev:
-            self._button_rects["prev"] = (pad_x, button_y, 80, 22)
-            cv2.rectangle(panel, (pad_x, button_y), (pad_x + 80, button_y + 22), (200, 200, 200), 1)
-            cv2.putText(panel, "Prev", (pad_x + 10, button_y + 15), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 255, 255), 1)
+            self._button_rects["prev"] = (pad_x, button_y, 80, 24)
+            cv2.rectangle(panel, (pad_x, button_y), (pad_x + 80, button_y + 24), (200, 200, 200), 1)
+            cv2.putText(panel, "Prev", (pad_x + 10, button_y + 16), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
         if has_next:
             next_x = pad_x + 90 if has_prev else pad_x
-            self._button_rects["next"] = (next_x, button_y, 80, 22)
-            cv2.rectangle(panel, (next_x, button_y), (next_x + 80, button_y + 22), (200, 200, 200), 1)
-            cv2.putText(panel, "Next", (next_x + 10, button_y + 15), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 255, 255), 1)
+            self._button_rects["next"] = (next_x, button_y, 80, 24)
+            cv2.rectangle(panel, (next_x, button_y), (next_x + 80, button_y + 24), (200, 200, 200), 1)
+            cv2.putText(panel, "Next", (next_x + 10, button_y + 16), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
 
         total = len(addresses)
         page_num = self._page + 1
         total_pages = math.ceil(total / self.PAGE_SIZE)
         info = f"Page {page_num}/{total_pages} ({total} addresses)"
-        cv2.putText(panel, info, (pad_x, button_y + 38), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (180, 180, 180), 1)
+        cv2.putText(panel, info, (pad_x, button_y + 42), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (180, 180, 180), 1)
 
         cv2.imshow(self.title, panel)
         if self.title not in positioned_windows:
+            cv2.resizeWindow(self.title, panel_w, panel_h)
             screen_w, _ = get_screen_size()
             win_x = max(0, screen_w - panel_w - 20)
             cv2.moveWindow(self.title, win_x, 40)
@@ -413,10 +514,10 @@ def draw_memory_watch_panel(
         value = int(entry["value"])
         text_color = (0, 0, 255) if entry.get("flash", False) else (255, 255, 255)
         border_color = (0, 255, 0) if entry["changed"] else (90, 90, 90)
-        cv2.putText(image, f"0x{address:04X}", (x, row_y), cv2.FONT_HERSHEY_SIMPLEX, 0.44, text_color, 1)
-        cv2.putText(image, f": {value:02X}", (x + 96, row_y), cv2.FONT_HERSHEY_SIMPLEX, 0.44, text_color, 1)
+        cv2.putText(image, f"0x{address:04X}", (x, row_y), cv2.FONT_HERSHEY_SIMPLEX, 0.50, text_color, 1)
+        cv2.putText(image, f": {value:02X}", (x + 65, row_y), cv2.FONT_HERSHEY_SIMPLEX, 0.50, text_color, 1)
         if entry["changed"]:
-            cv2.rectangle(image, (x, row_y - 10), (x + min(width, 190), row_y + 10), border_color, 1)
+            cv2.rectangle(image, (x, row_y - 9), (x + min(width, 190), row_y + 8), border_color, 1)
         row_y += 18
 
     if overflowed:

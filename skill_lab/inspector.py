@@ -141,7 +141,7 @@ class ObservationInspector:
         watch_snapshot = self.address_watch.record(mem)
         self._button_rect = draw_memory_watch_panel(panel, 15, 330, 250, watch_snapshot, title="Addr watch")
         if self._watch_window.visible:
-            self._watch_window.render(watch_snapshot)
+            self._watch_window.render(mem)
 
         rx = left_panel_w + 15
         ry = 120
