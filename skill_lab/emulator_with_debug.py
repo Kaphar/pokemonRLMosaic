@@ -44,6 +44,7 @@ from skill_lab.panel_data import (
 )
 from v2.global_map import local_to_global, GLOBAL_MAP_SHAPE
 from skill_lab.party_reader import Gen1PartyReader, PyBoyMemoryReader
+from skill_lab.inspector import ObservationInspector
 
 DEFAULT_ROM = PROJECT_ROOT / "PokemonRed.gb"
 DEFAULT_INIT_STATE = PROJECT_ROOT / "init.state"
@@ -1054,6 +1055,8 @@ def replay_frame_by_frame(
     *,
     verbose: bool = False,
     render: bool = True,
+    start_frame: int = 0,
+    max_frames: int | None = None,
 ) -> int:
     """Replay frame-level input events with exact frame granularity.
 
@@ -1070,9 +1073,12 @@ def replay_frame_by_frame(
         render: When ``False``, use ``tick(1, False)`` to skip SDL event
             processing for deterministic headless replay. The final frame
             still renders (``True``) to match ``run_action_on_emulator``.
+        start_frame: Frame index to begin from (for incremental replay).
+        max_frames: Maximum frames to process in this call. When ``None``,
+            processes all remaining frames up to ``total_frames``.
 
     Returns:
-        The total number of frames replayed.
+        The total number of frames replayed (start_frame + frames processed).
     """
     event_map: dict[int, list[int]] = {}
     for ev in input_events:
@@ -1080,18 +1086,21 @@ def replay_frame_by_frame(
         event_code = int(ev["event"])
         event_map.setdefault(frame, []).append(event_code)
 
-    for frame in range(total_frames):
+    end_frame = total_frames
+    if max_frames is not None:
+        end_frame = min(start_frame + max_frames, total_frames)
+
+    for frame in range(start_frame, end_frame):
         for event_code in event_map.get(frame, []):
             if verbose:
                 print(f"FRAME {frame}: input {event_code}")
             pyboy.send_input(event_code)
-        pyboy.tick(1, render if frame < total_frames - 1 else True)
+        is_last = frame == total_frames - 1
+        pyboy.tick(1, render if not is_last else True)
         if render and frame % 600 == 0 and frame > 0:
             print(f"  ... replayed {frame}/{total_frames} frames")
-        if render:
-            cv2.waitKey(1)
 
-    return total_frames
+    return end_frame
 
 
 def verify_recording(
@@ -1562,6 +1571,54 @@ def _print_dv_summary(pyboy: PyBoy, replay_path: Path | None) -> None:
             print(f"DV summary: MATCH={matched}")
 
 
+_EVENT_FLAGS_START = 0xD7B2
+_EVENT_FLAGS_END = 0xD7D0
+
+
+class _PyBoyObserver:
+    """Lightweight adapter that exposes the subset of the RedGymEnv interface
+    needed by :class:`ObservationInspector` on top of a bare PyBoy instance."""
+
+    def __init__(self, pyboy: PyBoy) -> None:
+        self.pyboy = pyboy
+        self.step_count = 0
+        self.trainer_wins = 0
+        self.wild_wins = 0
+        self.wall_collisions = 0
+        self.recent_actions = np.zeros(1, dtype=np.uint8)
+
+    def read_m(self, addr) -> int:
+        return int(self.pyboy.memory[addr])
+
+    def read_hp_fraction(self) -> float:
+        hp_sum = sum(256 * self.read_m(a) + self.read_m(a + 1) for a in [0xD16C, 0xD198, 0xD1C4, 0xD1F0, 0xD21C, 0xD248])
+        max_hp_sum = sum(256 * self.read_m(a) + self.read_m(a + 1) for a in [0xD18D, 0xD1B9, 0xD1E5, 0xD211, 0xD23D, 0xD269])
+        return hp_sum / max(max_hp_sum, 1)
+
+    def read_event_bits(self) -> list[int]:
+        result = []
+        for i in range(_EVENT_FLAGS_START, _EVENT_FLAGS_END):
+            val = self.read_m(i)
+            for bit in f"{val:08b}":
+                result.append(int(bit))
+        return result
+
+    @property
+    def current_map_id(self) -> int:
+        return self.read_m(0xD35E)
+
+    @property
+    def current_level_sum(self) -> int:
+        return sum(self.read_m(a) for a in [0xD18C, 0xD1B8, 0xD1E4, 0xD210, 0xD23C, 0xD268])
+
+
+class _ObserverEnv:
+    """Tiny shim so ``ObservationInspector.render`` can index ``env.envs[0]``."""
+
+    def __init__(self, pyboy: PyBoy) -> None:
+        self.envs: list[_PyBoyObserver] = [_PyBoyObserver(pyboy)]
+
+
 def run_player(
     rom_path: Path,
     state_path: Path | None,
@@ -1582,14 +1639,23 @@ def run_player(
 
     replay_speed_value = resolve_replay_speed(replay_speed)
     # When using plugin replay, always use headless mode for determinism.
-    # The priming and the actual frame-by-frame replay must use render=False
-    # to produce the correct result. The game screen and inspector panel are
-    # still shown after the replay completes via the deterministic display loop.
+    # The pyBoy window=null means no SDL event processing, which guarantees
+    # identical RNG and DVs to the original training run. However, we still
+    # render frames (render=True) so that the inspector can read the screen
+    # buffer. With window="null", tick(1, True) updates the internal screen
+    # buffer without any SDL window involvement, preserving determinism.
     force_headless = use_plugin_replay and replay_path is not None
     effective_deterministic = deterministic or force_headless
     window_mode = "null" if effective_deterministic else "SDL2"
     sound_enabled = not effective_deterministic
-    render_during_replay = False if effective_deterministic else not deterministic
+    # render_during_replay should be True so the inspector sees updated frames.
+    # With window="null", tick(1, True) does not process SDL events.
+    # render_during_replay is only False in pure deterministic mode WITHOUT
+    # plugin replay (for the verify use case).
+    if effective_deterministic and not use_plugin_replay:
+        render_during_replay = False
+    else:
+        render_during_replay = True
     total_replay_frames = len(actions) * replay_action_freq
 
     os.environ.setdefault("SDL_VIDEO_WINDOW_POS", "0,0")
@@ -1615,18 +1681,12 @@ def run_player(
         initial_state.seek(0)
         pyboy.load_state(initial_state)
         initial_state.seek(0)
-        if watch_window.visible:
-            watch_window._page = 0
         messagebox.showinfo("Reset ROM", "ROM has been reset to initial state.", parent=runtime_menu.root)
 
     runtime_menu = RuntimeMenu(pyboy, close_callback=close_emulator, reset_callback=reset_rom)
-    watch_addresses = [
-        *address_range(MAP_N_ADDRESS, MAP_N_ADDRESS),
-        *address_range(X_POS_ADDRESS, Y_POS_ADDRESS),
-        *address_range(BADGE_COUNT_ADDRESS, BADGE_COUNT_ADDRESS),
-        *address_range(0xCC06, 0xCC2F),
-    ]
-    watcher = MemoryWatchTracker(watch_addresses)
+    observer_env = _ObserverEnv(pyboy)
+    inspector = ObservationInspector()
+
     try:
         if state_path is not None:
             with state_path.open("rb") as state_file:
@@ -1635,45 +1695,47 @@ def run_player(
         pyboy.set_emulation_speed(replay_speed_value)
         if input_controller is not None:
             input_controller.emulation_speed = replay_speed_value
-        map_base = _prepare_map_base(load_map_image(DEFAULT_MAP_IMAGE))
 
         frame_count = 0
         replay_index = 0
         replay_finished = len(actions) == 0
-        show_more_state: dict[str, tuple[int, int, int, int] | None] = {"rect": None}
-        watch_window = MemoryWatchWindow()
-        control_panel = WatchControlPanel(runtime_menu.root, watch_window, reset_callback=reset_rom)
+        dv_summary_printed = False
+        observer_env.envs[0].step_count = 0
 
-        def _on_inspector_click(event: int, x: int, y: int, flags: int, param: Any) -> None:
-            if event != cv2.EVENT_LBUTTONDOWN:
-                return
-            rect = show_more_state["rect"]
-            if rect is None:
-                return
-            bx, by, bw, bh = rect
-            if bx <= x <= bx + bw and by <= y <= by + bh:
-                watch_window.show()
-
-        initial_snapshot = watcher.record(pyboy.memory)
-        initial_button_rect = render_inspector(pyboy, frame_count, replay_index, len(actions), replay_finished, map_base, watch_snapshot=initial_snapshot)
-        show_more_state["rect"] = initial_button_rect
-        cv2.setMouseCallback("Pokemon Red Inspector", _on_inspector_click)
-
-        # If plugin-based replay is requested, do the full frame-by-frame replay
-        # in one shot before entering the interactive loop.
+        # Plugin replay state
+        plugin_input_events: list[dict[str, Any]] = []
         if use_plugin_replay and replay_path is not None:
             print(f"Playing {len(actions)} actions via plugin-style frame-exact replay...")
-            frames_replayed = play_input_with_plugin(pyboy, replay_path, render=render_during_replay)
-            frame_count += frames_replayed
-            replay_index = len(actions)
-            replay_finished = True
-            _print_dv_summary(pyboy, replay_path)
+            state_path_replay = resolve_recording_path(replay_data.get("init_state"))
+            if state_path_replay is not None:
+                with state_path_replay.open("rb") as state_file:
+                    pyboy.load_state(state_file)
+                _prime_emulator(pyboy, state_path_replay, actions, replay_action_freq, replay_noop_action, num_actions=len(actions))
+                with state_path_replay.open("rb") as state_file:
+                    pyboy.load_state(state_file)
+            plugin_input_events = replay_data.get("input_events", [])
+            if not plugin_input_events:
+                plugin_input_events = generate_input_events(actions, replay_action_freq, replay_noop_action)
+
+        inspector.show()
+        inspector.render(observer_env, 0, [])
+        cv2.waitKey(1)
 
         while True:
             runtime_menu.update()
-            # Play back the next queued action at normal speed, one frame at a time, so the
-            # audio/video stay in sync and the player can start controlling as soon as it ends.
-            if replay_index < len(actions):
+
+            if use_plugin_replay and replay_path is not None and frame_count < total_replay_frames:
+                # Replay one action's worth of frames, then render the inspector
+                batch = replay_action_freq
+                start_f = frame_count
+                replayed_to = replay_frame_by_frame(
+                    pyboy, plugin_input_events, total_replay_frames,
+                    verbose=False, render=render_during_replay,
+                    start_frame=start_f, max_frames=batch,
+                )
+                frame_count = replayed_to
+                replay_index = frame_count // replay_action_freq
+            elif replay_index < len(actions):
                 action = actions[replay_index]
                 replay_index += 1
                 print(f"REPLAYING ACTION {action} ({ACTION_NAMES[action]}) with freq={replay_action_freq}")
@@ -1681,7 +1743,10 @@ def run_player(
                 frame_count += replay_action_freq
             else:
                 if effective_deterministic:
-                    pyboy.tick(1, False)
+                    # After replay finishes, keep ticking with render=True so the
+                    # inspector retains a visible screen. With window="null",
+                    # tick(1, True) updates the screen buffer without SDL events.
+                    pyboy.tick(1, True)
                     frame_count += 1
                 else:
                     input_controller.poll()
@@ -1694,18 +1759,19 @@ def run_player(
 
             if replay_index >= len(actions):
                 replay_finished = True
+                if use_plugin_replay and replay_path is not None and frame_count >= total_replay_frames:
+                    if not dv_summary_printed:
+                        _print_dv_summary(pyboy, replay_path)
+                        dv_summary_printed = True
 
-            watch_snapshot = watcher.record(pyboy.memory)
-            button_rect = render_inspector(pyboy, frame_count, replay_index, len(actions), replay_finished, map_base, watch_snapshot=watch_snapshot)
-            show_more_state["rect"] = button_rect
-            if watch_window.visible:
-                watch_window.render(pyboy.memory)
-            runtime_menu.update()
-            control_panel.update()
+            observer_env.envs[0].step_count = frame_count // replay_action_freq
+
+            if not inspector.render(observer_env, 0, []):
+                if not effective_deterministic:
+                    input_controller.request_quit()
+                break
 
             if effective_deterministic:
-                screen = np.array(pyboy.screen.ndarray[:, :, ::-1])
-                cv2.imshow("Pokemon Red (Deterministic)", screen)
                 if replay_finished:
                     key = cv2.waitKey(1)
                     if key in (ord("q"), 27):
@@ -1716,7 +1782,7 @@ def run_player(
                     time.sleep(0.001)
             else:
                 try:
-                    inspector_visible = cv2.getWindowProperty("Pokemon Red Inspector", cv2.WND_PROP_VISIBLE) >= 1
+                    inspector_visible = cv2.getWindowProperty(inspector.title, cv2.WND_PROP_VISIBLE) >= 1
                 except cv2.error:
                     inspector_visible = False
                 if not inspector_visible:
@@ -1728,21 +1794,20 @@ def run_player(
                     input_controller.request_quit()
                     break
                 if key == ord("m"):
-                    if watch_window.visible:
-                        watch_window.hide()
+                    if inspector._watch_window.visible:
+                        inspector._watch_window.hide()
                     else:
-                        watch_window.show()
+                        inspector._watch_window.show()
                 if key == ord("r"):
-                    _set_watch_range(runtime_menu.root, watch_window, control_panel)
+                    _set_watch_range(runtime_menu.root, inspector._watch_window)
                 time.sleep(0.001)
     except OSError as error:
         print(f"PyBoy stopped while closing the SDL window: {error}")
     finally:
         runtime_menu.close_menu()
-        control_panel._on_close()
+        inspector.close()
         if input_controller is not None:
             input_controller.close()
-        watch_window.close()
         try:
             pyboy.stop()
         except OSError as error:
