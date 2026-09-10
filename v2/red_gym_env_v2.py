@@ -70,6 +70,7 @@ class RedGymEnv(Env):
             WindowEvent.PRESS_BUTTON_A,
             WindowEvent.PRESS_BUTTON_B,
             WindowEvent.PRESS_BUTTON_START,
+            WindowEvent.PRESS_BUTTON_SELECT,
         ]
 
         self.release_actions = [
@@ -79,7 +80,8 @@ class RedGymEnv(Env):
             WindowEvent.RELEASE_ARROW_UP,
             WindowEvent.RELEASE_BUTTON_A,
             WindowEvent.RELEASE_BUTTON_B,
-            WindowEvent.RELEASE_BUTTON_START
+            WindowEvent.RELEASE_BUTTON_START,
+            WindowEvent.RELEASE_BUTTON_SELECT,
         ]
 
         if self.noop_button:
@@ -115,7 +117,7 @@ class RedGymEnv(Env):
 
         head = "null" if config["headless"] else "SDL2"
 
-        #log_level("ERROR")
+        self.rom_path = config["gb_path"]
         self.pyboy = PyBoy(
             config["gb_path"],
             #debugging=False,
@@ -127,6 +129,17 @@ class RedGymEnv(Env):
 
         if not config["headless"]:
             self.pyboy.set_emulation_speed(6)
+
+        # Optional frame-exact input recording for deterministic replay
+        if config.get("record_input_with_plugin", False):
+            from skill_lab.emulator_with_debug import record_input_with_plugin
+            noop_idx = self.valid_actions.index(WindowEvent.PASS) if self.noop_button else -1
+            self.pyboy = record_input_with_plugin(
+                self.pyboy,
+                Path(config.get("record_input_path", "input_events.json")),
+                action_freq=config["action_freq"],
+                noop_action=noop_idx,
+            )
 
     def reset(self, seed=None, options={}):
         self.seed = seed
@@ -654,3 +667,20 @@ class RedGymEnv(Env):
     @property
     def current_level_sum(self):
         return sum([self.read_m(a) for a in [0xD18C, 0xD1B8, 0xD1E4, 0xD210, 0xD23C, 0xD268]])
+
+    def save_recording(self, actions: list[int], output_path: Path) -> Path:
+        """Write the frame-exact input recording accumulated during this episode.
+
+        Only available when the env was created with ``record_input_with_plugin=True``.
+        """
+        from skill_lab.emulator_with_debug import finalize_input_recording
+        finalize_input_recording(
+            self.pyboy,
+            output_path,
+            actions,
+            action_freq=self.act_freq,
+            noop_action=self.noop_button_index,
+            rom_path=Path(self.rom_path),
+            init_state_path=Path(self.init_state) if self.init_state else None,
+        )
+        return output_path

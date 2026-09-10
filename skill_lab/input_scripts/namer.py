@@ -19,13 +19,16 @@ from typing import Any
 from pyboy.utils import WindowEvent
 
 
+# Cursor addres column : CC25
+
+
 # Pokemon Red naming screen alphabet layout (uppercase)
 # Cursor starts at A (row=0, col=0)
 # Navigate with UP/DOWN/LEFT/RIGHT, confirm with A
 ALPHABET_GRID = [
-    list("ABCDEFGHIJ"),
-    list("KLMNOPQRST"),
-    list("UVWXYZ():"),
+    list("ABCDEFGHI"),
+    list("JKLMNOPQRS"),
+    list("TUVWXYZ():"),
     list(";[]' "),
     list("-.!?!"),  # Row with special chars
     list("END"),     # Special row - END confirms the name

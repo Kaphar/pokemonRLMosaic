@@ -147,6 +147,7 @@ class SkillLabWrapper(gymnasium.Wrapper):
                 "noop_action": self.noop_action_index,
                 "total_actions": len(self._episode_actions),
                 "actions": self._episode_actions,
+                "source": "input_recorder",
             }, inputs_file, indent=2)
 
         print(
@@ -374,3 +375,6 @@ class SkillLabWrapper(gymnasium.Wrapper):
     @property
     def pyboy(self):
         return self.env.unwrapped.pyboy
+
+    def save_recording(self, actions, output_path):
+        return self.env.unwrapped.save_recording(actions, output_path)

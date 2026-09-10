@@ -39,6 +39,7 @@ class Launcher:
         self.hud_var = tk.BooleanVar(value=True)
         self.speed_var = tk.IntVar(value=2)  # NEW: emulator speed
         self.continuous_var = tk.BooleanVar(value=False)
+        self.record_input_var = tk.BooleanVar(value=False)
         self._build_ui()
 
     def _find_checkpoints(self) -> list[Path]:
@@ -165,17 +166,22 @@ class Launcher:
             main_frame, text="Use HUD overlay", variable=self.hud_var
         ).grid(row=11, column=0, columnspan=2, sticky="w", pady=5)
 
-        # Row 12: Stage description
+        # Row 12: Record frame-exact inputs
+        ttk.Checkbutton(
+            main_frame, text="Record frame-exact inputs", variable=self.record_input_var
+        ).grid(row=12, column=0, columnspan=2, sticky="w", pady=5)
+
+        # Row 13: Stage description
         self.stage_desc_var = tk.StringVar(value="")
         ttk.Label(
             main_frame, textvariable=self.stage_desc_var,
             font=("", 8), foreground="gray"
-        ).grid(row=12, column=0, columnspan=2, sticky="w")
+        ).grid(row=13, column=0, columnspan=2, sticky="w")
 
-        # Row 13: Launch
+        # Row 14: Launch
         ttk.Button(
             main_frame, text="Launch", command=self._launch
-        ).grid(row=13, column=0, columnspan=2, pady=10)
+        ).grid(row=14, column=0, columnspan=2, pady=10)
 
         # Initialize
         self._on_mode_change()
@@ -253,7 +259,8 @@ class Launcher:
             training_mode=training_mode,
             emulator_speed=self.speed_var.get(),
             milestones_path=Path("skill_lab/milestones.json"),
-            continuous=self.continuous_var.get(), 
+            continuous=self.continuous_var.get(),
+            record_input_with_plugin=self.record_input_var.get(),
         )
 
         if mode == "train" and self.checkpoints:

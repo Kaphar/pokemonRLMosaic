@@ -147,7 +147,7 @@ class ObservationInspector:
         ry = 120
         cv2.putText(panel, "Recent actions", (rx, ry), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
         ry += 16
-        action_names = ["Down", "Left", "Right", "Up", "A", "B", "Start"]
+        action_names = ["Down", "Left", "Right", "Up", "A", "B", "Start", "Select"]
         for action in recent_actions:
             name = action_names[action] if action < len(action_names) else f"#{action}"
             cv2.putText(panel, f"  {name}", (rx, ry), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1)

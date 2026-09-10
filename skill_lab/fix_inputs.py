@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 
 
-DEFAULT_NOOP_ACTION = 7
+DEFAULT_NOOP_ACTION = 8
 
 
 def fix_recording(source: Path, destination: Path, noop_action: int = DEFAULT_NOOP_ACTION) -> int:

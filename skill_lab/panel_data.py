@@ -14,6 +14,7 @@ import numpy as np
 from skill_lab.bag_reader import Gen1PlayerReader
 from skill_lab.party_reader import Gen1PartyReader, PyBoyMemoryReader
 
+# these should be imported from an address list.
 MAP_N_ADDRESS = 0xD35E
 X_POS_ADDRESS = 0xD362
 Y_POS_ADDRESS = 0xD361
@@ -273,6 +274,15 @@ def _copy_to_clipboard(text: str) -> bool:
     return False
 
 
+VALUE_OFFSET = 50
+"""Horizontal pixel gap between address and value text in watch cells."""
+
+
+def format_address_value(address: int, value: int) -> str:
+    """Format an address/value pair for display or clipboard (no separator character)."""
+    return f"0x{address:04X} {value:02X}"
+
+
 class MemoryWatchWindow:
     """Persistent, updating memory-watch window with pagination and change feedback.
 
@@ -282,17 +292,20 @@ class MemoryWatchWindow:
     the user page through the full list.  Each address cell mirrors the visual
     feedback of the compact ``draw_memory_watch_panel``: red text for just-changed
     (flash) values, green borders for changed values, and gray borders otherwise.
-    Double-clicking a cell copies ``0xADDR=VALUE`` to the system clipboard.
+    Double-clicking a cell copies ``0xADDR VALUE`` to the system clipboard.
     Left-clicking a cell tags it with a deep-purple border; changes to tagged
     addresses are logged to the terminal.  Use ``set_range`` to narrow or expand
     the watched range while preserving previously tagged addresses.
     """
 
-    PAGE_SIZE = 40
-    COLS = 4
-    CELL_W = 200
+    PAGE_SIZE = 128
+    COLS = 8
+    ROWS = 16
+    PANEL_W = 900
+    PANEL_H = 600
+    CELL_W = 96
     CELL_H = 28
-    PAD_X = 18
+    PAD_X = 16
     PAD_Y = 26
     SELECT_COLOR = (100, 0, 200)
 
@@ -376,7 +389,7 @@ class MemoryWatchWindow:
                 if bx <= x <= bx + bw and by <= y <= by + bh:
                     if self._last_snapshot is not None and address in self._last_snapshot:
                         value = int(self._last_snapshot[address]["value"])
-                        text = f"0x{address:04X}={value:02X}"
+                        text = format_address_value(address, value)
                         if _copy_to_clipboard(text):
                             print(f"Copied {text} to clipboard", flush=True)
                     return
@@ -428,6 +441,7 @@ class MemoryWatchWindow:
             return
 
         cols = self.COLS
+        rows = self.ROWS
         cell_w = self.CELL_W
         cell_h = self.CELL_H
         pad_x = self.PAD_X
@@ -438,17 +452,16 @@ class MemoryWatchWindow:
         has_next = start + self.PAGE_SIZE < len(addresses)
         has_prev = self._page > 0
 
-        max_rows = math.ceil(self.PAGE_SIZE / cols)
-        panel_h = max_rows * cell_h + pad_y + 50
-        panel_w = cols * cell_w + pad_x * 2
+        panel_h = self.PANEL_H
+        panel_w = self.PANEL_W
         panel = np.full((panel_h, panel_w, 3), 26, dtype=np.uint8)
 
         self._button_rects.clear()
         self._cell_rects.clear()
 
         for index, address in enumerate(page_addresses):
-            row = index // cols
-            col = index % cols
+            col = index // rows
+            row = index % rows
             cell_x = pad_x + col * cell_w
             cell_y = pad_y + row * cell_h
             entry = watch_snapshot[address]
@@ -457,13 +470,13 @@ class MemoryWatchWindow:
             border_color = (0, 255, 0) if entry["changed"] else (90, 90, 90)
             self._cell_rects[address] = (cell_x, cell_y - 14, cell_w - 12, cell_h)
             cv2.putText(panel, f"0x{address:04X}", (cell_x, cell_y), cv2.FONT_HERSHEY_SIMPLEX, 0.50, text_color, 1)
-            cv2.putText(panel, f"={value:02X}", (cell_x + 65, cell_y), cv2.FONT_HERSHEY_SIMPLEX, 0.50, text_color, 1)
+            cv2.putText(panel, f"{value:02X}", (cell_x + VALUE_OFFSET, cell_y), cv2.FONT_HERSHEY_SIMPLEX, 0.50, text_color, 1)
             if entry["changed"]:
                 cv2.rectangle(panel, (cell_x - 6, cell_y - 14), (cell_x + cell_w - 8, cell_y + 10), border_color, 1)
             if address in self._selected_addresses:
                 cv2.rectangle(panel, (cell_x - 3, cell_y - 12), (cell_x + cell_w - 5, cell_y + 8), self.SELECT_COLOR, 1)
 
-        button_y = max_rows * cell_h + pad_y + 12
+        button_y = rows * cell_h + pad_y + 12
         if has_prev:
             self._button_rects["prev"] = (pad_x, button_y, 80, 24)
             cv2.rectangle(panel, (pad_x, button_y), (pad_x + 80, button_y + 24), (200, 200, 200), 1)
@@ -515,7 +528,7 @@ def draw_memory_watch_panel(
         text_color = (0, 0, 255) if entry.get("flash", False) else (255, 255, 255)
         border_color = (0, 255, 0) if entry["changed"] else (90, 90, 90)
         cv2.putText(image, f"0x{address:04X}", (x, row_y), cv2.FONT_HERSHEY_SIMPLEX, 0.50, text_color, 1)
-        cv2.putText(image, f": {value:02X}", (x + 65, row_y), cv2.FONT_HERSHEY_SIMPLEX, 0.50, text_color, 1)
+        cv2.putText(image, f"{value:02X}", (x + VALUE_OFFSET, row_y), cv2.FONT_HERSHEY_SIMPLEX, 0.50, text_color, 1)
         if entry["changed"]:
             cv2.rectangle(image, (x, row_y - 9), (x + min(width, 190), row_y + 8), border_color, 1)
         row_y += 18

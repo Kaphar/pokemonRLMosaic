@@ -97,6 +97,9 @@ def make_config(profile: Profile, session_path: Path, args: argparse.Namespace) 
         "milestone_reward": stage.milestone_reward,
         "milestones_path": str(PROJECT_ROOT / "skill_lab" / "milestones.json"),
         "names_path": str(PROJECT_ROOT / "skill_lab" / "names.json"),
+        # Plugin-based frame-exact input recording
+        "record_input_with_plugin": getattr(args, "record_input_with_plugin", False),
+        "record_input_path": str(Path(session_path) / "plugin_input_events.json"),
     }
 
 def load_policy(path: str | None, env: DummyVecEnv, dry_run: bool) -> PPO | None:
@@ -150,6 +153,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-hud", action="store_true", help="Disable HUD overlay on emulator tiles")
 
     parser.add_argument("--continuous", action="store_true", help="Run indefinitely without batch limits")
+
+    parser.add_argument("--record-input-with-plugin", action="store_true",
+                        help="Record frame-exact inputs via plugin-style hook for deterministic replay")
     
     parser.add_argument("--disable-start-select", action="store_true", help="Mask Start/Select buttons in early game")
     
@@ -473,6 +479,27 @@ def main(args: argparse.Namespace | None = None) -> None:
     except KeyboardInterrupt: pass
     finally:
         stats_tracker.save_history()  # Save stats for next run
+        # Save plugin-based frame-exact input recording
+        if getattr(args, "record_input_with_plugin", False):
+            from skill_lab.emulator_with_debug import _plugin_recording_registry
+            from skill_lab.emulator_with_debug import ACTION_EVENTS
+            _event_to_action: dict[int, int] = {}
+            for _idx in range(8):
+                _press, _release = ACTION_EVENTS[_idx]
+                _event_to_action[int(_press)] = _idx
+                _event_to_action[int(_release)] = _idx
+            save_paths = []
+            for env_obj in env.envs:
+                pyboy = env_obj.pyboy
+                pid = id(pyboy)
+                entry = _plugin_recording_registry.get(pid)
+                if entry and entry["events"]:
+                    actions = [_event_to_action.get(ev["event"], entry["noop_action"]) for ev in entry["events"]]
+                    output_path = Path(config["record_input_path"]).parent / f"plugin_inputs_env{env_obj.env_index}.json"
+                    env_obj.save_recording(actions=actions, output_path=output_path)
+                    save_paths.append(output_path)
+            if save_paths:
+                print(f"[Plugin Recorder] Saved input recordings to: {save_paths}")
         env.close()
         inspector.close()
         map_window.close()
