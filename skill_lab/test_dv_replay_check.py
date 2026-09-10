@@ -210,9 +210,17 @@ def check_file(
     # --- Replay ---
     pyboy = PyBoy(str(rom_path), window="null", sound=False)
     try:
-        _prime_emulator(pyboy, state_path, actions, action_freq, noop_action, num_actions=len(actions))
+        # PyBoy's load_state does not fully reset internal buffers on a
+        # fresh instance. Always prime by running an old-method replay
+        # first, then reloading state, so that all replay methods produce
+        # deterministic, frame-accurate results.
         with state_path.open("rb") as sf:
             pyboy.load_state(sf)
+        for pa in actions:
+            replay_action(pyboy, pa, action_freq, verbose=False, render=False, noop_action=noop_action)
+        with state_path.open("rb") as sf:
+            pyboy.load_state(sf)
+
         for method in methods:
             if method != methods[0]:
                 with state_path.open("rb") as sf:

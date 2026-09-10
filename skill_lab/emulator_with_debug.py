@@ -43,6 +43,7 @@ from skill_lab.panel_data import (
     read_panel_data,
 )
 from v2.global_map import local_to_global, GLOBAL_MAP_SHAPE
+from skill_lab.party_reader import Gen1PartyReader, PyBoyMemoryReader
 
 DEFAULT_ROM = PROJECT_ROOT / "PokemonRed.gb"
 DEFAULT_INIT_STATE = PROJECT_ROOT / "init.state"
@@ -939,13 +940,19 @@ def play_input_with_plugin(
     Returns:
         Total number of frames replayed.
     """
-    _, replay_data = load_replay(recording_path)
+    
+    actions, replay_data = load_replay(recording_path)
     input_events = replay_data.get("input_events", [])
     if not input_events:
         raise ValueError(f"Recording {recording_path} has no input_events")
 
     action_freq = int(replay_data.get("action_freq", ACTION_FREQ))
+    noop_action = int(replay_data.get("noop_action", DEFAULT_NOOP_ACTION))
     total_frames = len(replay_data.get("actions", [])) * action_freq
+
+    state_path = resolve_recording_path(replay_data.get("init_state"))
+    if state_path is not None:
+        _prime_emulator(pyboy, state_path, actions, action_freq, noop_action, num_actions=len(actions))
 
     return replay_frame_by_frame(pyboy, input_events, total_frames, render=render)
 
@@ -1126,7 +1133,8 @@ def verify_recording(
             rom_path = DEFAULT_ROM
 
     pyboy = PyBoy(str(rom_path), window="null", sound=False)
-    _prime_emulator(pyboy, state_path, actions, action_freq, noop_action)
+    if state_path is not None:
+        _prime_emulator(pyboy, state_path, actions, action_freq, noop_action, num_actions=len(actions))
     try:
         with state_path.open("rb") as state_file:
             pyboy.load_state(state_file)
@@ -1205,7 +1213,8 @@ def verify_recording_frame_by_frame(
 
     pyboy = PyBoy(str(rom_path), window="null", sound=False)
     pyboy.set_emulation_speed(1.0)
-    _prime_emulator(pyboy, state_path, actions, action_freq, noop_action)
+    if state_path is not None:
+        _prime_emulator(pyboy, state_path, actions, action_freq, noop_action, num_actions=len(actions))
     try:
         with state_path.open("rb") as state_file:
             pyboy.load_state(state_file)
@@ -1509,6 +1518,50 @@ def _set_watch_range(
         watch_window.show()
 
 
+_INPUT_JSON_RE = re.compile(
+    r"^(?P<pokemon>.+?)\s+-\s+(?P<dvs>PERFECT|\d+(?:-\d+){3})\.json$",
+    re.IGNORECASE,
+)
+
+_PARTY_ADDRESSES = {
+    "partyAddr": Gen1PartyReader.PARTY_ADDRESS,
+    "partySlotsCounterAddr": Gen1PartyReader.PARTY_SIZE_ADDRESS,
+    "partySpeciesAddr": Gen1PartyReader.PARTY_SPECIES_ADDRESS,
+    "partyNicknamesAddr": Gen1PartyReader.PARTY_NICKNAMES_ADDRESS,
+}
+
+
+def _print_dv_summary(pyboy: PyBoy, replay_path: Path | None) -> None:
+    """Read the first Pokemon's DVs from memory and print a comparison against the filename."""
+    reader = Gen1PartyReader(PyBoyMemoryReader(pyboy.memory))
+    party = reader.read_party(_PARTY_ADDRESSES)
+    if not party:
+        print("DV summary: no Pokemon in party")
+        return
+    pk = party[0]
+    actual = (
+        int(pk.get("ivAttack", 0)),
+        int(pk.get("ivDefense", 0)),
+        int(pk.get("ivSpeed", 0)),
+        int(pk.get("ivSpAttack", 0)),
+    )
+    pokemon_name = pk.get("name", "?")
+    print(f"DV summary (replay): Pokemon={pokemon_name} DVs(atk,def,spd,spc)={actual}")
+
+    if replay_path is not None:
+        m = _INPUT_JSON_RE.match(replay_path.name)
+        if m is not None:
+            expected_pokemon = m.group("pokemon").strip()
+            dv_text = m.group("dvs").upper()
+            if dv_text == "PERFECT":
+                expected = (15, 15, 15, 15)
+            else:
+                expected = tuple(int(v) for v in dv_text.split("-"))
+            matched = actual[:4] == expected
+            print(f"DV summary (expected): Pokemon={expected_pokemon} DVs={expected}")
+            print(f"DV summary: MATCH={matched}")
+
+
 def run_player(
     rom_path: Path,
     state_path: Path | None,
@@ -1528,18 +1581,23 @@ def run_player(
         state_path = resolve_recording_path(replay_data.get("init_state"))
 
     replay_speed_value = resolve_replay_speed(replay_speed)
-    window_mode = "null" if deterministic else "SDL2"
-    sound_enabled = not deterministic
-    render_during_replay = not deterministic
+    # When using plugin replay, always use headless mode for determinism.
+    # The priming and the actual frame-by-frame replay must use render=False
+    # to produce the correct result. The game screen and inspector panel are
+    # still shown after the replay completes via the deterministic display loop.
+    force_headless = use_plugin_replay and replay_path is not None
+    effective_deterministic = deterministic or force_headless
+    window_mode = "null" if effective_deterministic else "SDL2"
+    sound_enabled = not effective_deterministic
+    render_during_replay = False if effective_deterministic else not deterministic
     total_replay_frames = len(actions) * replay_action_freq
 
     os.environ.setdefault("SDL_VIDEO_WINDOW_POS", "0,0")
     pyboy = PyBoy(str(rom_path), window=window_mode, sound=sound_enabled)
     pyboy.set_emulation_speed(replay_speed_value)
-    if not deterministic:
+    input_controller = None
+    if not effective_deterministic:
         input_controller = InputController(pyboy, controls or load_controls())
-    else:
-        input_controller = None
 
     def close_emulator() -> None:
         if input_controller is not None:
@@ -1609,6 +1667,7 @@ def run_player(
             frame_count += frames_replayed
             replay_index = len(actions)
             replay_finished = True
+            _print_dv_summary(pyboy, replay_path)
 
         while True:
             runtime_menu.update()
@@ -1621,7 +1680,7 @@ def run_player(
                 replay_action(pyboy, action, replay_action_freq, render=render_during_replay, noop_action=replay_noop_action)
                 frame_count += replay_action_freq
             else:
-                if deterministic:
+                if effective_deterministic:
                     pyboy.tick(1, False)
                     frame_count += 1
                 else:
@@ -1644,15 +1703,17 @@ def run_player(
             runtime_menu.update()
             control_panel.update()
 
-            if deterministic:
+            if effective_deterministic:
                 screen = np.array(pyboy.screen.ndarray[:, :, ::-1])
                 cv2.imshow("Pokemon Red (Deterministic)", screen)
                 if replay_finished:
                     key = cv2.waitKey(1)
                     if key in (ord("q"), 27):
                         break
+                    time.sleep(0.001)
                 else:
                     cv2.waitKey(1)
+                    time.sleep(0.001)
             else:
                 try:
                     inspector_visible = cv2.getWindowProperty("Pokemon Red Inspector", cv2.WND_PROP_VISIBLE) >= 1
