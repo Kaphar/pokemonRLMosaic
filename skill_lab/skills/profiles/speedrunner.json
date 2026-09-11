@@ -1,0 +1,10 @@
+{
+  "name": "speedrunner",
+  "description": "Focus on fast progression, minimal detours",
+  "priority": "progress",
+  "capture_targets": [{"species_id": 32, "name": "Nidoran♂"}],
+  "milestone_multiplier": 2.0,
+  "water_grass_multiplier": 1.5,
+  "avoid_wild_encounters": false,
+  "aggressive_training": true
+}

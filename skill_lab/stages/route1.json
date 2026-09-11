@@ -1,0 +1,17 @@
+{
+  "name": "route1",
+  "description": "Navigate Route 1, battle trainers, catch Pokemon",
+  "max_steps": 10000,
+  "disable_start": true,
+  "disable_select": true,
+  "disable_B": true,
+  "milestone_reward": 5.0,
+  "exploration_reward": 0.2,
+  "combat_reward": 1.0,
+  "capture_reward": 3.0,
+  "target_milestones": [
+    "0xD747-0",
+    "0xD747-1",
+    "0xD747-2"
+  ]
+}

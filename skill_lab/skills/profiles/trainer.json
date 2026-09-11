@@ -1,0 +1,15 @@
+{
+  "name": "dresser_trainer",
+  "description": "Capture specific Pokemon, build a team",
+  "priority": "capture",
+  "capture_targets": [
+    {"species_id": 32, "name": "Nidoran♂"},
+    {"species_id": 16, "name": "Pidgey"},
+    {"species_id": 25, "name": "Pikachu"}
+  ],
+  "milestone_multiplier": 1.0,
+  "capture_multiplier": 3.0,
+  "team_completion_bonus": 5.0,
+  "avoid_wild_encounters": false,
+  "aggressive_training": false
+}
