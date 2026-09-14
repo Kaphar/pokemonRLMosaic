@@ -44,12 +44,18 @@ def make_env(rank: int, env_conf: dict[str, Any], env_setup_config: dict[str, An
             cfg["env_name"] = env_setup_config.get("env_name", f"Env{rank:03d}")
             cfg["target_starter"] = env_setup_config.get("target_starter")
             cfg["env_dir"] = env_setup_config.get("env_dir")
+            # Pass profile settings for catch/train directives
+            cfg["catch_directive"] = env_setup_config.get("catch_directive", [])
+            cfg["train_directive"] = env_setup_config.get("train_directive", [])
+            cfg["save_on_catch"] = env_setup_config.get("save_on_catch", False)
+            cfg["reset_on_catch"] = env_setup_config.get("reset_on_catch", True)
 
         base_env = RedGymEnv(cfg)
 
         wrapped_env = SkillLabWrapper(base_env, config={
             "disable_start": cfg.get("disable_start", True),
             "disable_select": cfg.get("disable_select", True),
+            "disable_B": cfg.get("disable_B", False),
             "milestone_reward": cfg.get("milestone_reward", medium_reward),
             "milestones_path": cfg.get("milestones_path", None),
             "speed_bonus": cfg.get("speed_bonus", True),
@@ -63,6 +69,10 @@ def make_env(rank: int, env_conf: dict[str, Any], env_setup_config: dict[str, An
             "action_freq": cfg.get("action_freq", ACTION_FREQ),
             "save_objective_states": cfg.get("save_objective_states", True),
             "perfect_sound": cfg.get("perfect_sound", True),
+            "catch_directive": cfg.get("catch_directive", []),
+            "train_directive": cfg.get("train_directive", []),
+            "save_on_catch": cfg.get("save_on_catch", False),
+            "reset_on_catch": cfg.get("reset_on_catch", True),
         })
 
         return wrapped_env

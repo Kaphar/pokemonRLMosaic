@@ -34,7 +34,7 @@ from skill_lab.mosaic import Mosaic
 from skill_lab.stats_window import StatsWindow
 
 
-from skill_lab.env_setup import setup_envs
+from skill_lab.env_setup import setup_envs, ensure_env_exists, get_env_config, load_stage_config
 
 from skill_lab.curriculum import get_stage #, stage_to_config
 from skill_lab.recorder import InputRecorder
@@ -51,9 +51,9 @@ class Profile:
 
 
 def make_config(profile: Profile, session_path: Path, args: argparse.Namespace) -> dict[str, Any]:
-    from skill_lab.curriculum import get_stage
+    from skill_lab.env_setup import load_stage_config
 
-    stage = get_stage(args.stage)
+    stage_config = load_stage_config(args.stage)
 
     reward_scale = args.reward_scale
     explore_weight = args.explore_weight
@@ -67,11 +67,19 @@ def make_config(profile: Profile, session_path: Path, args: argparse.Namespace) 
     if training_mode == "fullrun":
         max_steps = 999999  # Effectively no limit
     else:
-        max_steps = args.max_steps or stage.max_steps
+        max_steps = args.max_steps or stage_config.get("max_steps", 7200)
 
-    init_state = Path(stage.init_state)
+    init_state = Path(stage_config.get("init_state", "v2/state/init.state"))
     if args.init_state and args.init_state.exists():
         init_state = args.init_state
+
+    # Get disable_B from action_masks if present, otherwise from disable_B field
+    disable_B = stage_config.get("disable_B", False)
+    action_masks = stage_config.get("action_masks", {})
+    if "B" in action_masks:
+        # action_masks.B = false means don't mask (allow B button)
+        # action_masks.B = true would mean mask it
+        disable_B = action_masks.get("B", disable_B)
 
     return {
         "headless": True,
@@ -91,10 +99,11 @@ def make_config(profile: Profile, session_path: Path, args: argparse.Namespace) 
         "noop_button": True,
         "speed": getattr(args, "emulator_speed", 2),
         "training_mode": training_mode,
-        # Stage config
-        "disable_start": stage.disable_start,
-        "disable_select": stage.disable_select,
-        "milestone_reward": stage.milestone_reward,
+        # Stage config from JSON
+        "disable_start": stage_config.get("disable_start", True),
+        "disable_select": stage_config.get("disable_select", True),
+        "disable_B": disable_B,
+        "milestone_reward": stage_config.get("milestone_reward", medium_reward),
         "milestones_path": str(PROJECT_ROOT / "skill_lab" / "milestones.json"),
         "names_path": str(PROJECT_ROOT / "skill_lab" / "names.json"),
         # Plugin-based frame-exact input recording
@@ -233,11 +242,17 @@ def show_report(stats: BatchStats, profile_name: str) -> None:
 def main(args: argparse.Namespace | None = None) -> None:
     if args is None: args = parse_args()
 
-    # Get stage configuration
-    stage = get_stage(args.stage)
-    print(f"Stage: {stage.name} - {stage.description}")
-    print(f"  Start masked: {stage.disable_start}")
-    print(f"  Select masked: {stage.disable_select}")
+    # Get stage configuration from JSON
+    stage_config = load_stage_config(args.stage)
+    print(f"Stage: {stage_config.get('name', args.stage)} - {stage_config.get('description', '')}")
+    print(f"  Start masked: {stage_config.get('disable_start', True)}")
+    print(f"  Select masked: {stage_config.get('disable_select', True)}")
+    print(f"  B button masked: {stage_config.get('disable_B', False)}")
+    
+    # Extract action_masks from stage config
+    action_masks = stage_config.get("action_masks", {})
+    if "B" in action_masks and not action_masks["B"]:
+        print(f"  Note: B button masking controlled by action_masks.B = {action_masks['B']}")
 
     if not args.rom.exists(): raise FileNotFoundError(f"ROM not found: {args.rom}")
     if not args.init_state.exists(): raise FileNotFoundError(f"Initial state not found: {args.init_state}")
@@ -250,12 +265,23 @@ def main(args: argparse.Namespace | None = None) -> None:
     config["session_path"].mkdir(exist_ok=True)
 
     # Set up environment directives with ROM and init_state paths
+    # setup_envs creates the initial folder structure if needed
     env_configs = setup_envs(
         num_envs=profile.count,
         stage=args.stage,
         rom_path=args.rom,
         init_state=args.init_state,
     )
+
+    # Ensure each environment exists (lazy creation on launch)
+    # This allows envs to be created on-demand if we increase num_envs later
+    for i in range(profile.count):
+        ensure_env_exists(
+            env_index=i,
+            rom_source_path=args.rom,
+            default_state_path=str(args.init_state),
+            launcher_stage=args.stage,
+        )
 
     # Print directive assignments (confirmation in logs)
     for cfg in env_configs:
