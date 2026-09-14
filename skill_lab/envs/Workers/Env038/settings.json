@@ -1,0 +1,73 @@
+{
+  "env_index": 37,
+  "env_name": "Env038",
+  "env_dir": "/workspace/skill_lab/envs/Workers/Env038",
+  "stage": "starter",
+  "stage_config": {
+    "name": "starter",
+    "description": "Get a starter Pokemon. Short episodes for fast learning.",
+    "max_steps": 1200,
+    "disable_start": true,
+    "disable_select": true,
+    "milestone_reward": 5.0,
+    "exploration_reward": 0.1,
+    "combat_reward": 0.0,
+    "init_state": "init.state",
+    "target_milestones": [
+      "0xD747-0",
+      "0xD747-1",
+      "0xD747-2"
+    ],
+    "directives": {
+      "0": {
+        "target_starter": "Charmander",
+        "description": "Navigate to pick Charmander (right ball)"
+      },
+      "1": {
+        "target_starter": "Squirtle",
+        "description": "Navigate to pick Squirtle (middle ball)"
+      },
+      "2": {
+        "target_starter": "Bulbasaur",
+        "description": "Navigate to pick Bulbasaur (left ball)"
+      },
+      "default": {
+        "target_starter": "Charmander",
+        "description": "Default to Charmander"
+      }
+    }
+  },
+  "rom_path": "/workspace/skill_lab/envs/Workers/Env038/PokemonRed.gb",
+  "init_state": "init.state",
+  "profile": {
+    "name": "trainer",
+    "reward_scale": 2.0,
+    "explore_weight": 0.5,
+    "catch_directive": [
+      "Nidoran\u2642",
+      "Pidgey",
+      "Rattata",
+      "Spearow",
+      "Pikachu"
+    ],
+    "train_directive": [
+      "Nidoran\u2642",
+      "Pikachu"
+    ],
+    "save_on_catch": true,
+    "reset_on_catch": false
+  },
+  "catch_directive": [
+    "Nidoran\u2642",
+    "Pidgey",
+    "Rattata",
+    "Spearow",
+    "Pikachu"
+  ],
+  "train_directive": [
+    "Nidoran\u2642",
+    "Pikachu"
+  ],
+  "save_on_catch": true,
+  "reset_on_catch": false
+}

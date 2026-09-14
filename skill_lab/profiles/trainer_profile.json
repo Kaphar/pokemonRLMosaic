@@ -1,0 +1,12 @@
+{
+  "name": "trainer",
+  "description": "Focus on battling trainers and catching specific Pokemon",
+  "settings": {
+    "reward_scale": 2.0,
+    "explore_weight": 0.5,
+    "catch_directive": ["Nidoran♂", "Pidgey", "Rattata", "Spearow", "Pikachu"],
+    "train_directive": ["Nidoran♂", "Pikachu"],
+    "save_on_catch": true,
+    "reset_on_catch": false
+  }
+}
