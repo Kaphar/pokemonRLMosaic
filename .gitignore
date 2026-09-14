@@ -1,22 +1,31 @@
-__pycache__
-.DS_Store
-rollouts
-*.gb
-*.ram
-.ipynb_checkpoints
-raw_documentation
-*.pem
-_autoplay.mp4
-session_*
+```
+# Dependencies
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
 .env
-PokemonRed.gb.state
-venv*
-.python-version
-mosaic_sessions/checkpoints/*.zip
-skill_lab/envs
-skill_lab/envs/Env031/config.json
-
-mosaic_sessions/stats_history.json
-
-mosaic_sessions/**/*.*
-starter_report.html
+.env.local
+.env.*
+# Build artifacts
+build/
+dist/
+*.egg-info/
+# Logs
+*.log
+# Coverage
+.coverage
+htmlcov/
+coverage/
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+# OS
+.DS_Store
+Thumbs.db
+```

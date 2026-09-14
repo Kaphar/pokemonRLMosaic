@@ -13,6 +13,8 @@ V2_DIR = PROJECT_ROOT / "v2"
 # ROM_PATH = PROJECT_ROOT / "roms" / "pokemon_red.gb"
 INIT_STATE_PATH = V2_DIR / "state" / "init.state"
 EVENT_JSON_PATH = V2_DIR / "events.json"
+PROFILES_DIR = PROJECT_ROOT / "skill_lab" / "profiles"
+ENVS_DIR = PROJECT_ROOT / "skill_lab" / "envs"
 
 # --- Emulator Settings ---
 ACTION_FREQ = 24          # Frames between actions
@@ -24,7 +26,7 @@ TILE_HEIGHT = 144         # Game Boy screen height
 
 GRID_COLS = 7
 GRID_ROWS = 6
-TOTAL_TILES = GRID_COLS * GRID_ROWS
+TOTAL_TILES = GRID_COLS * GRID_ROWS  # 42 environments in mosaic
 
 DEFAULT_MAX_STEPS = 7200  # Max steps per episode
 
@@ -50,6 +52,22 @@ REWARD_MODIFIER_SLASH = reward_penalty
 
 PANEL_WIDTH = 220
 
+
+# --- Catch/Train Directives ---
+# Pokemon to prioritize catching/training by species name or ID
+CATCH_DIRECTIVES = {
+    "charmander_trainer": ["Nidoran♂", "Pidgey", "Rattata", "Spearow", "Pikachu"],
+    "squirtle_trainer": [],  # Free exploration
+    "bulbasaur_trainer": [],  # Free exploration
+    "default": [],
+}
+
+TRAIN_DIRECTIVES = {
+    "charmander_trainer": ["Nidoran♂", "Pikachu"],
+    "squirtle_trainer": [],
+    "bulbasaur_trainer": [],
+    "default": [],
+}
 
 
 SPECIALIZATION_PRESETS = {

@@ -1,0 +1,12 @@
+{
+  "name": "explorer",
+  "description": "Focus on exploration and map discovery",
+  "settings": {
+    "reward_scale": 0.5,
+    "explore_weight": 3.0,
+    "catch_directive": [],
+    "train_directive": [],
+    "save_on_catch": false,
+    "reset_on_catch": true
+  }
+}

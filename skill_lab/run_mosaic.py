@@ -249,13 +249,18 @@ def main(args: argparse.Namespace | None = None) -> None:
     config = make_config(profile, session_path / profile.name.lower(), args)
     config["session_path"].mkdir(exist_ok=True)
 
-    # Set up environment directives
-    env_configs = setup_envs(num_envs=profile.count, stage=args.stage)
+    # Set up environment directives with ROM and init_state paths
+    env_configs = setup_envs(
+        num_envs=profile.count,
+        stage=args.stage,
+        rom_path=args.rom,
+        init_state=args.init_state,
+    )
 
     # Print directive assignments (confirmation in logs)
     for cfg in env_configs:
         print(f"  Env {cfg['env_index']:02d} [{cfg['env_name']}]: "
-              f"{cfg['description']} | target={cfg['target_starter']}")
+              f"{cfg['description']} | target={cfg['target_starter']} | profile={cfg['profile']}")
 
     # Create vectorized environment with per-env configs
     env = make_vec_env(profile.count, config, env_configs=env_configs)
