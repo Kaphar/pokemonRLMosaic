@@ -168,8 +168,8 @@ Y_POS_ADDRESS = 0xD361
 BADGE_COUNT_ADDRESS = 0xD356
 
 # Inspector panel layout
-INSPECTOR_W = 720
-INSPECTOR_H = 560
+INSPECTOR_W = 800
+INSPECTOR_H = 800
 LEFT_PANEL_W = 320
 RIGHT_PANEL_W = 400
 MAP_LABEL_H = 220
@@ -193,6 +193,8 @@ class DebugLauncher:
         self.replay_speed_var = tk.StringVar(value="auto")
         self.deterministic_var = tk.BooleanVar(value=False)
         self.plugin_replay_var = tk.BooleanVar(value=False)
+        self.use_sdl_gamepad_var = tk.BooleanVar(value=False)
+        self.debug_var = tk.BooleanVar(value=False)
         self.controls = load_controls()
         self._build_ui()
 
@@ -276,8 +278,18 @@ class DebugLauncher:
             variable=self.plugin_replay_var,
         ).grid(row=9, column=0, columnspan=3, sticky="w", pady=(0, 4))
 
+        tk.Checkbutton(
+            frame, text="Use SDL for gamepad controller input (enable when playing with a gamepad)",
+            variable=self.use_sdl_gamepad_var,
+        ).grid(row=10, column=0, columnspan=3, sticky="w", pady=(0, 4))
+
+        tk.Checkbutton(
+            frame, text="Launch PyBoy in debug mode (-d / --debug)",
+            variable=self.debug_var,
+        ).grid(row=11, column=0, columnspan=3, sticky="w", pady=(0, 4))
+
         button_row = tk.Frame(frame)
-        button_row.grid(row=10, column=0, columnspan=3, pady=(4, 0))
+        button_row.grid(row=12, column=0, columnspan=3, pady=(4, 0))
         tk.Button(button_row, text="Configure controls...", command=self._configure_controls).pack(side=tk.LEFT, padx=4)
         tk.Button(button_row, text="Start", width=16, command=self._start).pack(side=tk.LEFT, padx=4)
 
@@ -342,6 +354,8 @@ class DebugLauncher:
             replay_speed=self.replay_speed_var.get(),
             deterministic=self.deterministic_var.get(),
             use_plugin_replay=self.plugin_replay_var.get(),
+            use_sdl_gamepad=self.use_sdl_gamepad_var.get(),
+            debug_mode=self.debug_var.get(),
         )
 
 
@@ -797,6 +811,7 @@ class _RecordingPyBoyProxy:
         return getattr(self._pyboy, name)
 
 
+# the plugin seem to work more reliably
 def record_input_with_plugin(
     pyboy: PyBoy,
     recording_path: Path,
@@ -967,6 +982,7 @@ def resolve_recording_path(value: object) -> Path | None:
     return path if path.is_file() else None
 
 
+# it might be helping the old input recorder, but I don't think this should be removed.
 def _prime_emulator(
     pyboy: PyBoy,
     state_path: Path,
@@ -1102,7 +1118,7 @@ def replay_frame_by_frame(
 
     return end_frame
 
-
+# for test purposes, to remove or move out.
 def verify_recording(
     recording_path: Path,
     rom_path: Path | None = None,
@@ -1184,6 +1200,7 @@ def verify_recording(
         pyboy.stop()
 
 
+# for test purposes, to remove or move out.
 def verify_recording_frame_by_frame(
     recording_path: Path,
     rom_path: Path | None = None,
@@ -1341,8 +1358,15 @@ class InputController:
             self.active.remove(token)
 
     def poll(self) -> None:
+        sdl2.SDL_PumpEvents()
+        if hasattr(sdl2, "SDL_GameControllerUpdate"):
+            sdl2.SDL_GameControllerUpdate()
+        if hasattr(sdl2, "SDL_JoystickUpdate"):
+            sdl2.SDL_JoystickUpdate()
         event = sdl2.SDL_Event()
+        events_received = False
         while sdl2.SDL_PollEvent(event):
+            events_received = True
             debug_sdl_event(event, "PLAY")
             if event.type == sdl2.SDL_QUIT:
                 self.quit_requested = True
@@ -1372,6 +1396,33 @@ class InputController:
                 prefix = f"hat:{event.jhat.hat}:"
                 for value in (1, 2, 4, 8):
                     self._set_token(prefix + str(value), int(event.jhat.value) & value != 0)
+        if not events_received:
+            self._poll_controller_states()
+
+    def _poll_controller_states(self) -> None:
+        for controller in self.controllers:
+            for button in range(sdl2.SDL_CONTROLLER_BUTTON_MAX):
+                pressed = bool(sdl2.SDL_GameControllerGetButton(controller, button))
+                token = f"controller:{button}"
+                if pressed and token not in self.active:
+                    debug_input(f"POLL ctrl button={button} -> press (no event mode)")
+                    self._set_token(token, True)
+                elif not pressed and token in self.active:
+                    debug_input(f"POLL ctrl button={button} -> release (no event mode)")
+                    self._set_token(token, False)
+        for joystick in self.joysticks:
+            num_buttons = sdl2.SDL_JoystickNumButtons(joystick)
+            if num_buttons < 0:
+                continue
+            for button in range(num_buttons):
+                pressed = bool(sdl2.SDL_JoystickGetButton(joystick, button))
+                token = f"button:{button}"
+                if pressed and token not in self.active:
+                    debug_input(f"POLL joy button={button} -> press (no event mode)")
+                    self._set_token(token, True)
+                elif not pressed and token in self.active:
+                    debug_input(f"POLL joy button={button} -> release (no event mode)")
+                    self._set_token(token, False)
 
     def close(self) -> None:
         for joystick in self.joysticks:
@@ -1628,6 +1679,8 @@ def run_player(
     *,
     deterministic: bool = False,
     use_plugin_replay: bool = False,
+    use_sdl_gamepad: bool = False,
+    debug_mode: bool = False,
 ) -> None:
     actions, replay_data = load_replay(replay_path)
     replay_action_freq = int(replay_data.get("action_freq", ACTION_FREQ))
@@ -1659,11 +1712,13 @@ def run_player(
     total_replay_frames = len(actions) * replay_action_freq
 
     os.environ.setdefault("SDL_VIDEO_WINDOW_POS", "0,0")
-    pyboy = PyBoy(str(rom_path), window=window_mode, sound=sound_enabled)
+    pyboy = PyBoy(str(rom_path), window=window_mode, sound=sound_enabled, debug=debug_mode)
     pyboy.set_emulation_speed(replay_speed_value)
     input_controller = None
-    if not effective_deterministic:
+    if not effective_deterministic and use_sdl_gamepad:
         input_controller = InputController(pyboy, controls or load_controls())
+        print(f"SDL gamepad input enabled — {len(input_controller.joysticks)} joystick(s), "
+              f"{len(input_controller.controllers)} controller(s), {len([k for k, v in input_controller.controls['gamepad'].items() if v])} gamepad mapping(s)", flush=True)
 
     def close_emulator() -> None:
         if input_controller is not None:
@@ -1749,11 +1804,13 @@ def run_player(
                     pyboy.tick(1, True)
                     frame_count += 1
                 else:
-                    input_controller.poll()
-                    if input_controller.quit_requested:
-                        break
+                    if input_controller is not None:
+                        input_controller.poll()
+                        if input_controller.quit_requested:
+                            break
                     if not pyboy.tick(1, True):
-                        input_controller.request_quit()
+                        if input_controller is not None:
+                            input_controller.request_quit()
                         break
                     frame_count += 1
 
@@ -1767,7 +1824,7 @@ def run_player(
             observer_env.envs[0].step_count = frame_count // replay_action_freq
 
             if not inspector.render(observer_env, 0, []):
-                if not effective_deterministic:
+                if not effective_deterministic and input_controller is not None:
                     input_controller.request_quit()
                 break
 
@@ -1786,12 +1843,14 @@ def run_player(
                 except cv2.error:
                     inspector_visible = False
                 if not inspector_visible:
-                    input_controller.request_quit()
+                    if input_controller is not None:
+                        input_controller.request_quit()
                     break
 
                 key = cv2.waitKeyEx(1)
                 if key in (ord("q"), 27):
-                    input_controller.request_quit()
+                    if input_controller is not None:
+                        input_controller.request_quit()
                     break
                 if key == ord("m"):
                     if inspector._watch_window.visible:

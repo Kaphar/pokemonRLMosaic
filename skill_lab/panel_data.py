@@ -320,8 +320,8 @@ class MemoryWatchWindow:
         self._selected_addresses: set[int] = set()
         self._selected_values: dict[int, int] = {}
         self._range_addresses: set[int] = set()
-        self._start_address: int = 0xCC06
-        self._end_address: int = 0xD362
+        self._start_address: int = 0xCC24
+        self._end_address: int = 0xCC35 #0xD362
         self._watcher = MemoryWatchTracker()
         self.set_range(self._start_address, self._end_address)
 

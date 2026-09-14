@@ -7,6 +7,12 @@ I see an issue with the speed bonus, if it is slow or very slow, it is still a 1
 I will tell you more about the state of the training, but it would be nice to have a window that would have a scrollable list of all the reset and the scores. 
 
 
+but we could use some cleaning in the emulator_with_denug
+firstly : use_plugin_replay is the default, use_plugin_replay false = use legacy
+I am still arguing if I should not delete the old recorder, we are going to call that legacy, keep it for now, but only use it if the use legacy checkbox is checked (not by default)
+
+
+
 
 # for next model reset :
 change the milestone reward to big_reward for starter stage.
@@ -14,6 +20,10 @@ ACTION MASKING FOR B Button.
 
 
 
+
+
+# emulator_with_debug :
+fix replay to get the same state if we load from the same state and put the same inputs.
 
 
 # rather cool and more ambitious, we will need to make sure the observation changes (we will need to check the opencv part of the detection too)

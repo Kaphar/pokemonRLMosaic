@@ -7,7 +7,7 @@
     {"species_id": 16, "name": "Pidgey"},
     {"species_id": 25, "name": "Pikachu"}
   ],
-  "milestone_multiplier": 1.0,
+  "milestone_multiplier": 0.6,
   "capture_multiplier": 3.0,
   "team_completion_bonus": 5.0,
   "avoid_wild_encounters": false,
