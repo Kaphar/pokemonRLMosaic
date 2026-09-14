@@ -159,7 +159,6 @@ class ObservationInspector:
         screen_canvas[:screen.shape[0], :screen.shape[1]] = screen
         inspector = np.hstack([screen_canvas, panel])
         cv2.imshow(self.title, inspector)
-        cv2.setWindowProperty(self.title, cv2.WND_PROP_TOPMOST, 1)
         self._needs_initial_render = False
         return True
 
