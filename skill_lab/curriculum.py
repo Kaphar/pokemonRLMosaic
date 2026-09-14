@@ -25,6 +25,7 @@ class Stage:
     # Action masking
     disable_start: bool = True
     disable_select: bool = True
+    disable_B: bool = False
 
     # Reward configuration
     milestone_reward: float = medium_reward
@@ -40,6 +41,9 @@ class Stage:
     # Per-environment directives
     # Key = env index (or "default"), Value = directive config
     directives: dict[str, dict[str, Any]] = field(default_factory=dict)
+    
+    # Action masks dictionary (for JSON compatibility)
+    action_masks: dict[str, bool] = field(default_factory=dict)
 
 
 # ========================================

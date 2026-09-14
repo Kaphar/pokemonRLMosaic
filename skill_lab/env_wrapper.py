@@ -45,11 +45,22 @@ class SkillLabWrapper(gymnasium.Wrapper):
         self.action_freq = int(config.get("action_freq", 24))
         self.save_objective_states = config.get("save_objective_states", True)
         self.perfect_sound_enabled = config.get("perfect_sound", True)
+        
+        # Action masking for B button (from stage config)
+        self.disable_B = config.get("disable_B", False)
+        self.B_action_index = None
+        
+        # Catch/train directives from profile
+        self.catch_directive = config.get("catch_directive", [])
+        self.train_directive = config.get("train_directive", [])
+        self.save_on_catch = config.get("save_on_catch", False)
+        self.reset_on_catch = config.get("reset_on_catch", True)
 
         # --- Detect action indices ---
         self.start_action_index = None
         self.select_action_index = None
         self.noop_action_index = env.noop_button_index
+        self.B_action_index = None
 
         valid_actions = env.valid_actions
         for idx, action in enumerate(valid_actions):
@@ -57,6 +68,8 @@ class SkillLabWrapper(gymnasium.Wrapper):
                 self.start_action_index = idx
             elif action == WindowEvent.PRESS_BUTTON_SELECT:
                 self.select_action_index = idx
+            elif action == WindowEvent.PRESS_BUTTON_B:
+                self.B_action_index = idx
 
         # Print directive confirmation
         if self.target_starter:
@@ -69,8 +82,16 @@ class SkillLabWrapper(gymnasium.Wrapper):
             masked.append("START")
         if self.disable_select and self.select_action_index is not None:
             masked.append("SELECT")
+        if self.disable_B and self.B_action_index is not None:
+            masked.append("B")
         if masked:
             print(f"[{self.env_name}] Masking: {', '.join(masked)}")
+        
+        # Print catch/train directives
+        if self.catch_directive:
+            print(f"[{self.env_name}] Catch directive: {self.catch_directive}")
+        if self.train_directive:
+            print(f"[{self.env_name}] Train directive: {self.train_directive}")
 
         # --- Milestone Tracker ---
         self.milestone_tracker: MilestoneTracker | None = None
@@ -188,6 +209,8 @@ class SkillLabWrapper(gymnasium.Wrapper):
         if self.disable_start and action == self.start_action_index:
             return True
         if self.disable_select and action == self.select_action_index:
+            return True
+        if self.disable_B and action == self.B_action_index:
             return True
         return False
 

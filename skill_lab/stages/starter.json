@@ -13,6 +13,9 @@
     "0xD747-1", 
     "0xD747-2"
   ],
+  "action_masks": {
+    "B": false
+  },
   "directives": {
     "0": {
       "target_starter": "Charmander",
