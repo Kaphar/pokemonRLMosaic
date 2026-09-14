@@ -29,3 +29,9 @@ coverage/
 .DS_Store
 Thumbs.db
 ```
+mosaic_sessions
+skill_lab/starter_report.html
+skill_lab/envs/*
+skill_lab/backup
+PokemonRed.gb
+PokemonBlue.gb
