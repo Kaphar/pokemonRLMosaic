@@ -73,13 +73,12 @@ def make_config(profile: Profile, session_path: Path, args: argparse.Namespace) 
     if args.init_state and args.init_state.exists():
         init_state = args.init_state
 
-    # Get disable_B from action_masks if present, otherwise from disable_B field
-    disable_B = stage_config.get("disable_B", False)
-    action_masks = stage_config.get("action_masks", {})
-    if "B" in action_masks:
-        # action_masks.B = false means don't mask (allow B button)
-        # action_masks.B = true would mean mask it
-        disable_B = action_masks.get("B", disable_B)
+    # Get button masks from unified button_masks dict
+    button_masks = stage_config.get("button_masks", {})
+    disable_start = button_masks.get("Start", True)
+    disable_select = button_masks.get("Select", True)
+    disable_B = button_masks.get("B", False)
+    disable_A = button_masks.get("A", False)
 
     return {
         "headless": True,
@@ -99,10 +98,11 @@ def make_config(profile: Profile, session_path: Path, args: argparse.Namespace) 
         "noop_button": True,
         "speed": getattr(args, "emulator_speed", 2),
         "training_mode": training_mode,
-        # Stage config from JSON
-        "disable_start": stage_config.get("disable_start", True),
-        "disable_select": stage_config.get("disable_select", True),
+        # Button masks from unified config
+        "disable_start": disable_start,
+        "disable_select": disable_select,
         "disable_B": disable_B,
+        "disable_A": disable_A,
         "milestone_reward": stage_config.get("milestone_reward", medium_reward),
         "milestones_path": str(PROJECT_ROOT / "skill_lab" / "milestones.json"),
         "names_path": str(PROJECT_ROOT / "skill_lab" / "names.json"),
@@ -165,6 +165,8 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--record-input-with-plugin", action="store_true",
                         help="Record frame-exact inputs via plugin-style hook for deterministic replay")
+    parser.add_argument("--use-legacy-recorder", action="store_true",
+                        help="Use legacy recorder instead of plugin (only if plugin recording is disabled)")
     
     parser.add_argument("--disable-start-select", action="store_true", help="Mask Start/Select buttons in early game")
     
@@ -245,14 +247,13 @@ def main(args: argparse.Namespace | None = None) -> None:
     # Get stage configuration from JSON
     stage_config = load_stage_config(args.stage)
     print(f"Stage: {stage_config.get('name', args.stage)} - {stage_config.get('description', '')}")
-    print(f"  Start masked: {stage_config.get('disable_start', True)}")
-    print(f"  Select masked: {stage_config.get('disable_select', True)}")
-    print(f"  B button masked: {stage_config.get('disable_B', False)}")
     
-    # Extract action_masks from stage config
-    action_masks = stage_config.get("action_masks", {})
-    if "B" in action_masks and not action_masks["B"]:
-        print(f"  Note: B button masking controlled by action_masks.B = {action_masks['B']}")
+    # Extract button masks from unified config
+    button_masks = stage_config.get("button_masks", {})
+    print(f"  Start masked: {button_masks.get('Start', True)}")
+    print(f"  Select masked: {button_masks.get('Select', True)}")
+    print(f"  B button masked: {button_masks.get('B', False)}")
+    print(f"  A button masked: {button_masks.get('A', False)}")
 
     if not args.rom.exists(): raise FileNotFoundError(f"ROM not found: {args.rom}")
     if not args.init_state.exists(): raise FileNotFoundError(f"Initial state not found: {args.init_state}")
@@ -286,14 +287,15 @@ def main(args: argparse.Namespace | None = None) -> None:
     # Print directive assignments (confirmation in logs)
     for cfg in env_configs:
         print(f"  Env {cfg['env_index']:02d} [{cfg['env_name']}]: "
-              f"{cfg['description']} | target={cfg['target_starter']} | profile={cfg['profile']}")
+              f"{cfg['description']} | target={cfg['target_starter']} | profile={cfg['profile']} | "
+              f"rom={cfg.get('rom_file', 'N/A')} | state={cfg.get('init_state_file', 'N/A')}")
 
     # ========================================================================
     # DETAILED ENVIRONMENT SETTINGS LOG
     # ========================================================================
-    print("\n" + "="*100)
+    print("\n" + "="*120)
     print("ENVIRONMENT CONFIGURATION SUMMARY")
-    print("="*100)
+    print("="*120)
     print(f"Total Environments: {profile.count}")
     print(f"Stage: {args.stage}")
     print(f"ROM: {args.rom.name}")
@@ -307,15 +309,16 @@ def main(args: argparse.Namespace | None = None) -> None:
     print(f"Disable Start: {config['disable_start']}")
     print(f"Disable Select: {config['disable_select']}")
     print(f"Disable B: {config['disable_B']}")
-    print("-"*100)
+    print(f"Disable A: {config.get('disable_A', False)}")
+    print("-"*120)
     
-    # Compact per-env settings table with all key details
+    # Compact per-env settings table with all key details including ROM and state
     header = (
         f"{'Env':<5} {'Name':<18} {'Profile':<9} {'Catch Directives':<35} {'Train Directives':<30} "
-        f"{'Save?':<6} {'Reset?':<7} {'Target':<12}"
+        f"{'Save?':<6} {'Reset?':<7} {'Target':<12} {'ROM':<18} {'State':<18}"
     )
     print(header)
-    print("-"*100)
+    print("-"*120)
     
     for cfg in env_configs:
         catch_list = ", ".join(cfg.get('catch_directive', [])[:3])
@@ -328,31 +331,38 @@ def main(args: argparse.Namespace | None = None) -> None:
         save_flag = "Y" if cfg.get('save_on_catch', False) else "N"
         reset_flag = "Y" if cfg.get('reset_on_catch', False) else "N"
         target = cfg.get('target_starter', '-') or "-"
+        rom_file = cfg.get('rom_file', 'N/A')
+        state_file = cfg.get('init_state_file', 'N/A')
         
         print(
             f"{cfg['env_index']:>4}  {cfg['env_name']:<18} {cfg['profile']:<9} "
-            f"{catch_list:<35} {train_list:<30} {save_flag:<6} {reset_flag:<7} {target:<12}"
+            f"{catch_list:<35} {train_list:<30} {save_flag:<6} {reset_flag:<7} {target:<12} "
+            f"{rom_file:<18} {state_file:<18}"
         )
     
-    print("-"*100)
+    print("-"*120)
     
     # Profile distribution summary
     trainer_count = sum(1 for cfg in env_configs if cfg['profile'] == 'trainer')
     explorer_count = sum(1 for cfg in env_configs if cfg['profile'] == 'explorer')
     print(f"\nProfile Distribution: {trainer_count} Trainer, {explorer_count} Explorer")
     
+    # Count ROM distribution
+    red_count = sum(1 for cfg in env_configs if cfg.get('rom_file', '').endswith('.gb') and 'Blue' not in cfg.get('rom_file', ''))
+    blue_count = sum(1 for cfg in env_configs if cfg.get('rom_file', '').endswith('.gb') and 'Blue' in cfg.get('rom_file', ''))
+    print(f"ROM Distribution: {red_count} Red, {blue_count} Blue")
+    
     # Stage config details
     print(f"\nStage Configuration ({args.stage}):")
-    print(f"  - Start Button Masked: {stage_config.get('disable_start', True)}")
-    print(f"  - Select Button Masked: {stage_config.get('disable_select', True)}")
-    print(f"  - B Button Masked: {stage_config.get('disable_B', False)}")
-    action_masks = stage_config.get("action_masks", {})
-    if action_masks:
-        print(f"  - Action Masks: {json.dumps(action_masks)}")
+    button_masks = stage_config.get("button_masks", {})
+    print(f"  - Start Button Masked: {button_masks.get('Start', True)}")
+    print(f"  - Select Button Masked: {button_masks.get('Select', True)}")
+    print(f"  - B Button Masked: {button_masks.get('B', False)}")
+    print(f"  - A Button Masked: {button_masks.get('A', False)}")
     milestone_reward = stage_config.get("milestone_reward", "medium_reward")
     print(f"  - Milestone Reward: {milestone_reward}")
     print(f"  - Max Steps (stage default): {stage_config.get('max_steps', 7200)}")
-    print("="*100 + "\n")
+    print("="*120 + "\n")
 
     # Create vectorized environment with per-env configs
     env = make_vec_env(profile.count, config, env_configs=env_configs)
