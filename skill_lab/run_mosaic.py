@@ -288,6 +288,56 @@ def main(args: argparse.Namespace | None = None) -> None:
         print(f"  Env {cfg['env_index']:02d} [{cfg['env_name']}]: "
               f"{cfg['description']} | target={cfg['target_starter']} | profile={cfg['profile']}")
 
+    # ========================================================================
+    # DETAILED ENVIRONMENT SETTINGS LOG
+    # ========================================================================
+    print("\n" + "="*80)
+    print("ENVIRONMENT CONFIGURATION SUMMARY")
+    print("="*80)
+    print(f"Total Environments: {profile.count}")
+    print(f"Stage: {args.stage}")
+    print(f"ROM: {args.rom.name}")
+    print(f"Init State: {args.init_state.name}")
+    print(f"Reward Scale: {config['reward_scale']:.2f}")
+    print(f"Explore Weight: {config['explore_weight']:.2f}")
+    print(f"Max Steps: {config['max_steps']}")
+    print(f"Training Mode: {config['training_mode']}")
+    print("-"*80)
+    
+    # Compact per-env settings table
+    print(f"{'Env':<6} {'Name':<18} {'Profile':<10} {'Catch':<30} {'Train':<30} {'Save?':<6} {'Reset?':<7}")
+    print("-"*80)
+    
+    for cfg in env_configs:
+        catch_list = ", ".join(cfg.get('catch_directive', [])[:3])
+        if len(cfg.get('catch_directive', [])) > 3:
+            catch_list += f" (+{len(cfg['catch_directive'])-3})"
+        train_list = ", ".join(cfg.get('train_directive', [])[:2])
+        if len(cfg.get('train_directive', [])) > 2:
+            train_list += f" (+{len(cfg['train_directive'])-2})"
+        
+        save_flag = "Yes" if cfg.get('save_on_catch', False) else "No"
+        reset_flag = "Yes" if cfg.get('reset_on_catch', False) else "No"
+        
+        print(f"{cfg['env_index']:>4}   {cfg['env_name']:<18} {cfg['profile']:<10} {catch_list:<30} {train_list:<30} {save_flag:<6} {reset_flag:<7}")
+    
+    print("-"*80)
+    
+    # Profile distribution summary
+    trainer_count = sum(1 for cfg in env_configs if cfg['profile'] == 'trainer')
+    explorer_count = sum(1 for cfg in env_configs if cfg['profile'] == 'explorer')
+    print(f"\nProfile Distribution: {trainer_count} Trainer, {explorer_count} Explorer")
+    
+    # Stage config details
+    print(f"\nStage Configuration ({args.stage}):")
+    print(f"  - Start Button Masked: {stage_config.get('disable_start', True)}")
+    print(f"  - Select Button Masked: {stage_config.get('disable_select', True)}")
+    print(f"  - B Button Masked: {stage_config.get('disable_B', False)}")
+    action_masks = stage_config.get("action_masks", {})
+    if action_masks:
+        print(f"  - Action Masks: {json.dumps(action_masks)}")
+    print("="*80 + "\n")
+
     # Create vectorized environment with per-env configs
     env = make_vec_env(profile.count, config, env_configs=env_configs)
 
