@@ -13,6 +13,8 @@ I am still arguing if I should not delete the old recorder, we are going to call
 
 
 
+the input recorder is based on the frequence of inputs for the replay of the model, but we should make sure we can make it work for a human replay, i didn't chck.
+
 
 # for next model reset :
 change the milestone reward to big_reward for starter stage.

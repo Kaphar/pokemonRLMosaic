@@ -192,7 +192,7 @@ class DebugLauncher:
         self.replay_path_var = tk.StringVar(value="No replay selected")
         self.replay_speed_var = tk.StringVar(value="auto")
         self.deterministic_var = tk.BooleanVar(value=False)
-        self.plugin_replay_var = tk.BooleanVar(value=False)
+        self.legacy_replay_var = tk.BooleanVar(value=False)
         self.use_sdl_gamepad_var = tk.BooleanVar(value=False)
         self.debug_var = tk.BooleanVar(value=False)
         self.controls = load_controls()
@@ -274,8 +274,8 @@ class DebugLauncher:
         ).grid(row=8, column=0, columnspan=3, sticky="w", pady=(0, 4))
 
         tk.Checkbutton(
-            frame, text="Use plugin-style frame-exact replay (reads input_events from recording)",
-            variable=self.plugin_replay_var,
+            frame, text="Use legacy replay (action-based timing instead of frame-exact)",
+            variable=self.legacy_replay_var,
         ).grid(row=9, column=0, columnspan=3, sticky="w", pady=(0, 4))
 
         tk.Checkbutton(
@@ -353,7 +353,7 @@ class DebugLauncher:
             rom_path, state_path, replay, self.controls,
             replay_speed=self.replay_speed_var.get(),
             deterministic=self.deterministic_var.get(),
-            use_plugin_replay=self.plugin_replay_var.get(),
+            use_plugin_replay=not self.legacy_replay_var.get(),
             use_sdl_gamepad=self.use_sdl_gamepad_var.get(),
             debug_mode=self.debug_var.get(),
         )
@@ -367,11 +367,15 @@ class RuntimeMenu:
         pyboy: PyBoy,
         close_callback: callable | None = None,
         reset_callback: callable | None = None,
+        toggle_watch_callback: callable | None = None,
+        set_range_callback: callable | None = None,
     ) -> None:
         self.pyboy = pyboy
         self.closed = False
         self.close_callback = close_callback
         self.reset_callback = reset_callback
+        self.toggle_watch_callback = toggle_watch_callback
+        self.set_range_callback = set_range_callback
         self.root = tk.Tk()
         self.root.title("Pokemon Red Debug Controls")
         self.root.resizable(False, False)
@@ -384,11 +388,14 @@ class RuntimeMenu:
         file_menu.add_separator()
         file_menu.add_command(label="Reset ROM", command=self.reset_rom)
         file_menu.add_separator()
+        file_menu.add_command(label="Toggle Watch", command=self.toggle_watch)
+        file_menu.add_command(label="Set Watch Range", command=self.set_range)
+        file_menu.add_separator()
         file_menu.add_command(label="Close Emulator", command=self.close)
         file_menu.add_command(label="Close Menu", command=self.close_menu)
         menu_bar.add_cascade(label="File", menu=file_menu)
         self.root.config(menu=menu_bar)
-        tk.Label(self.root, text="Use File to save or load the live emulator state.", padx=12, pady=8).pack()
+        tk.Label(self.root, text="Use File for save, load, reset, watch controls, or close.", padx=12, pady=8).pack()
 
     def close_menu(self) -> None:
         self.close()
@@ -423,7 +430,7 @@ class RuntimeMenu:
             with path.open("wb") as state_file:
                 self.pyboy.save_state(state_file)
             messagebox.showinfo("State saved", f"Saved state to:\n{path}", parent=self.root)
-        except OSError as error:
+        except Exception as error:
             messagebox.showerror("Save failed", str(error), parent=self.root)
 
     def load_state(self) -> None:
@@ -437,12 +444,20 @@ class RuntimeMenu:
             with Path(path).open("rb") as state_file:
                 self.pyboy.load_state(state_file)
             messagebox.showinfo("State loaded", f"Loaded state from:\n{path}", parent=self.root)
-        except OSError as error:
+        except Exception as error:
             messagebox.showerror("Load failed", str(error), parent=self.root)
 
     def reset_rom(self) -> None:
         if self.reset_callback is not None:
             self.reset_callback()
+
+    def toggle_watch(self) -> None:
+        if self.toggle_watch_callback is not None:
+            self.toggle_watch_callback()
+
+    def set_range(self) -> None:
+        if self.set_range_callback is not None:
+            self.set_range_callback()
 
     def update(self) -> None:
         if self.closed:
@@ -1530,11 +1545,11 @@ def render_inspector(
     if watch_snapshot:
         button_rect = draw_memory_watch_panel(panel, 15, 280, 260, watch_snapshot, title="Addr watch")
 
-    cv2.putText(
-        panel,
-        "Q/Esc: quit | M: toggle watch | R: set range | Reset: via control panel | Show more: full watch | Arrows/A/S/Start: move & buttons | +/-: speed | P: pause",
-        (15, INSPECTOR_H - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.34, (120, 120, 120), 1,
-    )
+        cv2.putText(
+            panel,
+            "Reset: via control panel | Show more: full watch | Arrows/A/S/Start: move & buttons | +/-: speed | P: pause",
+            (15, INSPECTOR_H - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.34, (120, 120, 120), 1,
+        )
 
     cv2.namedWindow("Pokemon Red Inspector", cv2.WINDOW_NORMAL)
     cv2.imshow("Pokemon Red Inspector", panel)
@@ -1688,7 +1703,13 @@ def run_player(
     if replay_action_freq < 9:
         raise ValueError(f"Replay action frequency must be at least 9, got {replay_action_freq}")
     if state_path is None:
-        state_path = resolve_recording_path(replay_data.get("init_state"))
+        resolved_state = resolve_recording_path(replay_data.get("init_state"))
+        if resolved_state is not None and resolved_state.is_file():
+            state_path = resolved_state
+        else:
+            if resolved_state is not None:
+                print(f"[WARNING] Replay init_state not found: {resolved_state} — starting from ROM")
+            state_path = None
 
     replay_speed_value = resolve_replay_speed(replay_speed)
     # When using plugin replay, always use headless mode for determinism.
@@ -1738,7 +1759,14 @@ def run_player(
         initial_state.seek(0)
         messagebox.showinfo("Reset ROM", "ROM has been reset to initial state.", parent=runtime_menu.root)
 
-    runtime_menu = RuntimeMenu(pyboy, close_callback=close_emulator, reset_callback=reset_rom)
+    runtime_menu = RuntimeMenu(
+        pyboy, close_callback=close_emulator, reset_callback=reset_rom,
+        toggle_watch_callback=lambda: (
+            inspector._watch_window.hide() if inspector._watch_window.visible
+            else inspector._watch_window.show()
+        ),
+        set_range_callback=lambda: _set_watch_range(runtime_menu.root, inspector._watch_window),
+    )
     observer_env = _ObserverEnv(pyboy)
     inspector = ObservationInspector()
 
@@ -1762,12 +1790,14 @@ def run_player(
         if use_plugin_replay and replay_path is not None:
             print(f"Playing {len(actions)} actions via plugin-style frame-exact replay...")
             state_path_replay = resolve_recording_path(replay_data.get("init_state"))
-            if state_path_replay is not None:
+            if state_path_replay is not None and state_path_replay.is_file():
                 with state_path_replay.open("rb") as state_file:
                     pyboy.load_state(state_file)
                 _prime_emulator(pyboy, state_path_replay, actions, replay_action_freq, replay_noop_action, num_actions=len(actions))
                 with state_path_replay.open("rb") as state_file:
                     pyboy.load_state(state_file)
+            elif state_path_replay is not None:
+                print(f"[WARNING] Plugin replay init_state not found: {state_path_replay}")
             plugin_input_events = replay_data.get("input_events", [])
             if not plugin_input_events:
                 plugin_input_events = generate_input_events(actions, replay_action_freq, replay_noop_action)
@@ -1838,6 +1868,10 @@ def run_player(
                     cv2.waitKey(1)
                     time.sleep(0.001)
             else:
+                # Non-deterministic mode: SDL2 owns the event loop (PyBoy window + InputController).
+                # Calling cv2.waitKeyEx here conflicts with SDL2's message pump on Windows,
+                # causing GIL corruption (PyEval_RestoreThread fatal error).
+                # Inspector display still updates via cv2.imshow in render(); we just skip event processing.
                 try:
                     inspector_visible = cv2.getWindowProperty(inspector.title, cv2.WND_PROP_VISIBLE) >= 1
                 except cv2.error:
@@ -1846,19 +1880,6 @@ def run_player(
                     if input_controller is not None:
                         input_controller.request_quit()
                     break
-
-                key = cv2.waitKeyEx(1)
-                if key in (ord("q"), 27):
-                    if input_controller is not None:
-                        input_controller.request_quit()
-                    break
-                if key == ord("m"):
-                    if inspector._watch_window.visible:
-                        inspector._watch_window.hide()
-                    else:
-                        inspector._watch_window.show()
-                if key == ord("r"):
-                    _set_watch_range(runtime_menu.root, inspector._watch_window)
                 time.sleep(0.001)
     except OSError as error:
         print(f"PyBoy stopped while closing the SDL window: {error}")
