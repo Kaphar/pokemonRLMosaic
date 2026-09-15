@@ -291,9 +291,9 @@ def main(args: argparse.Namespace | None = None) -> None:
     # ========================================================================
     # DETAILED ENVIRONMENT SETTINGS LOG
     # ========================================================================
-    print("\n" + "="*80)
+    print("\n" + "="*100)
     print("ENVIRONMENT CONFIGURATION SUMMARY")
-    print("="*80)
+    print("="*100)
     print(f"Total Environments: {profile.count}")
     print(f"Stage: {args.stage}")
     print(f"ROM: {args.rom.name}")
@@ -302,11 +302,20 @@ def main(args: argparse.Namespace | None = None) -> None:
     print(f"Explore Weight: {config['explore_weight']:.2f}")
     print(f"Max Steps: {config['max_steps']}")
     print(f"Training Mode: {config['training_mode']}")
-    print("-"*80)
+    print(f"Noop Button: {config['noop_button']}")
+    print(f"Emulator Speed: {config['speed']}")
+    print(f"Disable Start: {config['disable_start']}")
+    print(f"Disable Select: {config['disable_select']}")
+    print(f"Disable B: {config['disable_B']}")
+    print("-"*100)
     
-    # Compact per-env settings table
-    print(f"{'Env':<6} {'Name':<18} {'Profile':<10} {'Catch':<30} {'Train':<30} {'Save?':<6} {'Reset?':<7}")
-    print("-"*80)
+    # Compact per-env settings table with all key details
+    header = (
+        f"{'Env':<5} {'Name':<18} {'Profile':<9} {'Catch Directives':<35} {'Train Directives':<30} "
+        f"{'Save?':<6} {'Reset?':<7} {'Target':<12}"
+    )
+    print(header)
+    print("-"*100)
     
     for cfg in env_configs:
         catch_list = ", ".join(cfg.get('catch_directive', [])[:3])
@@ -316,12 +325,16 @@ def main(args: argparse.Namespace | None = None) -> None:
         if len(cfg.get('train_directive', [])) > 2:
             train_list += f" (+{len(cfg['train_directive'])-2})"
         
-        save_flag = "Yes" if cfg.get('save_on_catch', False) else "No"
-        reset_flag = "Yes" if cfg.get('reset_on_catch', False) else "No"
+        save_flag = "Y" if cfg.get('save_on_catch', False) else "N"
+        reset_flag = "Y" if cfg.get('reset_on_catch', False) else "N"
+        target = cfg.get('target_starter', '-') or "-"
         
-        print(f"{cfg['env_index']:>4}   {cfg['env_name']:<18} {cfg['profile']:<10} {catch_list:<30} {train_list:<30} {save_flag:<6} {reset_flag:<7}")
+        print(
+            f"{cfg['env_index']:>4}  {cfg['env_name']:<18} {cfg['profile']:<9} "
+            f"{catch_list:<35} {train_list:<30} {save_flag:<6} {reset_flag:<7} {target:<12}"
+        )
     
-    print("-"*80)
+    print("-"*100)
     
     # Profile distribution summary
     trainer_count = sum(1 for cfg in env_configs if cfg['profile'] == 'trainer')
@@ -336,7 +349,10 @@ def main(args: argparse.Namespace | None = None) -> None:
     action_masks = stage_config.get("action_masks", {})
     if action_masks:
         print(f"  - Action Masks: {json.dumps(action_masks)}")
-    print("="*80 + "\n")
+    milestone_reward = stage_config.get("milestone_reward", "medium_reward")
+    print(f"  - Milestone Reward: {milestone_reward}")
+    print(f"  - Max Steps (stage default): {stage_config.get('max_steps', 7200)}")
+    print("="*100 + "\n")
 
     # Create vectorized environment with per-env configs
     env = make_vec_env(profile.count, config, env_configs=env_configs)
