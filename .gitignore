@@ -12,21 +12,18 @@ venv/
 .env.local
 *.env.*
 
-# Logs and temp files
+# Logs and temporary files
 *.log
 *.tmp
-
-# Editors
-.vscode/
-.idea/
 
 # Coverage
 .coverage
 coverage/
 htmlcov/
 
-# Distribution / packaging
-dist/
-build/
-*.egg-info/
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
 ```

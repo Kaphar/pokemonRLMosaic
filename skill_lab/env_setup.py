@@ -81,12 +81,14 @@ def load_stage_config(stage_name: str) -> dict[str, Any]:
         "name": stage_name,
         "description": f"Default {stage_name} stage",
         "max_steps": 7200,
-        "disable_start": True,
-        "disable_select": True,
-        "disable_B": False,
         "milestone_reward": medium_reward,
         "init_state": str(DEFAULT_INIT_STATE),
-        "action_masks": {},
+        "button_masks": {
+            "Start": True,
+            "Select": True,
+            "B": False,
+            "A": False,
+        },
     }
 
 
