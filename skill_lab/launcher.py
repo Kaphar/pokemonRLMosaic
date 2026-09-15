@@ -39,7 +39,8 @@ class Launcher:
         self.hud_var = tk.BooleanVar(value=True)
         self.speed_var = tk.IntVar(value=2)  # NEW: emulator speed
         self.continuous_var = tk.BooleanVar(value=False)
-        self.record_input_var = tk.BooleanVar(value=False)
+        self.record_input_var = tk.BooleanVar(value=True)  # Changed: record plugin enabled by default
+        self.legacy_recorder_var = tk.BooleanVar(value=False)  # NEW: legacy recorder option
         self._build_ui()
 
     def _find_checkpoints(self) -> list[Path]:
@@ -166,28 +167,36 @@ class Launcher:
             main_frame, text="Use HUD overlay", variable=self.hud_var
         ).grid(row=11, column=0, columnspan=2, sticky="w", pady=5)
 
-        # Row 12: Record frame-exact inputs
+        # Row 12: Record frame-exact inputs (plugin-based, enabled by default)
         ttk.Checkbutton(
-            main_frame, text="Record frame-exact inputs", variable=self.record_input_var
+            main_frame, text="Record frame-exact inputs (plugin)", variable=self.record_input_var
         ).grid(row=12, column=0, columnspan=2, sticky="w", pady=5)
 
-        # Row 13: Stage description
+        # Row 13: Legacy recorder (only if plugin recording is disabled)
+        self.legacy_check = ttk.Checkbutton(
+            main_frame, text="Use legacy recorder (instead of plugin)", variable=self.legacy_recorder_var, state="disabled"
+        )
+        self.legacy_check.grid(row=13, column=0, columnspan=2, sticky="w", pady=5)
+        self.record_input_var.trace_add("write", self._toggle_legacy_option)
+
+        # Row 14: Stage description
         self.stage_desc_var = tk.StringVar(value="")
         ttk.Label(
             main_frame, textvariable=self.stage_desc_var,
             font=("", 8), foreground="gray"
-        ).grid(row=13, column=0, columnspan=2, sticky="w")
+        ).grid(row=14, column=0, columnspan=2, sticky="w")
 
-        # Row 14: Launch
+        # Row 15: Launch
         ttk.Button(
             main_frame, text="Launch", command=self._launch
-        ).grid(row=14, column=0, columnspan=2, pady=10)
+        ).grid(row=15, column=0, columnspan=2, pady=10)
 
         # Initialize
         self._on_mode_change()
         self._on_stage_change(None)
         self._on_training_mode_change()
         self._update_total()
+        self._toggle_legacy_option()
 
     def _update_total(self, *args) -> None:
         total = self.rows_var.get() * self.cols_var.get()
@@ -214,6 +223,14 @@ class Launcher:
         else:
             self.steps_spinbox.config(state="normal")
             self.steps_label.config(text="(steps per segment before reset)")
+
+    def _toggle_legacy_option(self, *args) -> None:
+        """Enable legacy recorder checkbox only when plugin recording is disabled."""
+        if self.record_input_var.get():
+            self.legacy_check.config(state="disabled")
+            self.legacy_recorder_var.set(False)
+        else:
+            self.legacy_check.config(state="normal")
 
     def _launch(self) -> None:
         mode = self.mode_var.get()
@@ -261,6 +278,7 @@ class Launcher:
             milestones_path=Path("skill_lab/milestones.json"),
             continuous=self.continuous_var.get(),
             record_input_with_plugin=self.record_input_var.get(),
+            use_legacy_recorder=self.legacy_recorder_var.get(),
         )
 
         if mode == "train" and self.checkpoints:

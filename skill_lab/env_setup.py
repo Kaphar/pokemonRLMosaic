@@ -81,12 +81,14 @@ def load_stage_config(stage_name: str) -> dict[str, Any]:
         "name": stage_name,
         "description": f"Default {stage_name} stage",
         "max_steps": 7200,
-        "disable_start": True,
-        "disable_select": True,
-        "disable_B": False,
         "milestone_reward": medium_reward,
         "init_state": str(DEFAULT_INIT_STATE),
-        "action_masks": {},
+        "button_masks": {
+            "Start": True,
+            "Select": True,
+            "B": False,
+            "A": False,
+        },
     }
 
 
@@ -124,7 +126,7 @@ def setup_envs(
     
     env_configs = []
     
-    # First 3 envs are the named trainers
+    # First 3 envs are the named trainers (always use provided ROM)
     for i in range(min(3, num_envs)):
         trainer_name = trainer_names[i]
         trainer_dir = ENVS_DIR / trainer_name
@@ -180,10 +182,13 @@ def setup_envs(
             "catch_directive": profile["catch_directive"],
             "train_directive": profile["train_directive"],
             "description": f"{trainer_name} - {profile['name']} profile",
+            "rom_file": rom_path.name,
+            "init_state_file": init_state.name,
         }
         env_configs.append(config)
     
     # Remaining envs go to Workers directory
+    # 50/50 chance to use PokemonBlue.gb with blue.init.state
     for i in range(3, num_envs):
         env_name = f"Env{i+1:03d}"
         env_dir = workers_dir / env_name
@@ -192,10 +197,19 @@ def setup_envs(
         (env_dir / "states").mkdir(exist_ok=True)
         (env_dir / "inputs").mkdir(exist_ok=True)
         
+        # 50/50 ROM selection for workers
+        use_blue = random.random() < 0.5
+        if use_blue:
+            worker_rom_path = rom_path.parent / "PokemonBlue.gb"
+            worker_init_state = rom_path.parent / "blue.init.state"
+        else:
+            worker_rom_path = rom_path
+            worker_init_state = init_state
+        
         # Copy ROM to env folder
-        rom_dest = env_dir / rom_path.name
-        if not rom_dest.exists() and rom_path.exists():
-            shutil.copy2(rom_path, rom_dest)
+        rom_dest = env_dir / worker_rom_path.name
+        if not rom_dest.exists() and worker_rom_path.exists():
+            shutil.copy2(worker_rom_path, rom_dest)
         
         # 50/50 random profile distribution for workers
         profile_name = random.choice(["trainer", "explorer"])
@@ -209,7 +223,7 @@ def setup_envs(
             "stage": stage,
             "stage_config": stage_config,
             "rom_path": str(rom_dest),
-            "init_state": str(init_state),
+            "init_state": str(worker_init_state),
             "profile": profile,
             "catch_directive": profile["catch_directive"],
             "train_directive": profile["train_directive"],
@@ -232,6 +246,8 @@ def setup_envs(
             "catch_directive": profile["catch_directive"],
             "train_directive": profile["train_directive"],
             "description": f"Worker {env_name} - {profile['name']} profile",
+            "rom_file": worker_rom_path.name,
+            "init_state_file": worker_init_state.name,
         }
         env_configs.append(config)
     
