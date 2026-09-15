@@ -27,7 +27,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from v2.red_gym_env_v2 import RedGymEnv
-from skill_lab.config import ACTION_FREQ, TILE_HEIGHT, TILE_WIDTH, EVENT_JSON_PATH
+from skill_lab.config import ACTION_FREQ, TILE_HEIGHT, TILE_WIDTH, EVENT_JSON_PATH, SAVE_ON_CATCH_ENABLED, SAVE_ON_CATCH_MIN_DV
 from skill_lab.env_wrapper import SkillLabWrapper
 from skill_lab.rewards import medium_reward
 
@@ -73,6 +73,8 @@ def make_env(rank: int, env_conf: dict[str, Any], env_setup_config: dict[str, An
             "train_directive": cfg.get("train_directive", []),
             "save_on_catch": cfg.get("save_on_catch", False),
             "reset_on_catch": cfg.get("reset_on_catch", True),
+            "save_on_catch_enabled": cfg.get("save_on_catch_enabled", SAVE_ON_CATCH_ENABLED),
+            "save_on_catch_min_dv": cfg.get("save_on_catch_min_dv", SAVE_ON_CATCH_MIN_DV),
         })
 
         return wrapped_env

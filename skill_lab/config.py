@@ -29,6 +29,7 @@ GRID_ROWS = 6
 TOTAL_TILES = GRID_COLS * GRID_ROWS  # 42 environments in mosaic
 
 DEFAULT_MAX_STEPS = 7200  # Max steps per episode
+DEFAULT_EMULATOR_SPEED = 0  # 0=auto/turbo, 1=normal, 2=double, etc.
 
 # --- Action Indices (must match v2/red_gym_env_v2.py valid_actions) ---
 # These are the standard indices used in PWhiddy's v2:
@@ -56,7 +57,7 @@ PANEL_WIDTH = 220
 # --- Catch/Train Directives ---
 # Pokemon to prioritize catching/training by species name or ID
 CATCH_DIRECTIVES = {
-    "charmander_trainer": ["Nidoran♂", "Pidgey", "Rattata", "Spearow", "Pikachu"],
+    "charmander_trainer": ["Nidoran♂", "Pidgey", "Pikachu"],
     "squirtle_trainer": [],  # Free exploration
     "bulbasaur_trainer": [],  # Free exploration
     "default": [],
@@ -76,3 +77,7 @@ SPECIALIZATION_PRESETS = {
     "trainer": {"reward_scale": 2.0, "explore_weight": 0.5},
     "speedrunner": {"reward_scale": 3.0, "explore_weight": 0.1},
 }
+
+# --- Save on Catch Settings ---
+SAVE_ON_CATCH_MIN_DV = 11  # Minimum DV for all stats to save state/inputs
+SAVE_ON_CATCH_ENABLED = True  # Enable saving on any Pokemon catch

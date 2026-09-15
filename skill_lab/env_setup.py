@@ -39,10 +39,18 @@ from skill_lab.config import (
     ENVS_DIR,
     PROFILES_DIR,
     TRAIN_DIRECTIVES,
+    SAVE_ON_CATCH_ENABLED,
+    SAVE_ON_CATCH_MIN_DV,
+    GRID_COLS,
+    GRID_ROWS,
 )
 from skill_lab.rewards import big_reward, huge_reward, medium_reward
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+# Default ROM paths
+DEFAULT_ROM_RED = PROJECT_ROOT / "PokemonRed.gb"
+DEFAULT_ROM_BLUE = PROJECT_ROOT / "PokemonBlue.gb"
 
 # Profile definitions
 PROFILES = {
@@ -54,6 +62,8 @@ PROFILES = {
         "train_directive": ["Nidoran♂", "Pikachu"],
         "save_on_catch": True,
         "reset_on_catch": False,
+        "save_on_catch_enabled": True,
+        "save_on_catch_min_dv": 11,
     },
     "explorer": {
         "name": "explorer",
@@ -63,6 +73,8 @@ PROFILES = {
         "train_directive": [],
         "save_on_catch": False,
         "reset_on_catch": True,
+        "save_on_catch_enabled": False,
+        "save_on_catch_min_dv": 11,
     },
 }
 
@@ -97,20 +109,24 @@ def setup_envs(
     stage: str = "starter",
     rom_path: Path | None = None,
     init_state: Path | None = None,
+    mosaic_rows: int = GRID_ROWS,
+    mosaic_cols: int = GRID_COLS,
 ) -> list[dict[str, Any]]:
     """Set up environment folders and assign directives.
 
     Args:
         num_envs: Total number of environments to create.
         stage: Which training stage we're in.
-        rom_path: Path to the ROM file (defaults to DEFAULT_ROM).
+        rom_path: Path to the ROM file (defaults to DEFAULT_ROM_RED).
         init_state: Path to initial save state (defaults to DEFAULT_INIT_STATE).
+        mosaic_rows: Number of rows in the mosaic grid.
+        mosaic_cols: Number of columns in the mosaic grid.
 
     Returns:
         List of env configs, one per environment.
     """
     if rom_path is None:
-        rom_path = DEFAULT_ROM
+        rom_path = DEFAULT_ROM_RED
     if init_state is None:
         init_state = DEFAULT_INIT_STATE
     
@@ -119,77 +135,99 @@ def setup_envs(
     # Load stage configuration
     stage_config = load_stage_config(stage)
     
-    # Create trainer directories (always 3 fixed trainers)
+    # Calculate mosaic tile count (visible environments)
+    mosaic_tiles = mosaic_rows * mosaic_cols
+    
+    # Trainers: 1/3 of mosaic tiles per starter type (Charmander, Squirtle, Bulbasaur)
+    trainers_per_type = max(1, mosaic_tiles // 3)
+    total_trainers = trainers_per_type * 3
+    
+    # Workers: remaining environments beyond mosaic tiles
+    num_workers = max(0, num_envs - mosaic_tiles)
+    
+    print(f"[EnvSetup] Mosaic: {mosaic_rows}x{mosaic_cols} = {mosaic_tiles} tiles")
+    print(f"[EnvSetup] Creating {trainers_per_type} trainers per starter type ({total_trainers} total trainers)")
+    print(f"[EnvSetup] Creating {num_workers} worker environments")
+    
+    env_configs = []
+    env_index = 0
     trainer_names = ["CharmanderTrainer", "SquirtleTrainer", "BulbasaurTrainer"]
     workers_dir = ENVS_DIR / "Workers"
     workers_dir.mkdir(exist_ok=True)
     
-    env_configs = []
-    
-    # First 3 envs are the named trainers (always use provided ROM)
-    for i in range(min(3, num_envs)):
-        trainer_name = trainer_names[i]
+    # Create trainers for each starter type (all use Pokemon Red)
+    for starter_idx, trainer_name in enumerate(trainer_names):
         trainer_dir = ENVS_DIR / trainer_name
         trainer_dir.mkdir(exist_ok=True)
         
-        # Each trainer gets an Env# subfolder
-        env_subdir = trainer_dir / f"Env{i+1:03d}"
-        env_subdir.mkdir(exist_ok=True)
-        (env_subdir / "checkpoints").mkdir(exist_ok=True)
-        (env_subdir / "states").mkdir(exist_ok=True)
-        (env_subdir / "inputs").mkdir(exist_ok=True)
-        
-        # Copy ROM to env folder
-        rom_dest = env_subdir / rom_path.name
-        if not rom_dest.exists() and rom_path.exists():
-            shutil.copy2(rom_path, rom_dest)
-        
-        # Assign profile: CharmanderTrainer = 100% trainer, others = 50/50 random
-        if i == 0:  # CharmanderTrainer
-            profile = PROFILES["trainer"].copy()
-        else:
-            profile_name = random.choice(["trainer", "explorer"])
-            profile = PROFILES[profile_name].copy()
-        
-        # Create settings.json
-        settings = {
-            "env_index": i,
-            "env_name": trainer_name,
-            "env_dir": str(env_subdir),
-            "stage": stage,
-            "stage_config": stage_config,
-            "rom_path": str(rom_dest),
-            "init_state": str(init_state),
-            "profile": profile,
-            "catch_directive": profile["catch_directive"],
-            "train_directive": profile["train_directive"],
-            "save_on_catch": profile["save_on_catch"],
-            "reset_on_catch": profile["reset_on_catch"],
-        }
-        
-        settings_path = env_subdir / "settings.json"
-        with open(settings_path, "w", encoding="utf-8") as f:
-            json.dump(settings, f, indent=2)
-        
-        config = {
-            "env_index": i,
-            "env_name": trainer_name,
-            "env_dir": str(env_subdir),
-            "settings_path": str(settings_path),
-            "directive": trainer_name.replace("Trainer", ""),
-            "target_starter": trainer_name.replace("Trainer", ""),
-            "profile": profile["name"],
-            "catch_directive": profile["catch_directive"],
-            "train_directive": profile["train_directive"],
-            "description": f"{trainer_name} - {profile['name']} profile",
-            "rom_file": rom_path.name,
-            "init_state_file": init_state.name,
-        }
-        env_configs.append(config)
+        for j in range(trainers_per_type):
+            if env_index >= num_envs:
+                break
+                
+            # Each trainer gets an Env# subfolder
+            env_subdir = trainer_dir / f"Env{env_index+1:03d}"
+            env_subdir.mkdir(exist_ok=True)
+            (env_subdir / "checkpoints").mkdir(exist_ok=True)
+            (env_subdir / "states").mkdir(exist_ok=True)
+            (env_subdir / "inputs").mkdir(exist_ok=True)
+            
+            # Copy ROM to env folder (trainers always use Pokemon Red)
+            trainer_rom = DEFAULT_ROM_RED
+            rom_dest = env_subdir / trainer_rom.name
+            if not rom_dest.exists() and trainer_rom.exists():
+                shutil.copy2(trainer_rom, rom_dest)
+            
+            # Assign profile: First trainer of each type = 100% trainer, others = 50/50 random
+            if j == 0:
+                profile = PROFILES["trainer"].copy()
+            else:
+                profile_name = random.choice(["trainer", "explorer"])
+                profile = PROFILES[profile_name].copy()
+            
+            # Create settings.json
+            settings = {
+                "env_index": env_index,
+                "env_name": trainer_name,
+                "env_dir": str(env_subdir),
+                "stage": stage,
+                "stage_config": stage_config,
+                "rom_path": str(rom_dest),
+                "init_state": str(init_state),
+                "profile": profile,
+                "catch_directive": profile["catch_directive"],
+                "train_directive": profile["train_directive"],
+                "save_on_catch": profile["save_on_catch"],
+                "reset_on_catch": profile["reset_on_catch"],
+            }
+            
+            settings_path = env_subdir / "settings.json"
+            with open(settings_path, "w", encoding="utf-8") as f:
+                json.dump(settings, f, indent=2)
+            
+            config = {
+                "env_index": env_index,
+                "env_name": trainer_name,
+                "env_dir": str(env_subdir),
+                "settings_path": str(settings_path),
+                "directive": trainer_name.replace("Trainer", ""),
+                "target_starter": trainer_name.replace("Trainer", ""),
+                "profile": profile["name"],
+                "catch_directive": profile["catch_directive"],
+                "train_directive": profile["train_directive"],
+                "save_on_catch": profile["save_on_catch"],
+                "reset_on_catch": profile["reset_on_catch"],
+                "save_on_catch_enabled": profile["save_on_catch_enabled"],
+                "save_on_catch_min_dv": profile["save_on_catch_min_dv"],
+                "description": f"{trainer_name} - {profile['name']} profile",
+                "rom_file": trainer_rom.name,
+                "init_state_file": init_state.name,
+            }
+            env_configs.append(config)
+            env_index += 1
     
     # Remaining envs go to Workers directory
-    # 50/50 chance to use PokemonBlue.gb with blue.init.state
-    for i in range(3, num_envs):
+    # Workers: 50/50 Pokemon Red / Pokemon Blue
+    for i in range(env_index, num_envs):
         env_name = f"Env{i+1:03d}"
         env_dir = workers_dir / env_name
         env_dir.mkdir(exist_ok=True)
@@ -198,18 +236,14 @@ def setup_envs(
         (env_dir / "inputs").mkdir(exist_ok=True)
         
         # 50/50 ROM selection for workers
-        use_blue = random.random() < 0.5
-        if use_blue:
-            worker_rom_path = rom_path.parent / "PokemonBlue.gb"
-            worker_init_state = rom_path.parent / "blue.init.state"
-        else:
-            worker_rom_path = rom_path
-            worker_init_state = init_state
+        use_blue = random.choice([True, False])
+        worker_rom = DEFAULT_ROM_BLUE if use_blue else DEFAULT_ROM_RED
+        worker_init_state = init_state
         
         # Copy ROM to env folder
-        rom_dest = env_dir / worker_rom_path.name
-        if not rom_dest.exists() and worker_rom_path.exists():
-            shutil.copy2(worker_rom_path, rom_dest)
+        rom_dest = env_dir / worker_rom.name
+        if not rom_dest.exists() and worker_rom.exists():
+            shutil.copy2(worker_rom, rom_dest)
         
         # 50/50 random profile distribution for workers
         profile_name = random.choice(["trainer", "explorer"])
@@ -245,17 +279,25 @@ def setup_envs(
             "profile": profile["name"],
             "catch_directive": profile["catch_directive"],
             "train_directive": profile["train_directive"],
+            "save_on_catch": profile["save_on_catch"],
+            "reset_on_catch": profile["reset_on_catch"],
+            "save_on_catch_enabled": profile["save_on_catch_enabled"],
+            "save_on_catch_min_dv": profile["save_on_catch_min_dv"],
             "description": f"Worker {env_name} - {profile['name']} profile",
-            "rom_file": worker_rom_path.name,
+            "rom_file": worker_rom.name,
             "init_state_file": worker_init_state.name,
         }
         env_configs.append(config)
     
     # Print assignment summary
+    num_trainers = total_trainers
+    num_workers = num_envs - num_trainers
+    red_count = sum(1 for cfg in env_configs if cfg.get('rom_file', '') == 'PokemonRed.gb')
+    blue_count = sum(1 for cfg in env_configs if cfg.get('rom_file', '') == 'PokemonBlue.gb')
     print(f"\n[EnvSetup] Created {num_envs} environments for stage '{stage}':")
-    print(f"  Trainers (0-2): CharmanderTrainer, SquirtleTrainer, BulbasaurTrainer")
-    print(f"  Workers (3-{num_envs-1}): {num_envs - 3} worker environments")
-    print(f"  ROM copied to each env folder: {rom_path.name}")
+    print(f"  Trainers: {num_trainers} ({trainers_per_type} per starter type: Charmander, Squirtle, Bulbasaur)")
+    print(f"  Workers: {num_workers}")
+    print(f"  ROM Distribution: {red_count} PokemonRed.gb, {blue_count} PokemonBlue.gb")
     print()
     
     return env_configs
@@ -281,7 +323,7 @@ def expand_envs(
         List of new env configs that were created.
     """
     if rom_path is None:
-        rom_path = DEFAULT_ROM
+        rom_path = DEFAULT_ROM_RED
     if init_state is None:
         init_state = DEFAULT_INIT_STATE
     
@@ -301,10 +343,14 @@ def expand_envs(
         (env_dir / "states").mkdir(exist_ok=True)
         (env_dir / "inputs").mkdir(exist_ok=True)
         
+        # 50/50 ROM selection for new workers
+        use_blue = random.choice([True, False])
+        worker_rom = DEFAULT_ROM_BLUE if use_blue else DEFAULT_ROM_RED
+        
         # Copy ROM to env folder
-        rom_dest = env_dir / rom_path.name
-        if not rom_dest.exists() and rom_path.exists():
-            shutil.copy2(rom_path, rom_dest)
+        rom_dest = env_dir / worker_rom.name
+        if not rom_dest.exists() and worker_rom.exists():
+            shutil.copy2(worker_rom, rom_dest)
         
         # 50/50 random profile distribution for new workers
         profile_name = random.choice(["trainer", "explorer"])
@@ -340,7 +386,12 @@ def expand_envs(
             "profile": profile["name"],
             "catch_directive": profile["catch_directive"],
             "train_directive": profile["train_directive"],
+            "save_on_catch": profile["save_on_catch"],
+            "reset_on_catch": profile["reset_on_catch"],
+            "save_on_catch_enabled": profile["save_on_catch_enabled"],
+            "save_on_catch_min_dv": profile["save_on_catch_min_dv"],
             "description": f"Worker {env_name} - {profile['name']} profile (newly created)",
+            "rom_file": worker_rom.name,
         }
         new_configs.append(config)
     
@@ -384,12 +435,15 @@ def ensure_env_exists(
     rom_source_path: Path | None = None,
     default_state_path: str | None = None,
     launcher_stage: str | None = None,
+    trainers_per_type: int = 14,
+    mosaic_rows: int = GRID_ROWS,
+    mosaic_cols: int = GRID_COLS,
 ) -> dict[str, Any]:
     """Ensure an environment folder exists, creating it if necessary.
     
     This function is called at runtime when the mosaic launches. It checks if
     the environment folder exists, and if not, creates it with proper settings.
-    For Worker envs (index >= 3), uses 'autostage' which will load the stage
+    For Worker envs, uses 'autostage' which will load the stage
     specified by the launcher.
     
     Args:
@@ -397,12 +451,19 @@ def ensure_env_exists(
         rom_source_path: Path to source ROM file to copy.
         default_state_path: Default initial state path.
         launcher_stage: Stage name selected in launcher (for autostage workers).
-    
+        trainers_per_type: Number of trainers per starter type (default 14 for 42 total).
+        mosaic_rows: Number of rows in the mosaic grid.
+        mosaic_cols: Number of columns in the mosaic grid.
+
     Returns:
         The environment settings dict.
     """
-    env_path = get_env_path(env_index)
+    env_path = get_env_path(env_index, trainers_per_type=trainers_per_type, mosaic_rows=mosaic_rows, mosaic_cols=mosaic_cols)
     settings_file = env_path / "settings.json"
+    
+    mosaic_tiles = mosaic_rows * mosaic_cols
+    total_trainers = trainers_per_type * 3
+    is_trainer = env_index < total_trainers
     
     # Create directory structure if missing
     if not env_path.exists():
@@ -412,15 +473,29 @@ def ensure_env_exists(
         (env_path / "inputs").mkdir(exist_ok=True)
         
         # Determine profile
-        if env_index == 0:  # CharmanderTrainer = 100% trainer
-            profile_type = "trainer"
+        if is_trainer:
+            # First trainer of each type = 100% trainer, others = 50/50 random
+            trainer_idx = env_index // trainers_per_type
+            trainer_offset = env_index % trainers_per_type
+            if trainer_offset == 0:
+                profile_type = "trainer"
+            else:
+                profile_type = random.choice(["trainer", "explorer"])
         else:
+            # Workers = 50/50 random
             profile_type = random.choice(["trainer", "explorer"])
         
         profile = PROFILES[profile_type].copy()
         
+        # Determine ROM - trainers always use Red, workers 50/50 Red/Blue
+        if is_trainer:
+            assigned_rom = DEFAULT_ROM_RED
+        else:
+            use_blue = random.choice([True, False])
+            assigned_rom = DEFAULT_ROM_BLUE if use_blue else DEFAULT_ROM_RED
+        
         # Determine stage config
-        if env_index < 3:
+        if is_trainer:
             # Named trainers use their specific stage (starter for now)
             stage_config_name = "starter"
         else:
@@ -435,59 +510,74 @@ def ensure_env_exists(
         
         stage_config = load_stage_config(actual_stage)
         
+        # ROM destination filename matches the assigned ROM
+        rom_dest_name = assigned_rom.name
+        
         settings = {
             "env_index": env_index,
             "stage_config": stage_config_name,
             "launcher_override_stage": launcher_stage,
-            "rom_path": str(env_path / "pokemon.gb"),
+            "rom_path": str(env_path / rom_dest_name),
             "initial_state_path": default_state_path or "",
             "profile": profile,
             "catch_directive": profile["catch_directive"],
             "train_directive": profile["train_directive"],
             "save_on_catch": profile["save_on_catch"],
             "reset_on_catch": profile["reset_on_catch"],
+            "save_on_catch_enabled": profile["save_on_catch_enabled"],
+            "save_on_catch_min_dv": profile["save_on_catch_min_dv"],
         }
         
         with open(settings_file, "w", encoding="utf-8") as f:
             json.dump(settings, f, indent=2)
         
-        print(f"[EnvSetup] Created new environment at {env_path}")
+        print(f"[EnvSetup] Created new environment at {env_path} with ROM {rom_dest_name}")
     
     # Copy ROM if source provided and target doesn't exist
-    if rom_source_path and not (env_path / "pokemon.gb").exists():
-        shutil.copy2(rom_source_path, env_path / "pokemon.gb")
-        print(f"[EnvSetup] Copied ROM to {env_path}")
+    if rom_source_path:
+        target_rom_name = rom_source_path.name
+        if not (env_path / target_rom_name).exists():
+            shutil.copy2(rom_source_path, env_path / target_rom_name)
+            print(f"[EnvSetup] Copied ROM to {env_path}")
     
     return get_env_config(env_index)
 
 
-def get_env_path(env_index: int) -> Path:
+def get_env_path(env_index: int, trainers_per_type: int = 14, mosaic_rows: int = GRID_ROWS, mosaic_cols: int = GRID_COLS) -> Path:
     """Get the path for an environment by index.
     
     Args:
         env_index: The environment index (0-based).
+        trainers_per_type: Number of trainers per starter type.
+        mosaic_rows: Number of rows in the mosaic grid.
+        mosaic_cols: Number of columns in the mosaic grid.
         
     Returns:
         Path to the environment folder.
     """
     env_name = f"Env{env_index + 1:03d}"
     
-    if env_index < 3:
-        trainer_names = ["CharmanderTrainer", "SquirtleTrainer", "BulbasaurTrainer"]
-        return ENVS_DIR / trainer_names[env_index] / env_name
+    mosaic_tiles = mosaic_rows * mosaic_cols
+    total_trainers = trainers_per_type * 3
+    
+    trainer_names = ["CharmanderTrainer", "SquirtleTrainer", "BulbasaurTrainer"]
+    
+    if env_index < total_trainers:
+        trainer_idx = env_index // trainers_per_type
+        return ENVS_DIR / trainer_names[trainer_idx] / env_name
     else:
         return ENVS_DIR / "Workers" / env_name
 
 
-def copy_file_to_all_envs(source_file_path: str, dest_filename: str = "pokemon.gb") -> int:
+def copy_file_to_all_envs(source_file_path: str, dest_filename: str | None = None) -> int:
     """Copy a file to all existing environment folders.
     
     Useful for updating resources (ROM, states) without regenerating settings.
     
     Args:
         source_file_path: Path to the source file.
-        dest_filename: Name to use in destination folders.
-    
+        dest_filename: Name to use in destination folders (defaults to source filename).
+        
     Returns:
         Number of environments the file was copied to.
     """
@@ -495,6 +585,9 @@ def copy_file_to_all_envs(source_file_path: str, dest_filename: str = "pokemon.g
     if not source.exists():
         print(f"[EnvSetup] Source file not found: {source}")
         return 0
+    
+    if dest_filename is None:
+        dest_filename = source.name
     
     count = 0
     
@@ -515,5 +608,5 @@ def copy_file_to_all_envs(source_file_path: str, dest_filename: str = "pokemon.g
                 shutil.copy2(source, env_folder / dest_filename)
                 count += 1
     
-    print(f"[EnvSetup] Copied {source.name} to {count} environments.")
+    print(f"[EnvSetup] Copied {source.name} to {count} environments as {dest_filename}.")
     return count
