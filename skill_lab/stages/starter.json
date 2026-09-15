@@ -4,6 +4,7 @@
   "max_steps": 1200,
   "disable_start": true,
   "disable_select": true,
+  "disable_B": false,
   "milestone_reward": 5.0,
   "exploration_reward": 0.1,
   "combat_reward": 0.0,
@@ -14,7 +15,8 @@
     "0xD747-2"
   ],
   "action_masks": {
-    "B": false
+    "B": false,
+    "A": false
   },
   "directives": {
     "0": {
