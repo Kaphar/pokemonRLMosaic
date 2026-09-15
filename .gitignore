@@ -1,1 +1,1 @@
-Nothing needs to be added to the .gitignore file based on the provided changes. The modified file 'skill_lab/run_mosaic.py' is a Python source file which should not be ignored.
+Nothing should be ignored based on the provided file changes. The only modified file is a Python source file (`skill_lab/run_mosaic.py`), which should not be added to .gitignore.
