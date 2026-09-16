@@ -101,6 +101,13 @@ class EnvConfigWindow:
         btn_frame.grid(row=2, column=0, columnspan=2, pady=10)
         ttk.Button(btn_frame, text="Save Configuration", command=self._save_config).pack(side=tk.LEFT, padx=5)
         ttk.Button(btn_frame, text="Cancel", command=self.top.destroy).pack(side=tk.LEFT, padx=5)
+        
+        # Instructions
+        ttk.Label(
+            main_frame, 
+            text="Configure each trainer and worker settings below.\nThese settings will be saved and used on next launch.",
+            font=("", 9), foreground="gray"
+        ).grid(row=3, column=0, columnspan=2, pady=(10, 0))
     
     def _build_trainer_tab(self, tab, trainer_name: str) -> None:
         config = self.trainer_configs[trainer_name]
@@ -204,12 +211,52 @@ class EnvConfigWindow:
             trainer_dir.mkdir(parents=True, exist_ok=True)
             
             config_file = trainer_dir / "trainer_config.json"
-            # Would need to get actual values from the UI widgets
-            # For now this is a placeholder - full implementation would extract widget values
+            # Get the tab for this trainer
+            tab = None
+            for widget in self.top.winfo_children():
+                if isinstance(widget, ttk.Frame):
+                    for child in widget.winfo_children():
+                        if isinstance(child, ttk.Notebook):
+                            for tab_widget in child.winfo_children():
+                                if hasattr(tab_widget, 'trainer_name') and tab_widget.trainer_name == trainer_name:
+                                    tab = tab_widget
+                                    break
+            
+            if tab and hasattr(tab, 'config_vars'):
+                config_data = {
+                    "profile": tab.config_vars["profile"].get(),
+                    "rom": tab.config_vars["rom"].get(),
+                    "init_state": tab.config_vars["init_state"].get(),
+                    "stage": tab.config_vars["stage"].get(),
+                    "reward_scale": tab.config_vars["reward_scale"].get(),
+                    "explore_weight": tab.config_vars["explore_weight"].get(),
+                }
+                with open(config_file, "w") as f:
+                    json.dump(config_data, f, indent=2)
         
         # Save worker defaults
         worker_config_file = ENVS_DIR / "worker_defaults.json"
-        # Would need to get actual values from the UI widgets
+        # Get the worker tab
+        worker_tab = None
+        for widget in self.top.winfo_children():
+            if isinstance(widget, ttk.Frame):
+                for child in widget.winfo_children():
+                    if isinstance(child, ttk.Notebook):
+                        for tab_widget in child.winfo_children():
+                            if hasattr(tab_widget, 'config_vars') and "blue_chance" in tab_widget.config_vars:
+                                worker_tab = tab_widget
+                                break
+        
+        if worker_tab and hasattr(worker_tab, 'config_vars'):
+            worker_data = {
+                "blue_rom_chance": worker_tab.config_vars["blue_chance"].get(),
+                "profile_distribution": worker_tab.config_vars["profile_dist"].get(),
+                "stage": worker_tab.config_vars["stage"].get(),
+                "reward_scale": worker_tab.config_vars["reward_scale"].get(),
+                "explore_weight": worker_tab.config_vars["explore_weight"].get(),
+            }
+            with open(worker_config_file, "w") as f:
+                json.dump(worker_data, f, indent=2)
         
         messagebox.showinfo("Configuration Saved", 
                            "Environment configuration has been saved.\nThese settings will be used on next launch.")
@@ -385,10 +432,15 @@ class Launcher:
             font=("", 8), foreground="gray"
         ).grid(row=14, column=0, columnspan=2, sticky="w")
 
-        # Row 15: Launch
+        # Row 15: Setup Environment Config button
+        ttk.Button(
+            main_frame, text="Setup Environment Config", command=self._open_env_config
+        ).grid(row=15, column=0, columnspan=2, pady=5)
+
+        # Row 16: Launch
         ttk.Button(
             main_frame, text="Launch", command=self._launch
-        ).grid(row=15, column=0, columnspan=2, pady=10)
+        ).grid(row=16, column=0, columnspan=2, pady=10)
 
         # Initialize
         self._on_mode_change()

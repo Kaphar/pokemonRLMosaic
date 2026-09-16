@@ -11,34 +11,31 @@ __pycache__/
 venv/
 env/
 
-# Build artifacts
-build/
-dist/
-*.egg-info/
-
 # Logs
 *.log
 
-# IDE
+# Temporary files
+*.tmp
+*.swp
+*~
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Coverage reports
+.coverage
+htmlcov/
+coverage/
+
+# IDE specific
 .vscode/
 .idea/
 *.swp
 *.swo
 
-# Coverage
-.coverage
-htmlcov/
-coverage/
-
-# OS
-.DS_Store
-Thumbs.db
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
 ```
-mosaic_sessions
-skill_lab/starter_report.html
-skill_lab/envs/*
-skill_lab/backup
-PokemonRed.gb
-PokemonBlue.gb
-PokemonBlue.gb.ram
-PokemonRed.gb.ram
