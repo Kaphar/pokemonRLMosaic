@@ -1,11 +1,12 @@
 ```
 # Python
 __pycache__/
+*/__pycache__/
 *.pyc
 *.pyo
 *.pyd
 
-# Environment
+# Dependencies
 .venv/
 venv/
 env/
@@ -30,6 +31,8 @@ coverage/
 # IDE specific
 .vscode/
 .idea/
+*.swp
+*.swo
 
 # Distribution / packaging
 dist/

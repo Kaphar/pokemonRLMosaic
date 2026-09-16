@@ -28,12 +28,12 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from skill_lab.panel_data import (
-    MemoryWatchTracker,
+    # MemoryWatchTracker,
     MemoryWatchWindow,
     address_range,
     draw_bag_panel,
     draw_memory_watch_panel,
-    draw_menu_handler_info,
+    #draw_menu_handler_info,
     draw_party_panel,
     get_screen_size,
     positioned_windows,
@@ -168,8 +168,8 @@ Y_POS_ADDRESS = 0xD361
 BADGE_COUNT_ADDRESS = 0xD356
 
 # Inspector panel layout
-INSPECTOR_W = 800
-INSPECTOR_H = 800
+INSPECTOR_W = 900
+INSPECTOR_H = 1000
 LEFT_PANEL_W = 320
 RIGHT_PANEL_W = 400
 MAP_LABEL_H = 220
