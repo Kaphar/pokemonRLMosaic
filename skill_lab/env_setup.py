@@ -81,12 +81,14 @@ def load_stage_config(stage_name: str) -> dict[str, Any]:
         "name": stage_name,
         "description": f"Default {stage_name} stage",
         "max_steps": 7200,
-        "disable_start": True,
-        "disable_select": True,
-        "disable_B": False,
         "milestone_reward": medium_reward,
         "init_state": str(DEFAULT_INIT_STATE),
-        "action_masks": {},
+        "button_masks": {
+            "Start": True,
+            "Select": True,
+            "B": False,
+            "A": False,
+        },
     }
 
 
@@ -117,18 +119,52 @@ def setup_envs(
     # Load stage configuration
     stage_config = load_stage_config(stage)
     
-    # Create trainer directories (always 3 fixed trainers)
+    # Load trainer configs from saved files if they exist
+    trainer_configs = {}
     trainer_names = ["CharmanderTrainer", "SquirtleTrainer", "BulbasaurTrainer"]
+    for trainer_name in trainer_names:
+        config_file = ENVS_DIR / trainer_name / "trainer_config.json"
+        if config_file.exists():
+            with open(config_file, "r") as f:
+                trainer_configs[trainer_name] = json.load(f)
+    
+    # Load worker defaults from saved file if it exists
+    worker_defaults = {}
+    worker_config_file = ENVS_DIR / "worker_defaults.json"
+    if worker_config_file.exists():
+        with open(worker_config_file, "r") as f:
+            worker_defaults = json.load(f)
+    
+    # Create trainer directories (always 3 fixed trainers)
     workers_dir = ENVS_DIR / "Workers"
     workers_dir.mkdir(exist_ok=True)
     
     env_configs = []
     
-    # First 3 envs are the named trainers (always use provided ROM)
+    # First 3 envs are the named trainers (use saved config or defaults)
     for i in range(min(3, num_envs)):
         trainer_name = trainer_names[i]
         trainer_dir = ENVS_DIR / trainer_name
         trainer_dir.mkdir(exist_ok=True)
+        
+        # Get trainer config or use defaults
+        trainer_cfg = trainer_configs.get(trainer_name, {})
+        
+        # Use configured values or defaults
+        cfg_rom_name = trainer_cfg.get("rom", rom_path.name)
+        cfg_init_state_name = trainer_cfg.get("init_state", init_state.name)
+        cfg_stage = trainer_cfg.get("stage", stage)
+        cfg_reward_scale = trainer_cfg.get("reward_scale", None)
+        cfg_explore_weight = trainer_cfg.get("explore_weight", None)
+        cfg_profile_name = trainer_cfg.get("profile", "trainer" if i == 0 else random.choice(["trainer", "explorer"]))
+        
+        # Set up ROM and init state paths
+        if cfg_rom_name == "PokemonBlue.gb":
+            trainer_rom_path = rom_path.parent / cfg_rom_name
+            trainer_init_state = rom_path.parent / cfg_init_state_name
+        else:
+            trainer_rom_path = rom_path
+            trainer_init_state = init_state
         
         # Each trainer gets an Env# subfolder
         env_subdir = trainer_dir / f"Env{i+1:03d}"
@@ -138,26 +174,28 @@ def setup_envs(
         (env_subdir / "inputs").mkdir(exist_ok=True)
         
         # Copy ROM to env folder
-        rom_dest = env_subdir / rom_path.name
-        if not rom_dest.exists() and rom_path.exists():
-            shutil.copy2(rom_path, rom_dest)
+        rom_dest = env_subdir / trainer_rom_path.name
+        if not rom_dest.exists() and trainer_rom_path.exists():
+            shutil.copy2(trainer_rom_path, rom_dest)
         
-        # Assign profile: CharmanderTrainer = 100% trainer, others = 50/50 random
-        if i == 0:  # CharmanderTrainer
-            profile = PROFILES["trainer"].copy()
-        else:
-            profile_name = random.choice(["trainer", "explorer"])
-            profile = PROFILES[profile_name].copy()
+        # Assign profile based on config
+        profile = PROFILES.get(cfg_profile_name, PROFILES["trainer"]).copy()
+        
+        # Override reward scale and explore weight if configured
+        if cfg_reward_scale is not None:
+            profile["reward_scale"] = cfg_reward_scale
+        if cfg_explore_weight is not None:
+            profile["explore_weight"] = cfg_explore_weight
         
         # Create settings.json
         settings = {
             "env_index": i,
             "env_name": trainer_name,
             "env_dir": str(env_subdir),
-            "stage": stage,
+            "stage": cfg_stage,  # Use configured stage
             "stage_config": stage_config,
             "rom_path": str(rom_dest),
-            "init_state": str(init_state),
+            "init_state": str(trainer_init_state),  # Use configured init state
             "profile": profile,
             "catch_directive": profile["catch_directive"],
             "train_directive": profile["train_directive"],
@@ -180,13 +218,19 @@ def setup_envs(
             "catch_directive": profile["catch_directive"],
             "train_directive": profile["train_directive"],
             "description": f"{trainer_name} - {profile['name']} profile",
-            "rom_file": rom_path.name,
-            "init_state_file": init_state.name,
+            "rom_file": trainer_rom_path.name,  # Use actual ROM name
+            "init_state_file": trainer_init_state.name,  # Use actual init state name
         }
         env_configs.append(config)
     
     # Remaining envs go to Workers directory
-    # 50/50 chance to use PokemonBlue.gb with blue.init.state
+    # Use worker_defaults config if available, otherwise 50/50 for Blue ROM
+    blue_rom_chance = worker_defaults.get("blue_rom_chance", 0.5)
+    profile_distribution = worker_defaults.get("profile_distribution", "50/50")
+    worker_stage = worker_defaults.get("stage", stage)
+    worker_reward_scale = worker_defaults.get("reward_scale", None)
+    worker_explore_weight = worker_defaults.get("explore_weight", None)
+    
     for i in range(3, num_envs):
         env_name = f"Env{i+1:03d}"
         env_dir = workers_dir / env_name
@@ -195,8 +239,8 @@ def setup_envs(
         (env_dir / "states").mkdir(exist_ok=True)
         (env_dir / "inputs").mkdir(exist_ok=True)
         
-        # 50/50 ROM selection for workers
-        use_blue = random.random() < 0.5
+        # Blue ROM selection based on configured chance
+        use_blue = random.random() < blue_rom_chance
         if use_blue:
             worker_rom_path = rom_path.parent / "PokemonBlue.gb"
             worker_init_state = rom_path.parent / "blue.init.state"
@@ -209,16 +253,28 @@ def setup_envs(
         if not rom_dest.exists() and worker_rom_path.exists():
             shutil.copy2(worker_rom_path, rom_dest)
         
-        # 50/50 random profile distribution for workers
-        profile_name = random.choice(["trainer", "explorer"])
+        # Profile distribution based on config
+        if profile_distribution == "all_trainer":
+            profile_name = "trainer"
+        elif profile_distribution == "all_explorer":
+            profile_name = "explorer"
+        else:  # 50/50
+            profile_name = random.choice(["trainer", "explorer"])
+        
         profile = PROFILES[profile_name].copy()
+        
+        # Override reward scale and explore weight if configured
+        if worker_reward_scale is not None:
+            profile["reward_scale"] = worker_reward_scale
+        if worker_explore_weight is not None:
+            profile["explore_weight"] = worker_explore_weight
         
         # Create settings.json
         settings = {
             "env_index": i,
             "env_name": env_name,
             "env_dir": str(env_dir),
-            "stage": stage,
+            "stage": worker_stage,  # Use configured worker stage
             "stage_config": stage_config,
             "rom_path": str(rom_dest),
             "init_state": str(worker_init_state),

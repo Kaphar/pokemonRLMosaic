@@ -8,22 +8,28 @@ __pycache__/
 # Environment
 .venv/
 venv/
-.env
-.env.local
-*.env.*
+env/
 
-# Logs and temp files
+# Logs
 *.log
-*.tmp
 
-# Editors
+# Temporary files
+*.tmp
+*.swp
+*~
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Coverage reports
+.coverage
+htmlcov/
+coverage/
+
+# IDE specific
 .vscode/
 .idea/
-
-# Coverage
-.coverage
-coverage/
-htmlcov/
 
 # Distribution / packaging
 dist/

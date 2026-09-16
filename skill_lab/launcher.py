@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -15,6 +16,251 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from skill_lab.curriculum import list_stages, get_stage
 from skill_lab.rewards import medium_reward
+from skill_lab.env_setup import PROFILES, ENVS_DIR
+
+
+class EnvConfigWindow:
+    """Configuration window for setting up environment settings per trainer and worker."""
+    
+    def __init__(self, parent) -> None:
+        self.top = tk.Toplevel(parent)
+        self.top.title("Environment Configuration")
+        self.top.geometry("700x550")
+        self.top.resizable(True, True)
+        
+        # Load current configs if they exist
+        self.trainer_configs = self._load_trainer_configs()
+        self.worker_defaults = self._load_worker_defaults()
+        
+        self._build_ui()
+    
+    def _load_trainer_configs(self) -> dict:
+        """Load existing trainer configurations from env folders."""
+        configs = {}
+        trainer_names = ["CharmanderTrainer", "SquirtleTrainer", "BulbasaurTrainer"]
+        
+        for trainer_name in trainer_names:
+            trainer_dir = ENVS_DIR / trainer_name
+            config_file = trainer_dir / "trainer_config.json"
+            if config_file.exists():
+                with open(config_file, "r") as f:
+                    configs[trainer_name] = json.load(f)
+            else:
+                # Default config
+                configs[trainer_name] = {
+                    "profile": "trainer" if trainer_name == "CharmanderTrainer" else "explorer",
+                    "rom": "PokemonRed.gb",
+                    "init_state": f"{trainer_name.replace('Trainer', '').lower()}.init.state",
+                    "stage": "progress",
+                    "reward_scale": 2.0 if trainer_name == "CharmanderTrainer" else 1.0,
+                    "explore_weight": 0.5 if trainer_name == "CharmanderTrainer" else 1.0,
+                }
+        
+        return configs
+    
+    def _load_worker_defaults(self) -> dict:
+        """Load worker default configuration."""
+        config_file = ENVS_DIR / "worker_defaults.json"
+        if config_file.exists():
+            with open(config_file, "r") as f:
+                return json.load(f)
+        return {
+            "blue_rom_chance": 0.5,
+            "profile_distribution": "50/50",
+            "stage": "progress",
+            "reward_scale": 1.0,
+            "explore_weight": 1.0,
+        }
+    
+    def _build_ui(self) -> None:
+        main_frame = ttk.Frame(self.top, padding=10)
+        main_frame.grid(row=0, column=0, sticky="nsew")
+        
+        # Title
+        ttk.Label(main_frame, text="Environment Configuration Setup", font=("", 14, "bold")).grid(
+            row=0, column=0, columnspan=2, pady=(0, 10)
+        )
+        
+        # Trainer configurations notebook
+        notebook = ttk.Notebook(main_frame)
+        notebook.grid(row=1, column=0, columnspan=2, sticky="nsew", pady=5)
+        
+        # Create tabs for each trainer
+        for trainer_name in ["CharmanderTrainer", "SquirtleTrainer", "BulbasaurTrainer"]:
+            tab = ttk.Frame(notebook, padding=10)
+            notebook.add(tab, text=trainer_name.replace("Trainer", ""))
+            self._build_trainer_tab(tab, trainer_name)
+        
+        # Worker defaults tab
+        worker_tab = ttk.Frame(notebook, padding=10)
+        notebook.add(worker_tab, text="Worker Defaults")
+        self._build_worker_tab(worker_tab)
+        
+        # Buttons
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.grid(row=2, column=0, columnspan=2, pady=10)
+        ttk.Button(btn_frame, text="Save Configuration", command=self._save_config).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="Cancel", command=self.top.destroy).pack(side=tk.LEFT, padx=5)
+        
+        # Instructions
+        ttk.Label(
+            main_frame, 
+            text="Configure each trainer and worker settings below.\nThese settings will be saved and used on next launch.",
+            font=("", 9), foreground="gray"
+        ).grid(row=3, column=0, columnspan=2, pady=(10, 0))
+    
+    def _build_trainer_tab(self, tab, trainer_name: str) -> None:
+        config = self.trainer_configs[trainer_name]
+        
+        # Profile selection
+        ttk.Label(tab, text="Profile:").grid(row=0, column=0, sticky="w", pady=5)
+        profile_var = tk.StringVar(value=config.get("profile", "trainer"))
+        ttk.Combobox(tab, textvariable=profile_var, values=["trainer", "explorer"], 
+                     state="readonly", width=15).grid(row=0, column=1, sticky="w", pady=5)
+        
+        # ROM selection
+        ttk.Label(tab, text="ROM File:").grid(row=1, column=0, sticky="w", pady=5)
+        rom_var = tk.StringVar(value=config.get("rom", "PokemonRed.gb"))
+        ttk.Combobox(tab, textvariable=rom_var, values=["PokemonRed.gb", "PokemonBlue.gb"],
+                     state="readonly", width=20).grid(row=1, column=1, sticky="w", pady=5)
+        
+        # Initial state
+        ttk.Label(tab, text="Initial State:").grid(row=2, column=0, sticky="w", pady=5)
+        state_var = tk.StringVar(value=config.get("init_state", "init.state"))
+        ttk.Entry(tab, textvariable=state_var, width=25).grid(row=2, column=1, sticky="w", pady=5)
+        
+        # Stage selection
+        ttk.Label(tab, text="Training Stage:").grid(row=3, column=0, sticky="w", pady=5)
+        stage_var = tk.StringVar(value=config.get("stage", "progress"))
+        ttk.Combobox(tab, textvariable=stage_var, values=list_stages(),
+                     state="readonly", width=15).grid(row=3, column=1, sticky="w", pady=5)
+        
+        # Reward scale
+        ttk.Label(tab, text="Reward Scale:").grid(row=4, column=0, sticky="w", pady=5)
+        reward_scale_var = tk.DoubleVar(value=config.get("reward_scale", 1.0))
+        ttk.Spinbox(tab, from_=0.1, to=10.0, increment=0.1, textvariable=reward_scale_var,
+                    width=8).grid(row=4, column=1, sticky="w", pady=5)
+        
+        # Explore weight
+        ttk.Label(tab, text="Explore Weight:").grid(row=5, column=0, sticky="w", pady=5)
+        explore_weight_var = tk.DoubleVar(value=config.get("explore_weight", 1.0))
+        ttk.Spinbox(tab, from_=0.1, to=10.0, increment=0.1, textvariable=explore_weight_var,
+                    width=8).grid(row=5, column=1, sticky="w", pady=5)
+        
+        # Store variables for saving
+        tab.config_vars = {
+            "profile": profile_var,
+            "rom": rom_var,
+            "init_state": state_var,
+            "stage": stage_var,
+            "reward_scale": reward_scale_var,
+            "explore_weight": explore_weight_var,
+        }
+        tab.trainer_name = trainer_name
+    
+    def _build_worker_tab(self, tab) -> None:
+        config = self.worker_defaults
+        
+        # Blue ROM chance
+        ttk.Label(tab, text="Blue ROM Chance:").grid(row=0, column=0, sticky="w", pady=5)
+        blue_chance_var = tk.DoubleVar(value=config.get("blue_rom_chance", 0.5))
+        ttk.Spinbox(tab, from_=0.0, to=1.0, increment=0.1, textvariable=blue_chance_var,
+                    width=8).grid(row=0, column=1, sticky="w", pady=5)
+        ttk.Label(tab, text="(0.0 = all Red, 1.0 = all Blue, 0.5 = 50/50)").grid(
+            row=0, column=2, sticky="w", pady=5)
+        
+        # Profile distribution
+        ttk.Label(tab, text="Profile Distribution:").grid(row=1, column=0, sticky="w", pady=5)
+        profile_dist_var = tk.StringVar(value=config.get("profile_distribution", "50/50"))
+        ttk.Combobox(tab, textvariable=profile_dist_var, 
+                     values=["50/50", "all_trainer", "all_explorer"],
+                     state="readonly", width=15).grid(row=1, column=1, sticky="w", pady=5)
+        
+        # Stage selection
+        ttk.Label(tab, text="Training Stage:").grid(row=2, column=0, sticky="w", pady=5)
+        stage_var = tk.StringVar(value=config.get("stage", "progress"))
+        ttk.Combobox(tab, textvariable=stage_var, values=list_stages(),
+                     state="readonly", width=15).grid(row=2, column=1, sticky="w", pady=5)
+        
+        # Reward scale
+        ttk.Label(tab, text="Reward Scale:").grid(row=3, column=0, sticky="w", pady=5)
+        reward_scale_var = tk.DoubleVar(value=config.get("reward_scale", 1.0))
+        ttk.Spinbox(tab, from_=0.1, to=10.0, increment=0.1, textvariable=reward_scale_var,
+                    width=8).grid(row=3, column=1, sticky="w", pady=5)
+        
+        # Explore weight
+        ttk.Label(tab, text="Explore Weight:").grid(row=4, column=0, sticky="w", pady=5)
+        explore_weight_var = tk.DoubleVar(value=config.get("explore_weight", 1.0))
+        ttk.Spinbox(tab, from_=0.1, to=10.0, increment=0.1, textvariable=explore_weight_var,
+                    width=8).grid(row=4, column=1, sticky="w", pady=5)
+        
+        # Store variables for saving
+        tab.config_vars = {
+            "blue_chance": blue_chance_var,
+            "profile_dist": profile_dist_var,
+            "stage": stage_var,
+            "reward_scale": reward_scale_var,
+            "explore_weight": explore_weight_var,
+        }
+    
+    def _save_config(self) -> None:
+        """Save configuration to files."""
+        # Save trainer configs
+        for trainer_name in ["CharmanderTrainer", "SquirtleTrainer", "BulbasaurTrainer"]:
+            trainer_dir = ENVS_DIR / trainer_name
+            trainer_dir.mkdir(parents=True, exist_ok=True)
+            
+            config_file = trainer_dir / "trainer_config.json"
+            # Get the tab for this trainer
+            tab = None
+            for widget in self.top.winfo_children():
+                if isinstance(widget, ttk.Frame):
+                    for child in widget.winfo_children():
+                        if isinstance(child, ttk.Notebook):
+                            for tab_widget in child.winfo_children():
+                                if hasattr(tab_widget, 'trainer_name') and tab_widget.trainer_name == trainer_name:
+                                    tab = tab_widget
+                                    break
+            
+            if tab and hasattr(tab, 'config_vars'):
+                config_data = {
+                    "profile": tab.config_vars["profile"].get(),
+                    "rom": tab.config_vars["rom"].get(),
+                    "init_state": tab.config_vars["init_state"].get(),
+                    "stage": tab.config_vars["stage"].get(),
+                    "reward_scale": tab.config_vars["reward_scale"].get(),
+                    "explore_weight": tab.config_vars["explore_weight"].get(),
+                }
+                with open(config_file, "w") as f:
+                    json.dump(config_data, f, indent=2)
+        
+        # Save worker defaults
+        worker_config_file = ENVS_DIR / "worker_defaults.json"
+        # Get the worker tab
+        worker_tab = None
+        for widget in self.top.winfo_children():
+            if isinstance(widget, ttk.Frame):
+                for child in widget.winfo_children():
+                    if isinstance(child, ttk.Notebook):
+                        for tab_widget in child.winfo_children():
+                            if hasattr(tab_widget, 'config_vars') and "blue_chance" in tab_widget.config_vars:
+                                worker_tab = tab_widget
+                                break
+        
+        if worker_tab and hasattr(worker_tab, 'config_vars'):
+            worker_data = {
+                "blue_rom_chance": worker_tab.config_vars["blue_chance"].get(),
+                "profile_distribution": worker_tab.config_vars["profile_dist"].get(),
+                "stage": worker_tab.config_vars["stage"].get(),
+                "reward_scale": worker_tab.config_vars["reward_scale"].get(),
+                "explore_weight": worker_tab.config_vars["explore_weight"].get(),
+            }
+            with open(worker_config_file, "w") as f:
+                json.dump(worker_data, f, indent=2)
+        
+        messagebox.showinfo("Configuration Saved", 
+                           "Environment configuration has been saved.\nThese settings will be used on next launch.")
+        self.top.destroy()
 
 
 class Launcher:
@@ -186,10 +432,15 @@ class Launcher:
             font=("", 8), foreground="gray"
         ).grid(row=14, column=0, columnspan=2, sticky="w")
 
-        # Row 15: Launch
+        # Row 15: Setup Environment Config button
+        ttk.Button(
+            main_frame, text="Setup Environment Config", command=self._open_env_config
+        ).grid(row=15, column=0, columnspan=2, pady=5)
+
+        # Row 16: Launch
         ttk.Button(
             main_frame, text="Launch", command=self._launch
-        ).grid(row=15, column=0, columnspan=2, pady=10)
+        ).grid(row=16, column=0, columnspan=2, pady=10)
 
         # Initialize
         self._on_mode_change()
@@ -231,6 +482,10 @@ class Launcher:
             self.legacy_recorder_var.set(False)
         else:
             self.legacy_check.config(state="normal")
+
+    def _open_env_config(self) -> None:
+        """Open the environment configuration window."""
+        EnvConfigWindow(self.root)
 
     def _launch(self) -> None:
         mode = self.mode_var.get()
