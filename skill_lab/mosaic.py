@@ -36,8 +36,8 @@ class Mosaic:
         start = 35
         colors = {
             "Control": (0, 180, 255), "Slash": (0, 0, 180), "Praise": (0, 180, 0),
-            "Stats": (180, 180, 0), "Map": (180, 0, 0), "KILL": (180, 0, 0),
-            "RESET": (180, 0, 0), "REPLAY": (180, 0, 0),
+            "Stats": (180, 180, 0), "Map": (180, 0, 0),
+            "RESET": (180, 180, 0), "KILL": (180, 0, 0),
         }
         self.buttons: dict[str, dict[str, Any]] = {}
         for index, (name, color) in enumerate(colors.items()):
@@ -86,6 +86,10 @@ class Mosaic:
                 self.last_action, self.last_action_target = "Slash", self.selected_index
             elif button == "Praise" and self.selected_index is not None:
                 self.last_action, self.last_action_target = "Praise", self.selected_index
+            elif button == "RESET" and self.selected_index is not None:
+                self.last_action, self.last_action_target = "RESET", self.selected_index
+            elif button == "KILL" and self.selected_index is not None:
+                self.last_action, self.last_action_target = "KILL", self.selected_index
             elif button == "Stats":
                 self.stats_visible = not self.stats_visible
             elif button == "Map":

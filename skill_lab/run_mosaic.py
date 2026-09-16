@@ -522,6 +522,18 @@ def main(args: argparse.Namespace | None = None) -> None:
                     reward_modifiers[mosaic.last_action_target] = REWARD_MODIFIER_SLASH
                 elif mosaic.last_action == "Praise" and mosaic.last_action_target is not None:
                     reward_modifiers[mosaic.last_action_target] = REWARD_MODIFIER_PRAISE
+                elif mosaic.last_action == "RESET" and mosaic.last_action_target is not None:
+                    # Reset the selected environment
+                    target_idx = mosaic.last_action_target
+                    print(f"[Mosaic] Resetting environment {target_idx}")
+                    env.env_method("reset", indices=[target_idx])
+                elif mosaic.last_action == "KILL" and mosaic.last_action_target is not None:
+                    # Kill the selected environment - apply penalty then reset
+                    target_idx = mosaic.last_action_target
+                    penalty = -100.0  # Significant penalty for glitched games
+                    reward_modifiers[target_idx] = penalty
+                    print(f"[Mosaic] KILL: Applying penalty {penalty} and resetting environment {target_idx}")
+                    env.env_method("reset", indices=[target_idx])
                 mosaic.last_action = None
                 mosaic.last_action_target = None
 

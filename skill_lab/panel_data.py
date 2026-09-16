@@ -302,7 +302,7 @@ class MemoryWatchWindow:
     COLS = 8
     ROWS = 16
     PANEL_W = 900
-    PANEL_H = 600
+    PANEL_H = 900
     CELL_W = 96
     CELL_H = 28
     PAD_X = 16
@@ -537,23 +537,23 @@ def draw_memory_watch_panel(
         button_x = x
         button_y = row_y + 8
         button_w = min(width, 160)
-        button_h = 18
+        button_h = 22
         cv2.rectangle(image, (button_x, button_y), (button_x + button_w, button_y + button_h), (200, 200, 200), 1)
-        cv2.putText(image, "Show more", (button_x + 10, button_y + 13), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 255, 255), 1)
+        cv2.putText(image, "Show more", (button_x + 10, button_y + 15), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
         return (button_x, button_y, button_w, button_h)
     return None
 
 
-def read_menu_handler_bytes(memory: Any) -> dict[int, int]:
-    """Read the WRAM menu/text handler probe range for diagnostics."""
-    return {
-        address: int(memory[address])
-        for address in range(MENU_HANDLER_START, MENU_HANDLER_END + 1)
-    }
+# def read_menu_handler_bytes(memory: Any) -> dict[int, int]:
+#     """Read the WRAM menu/text handler probe range for diagnostics."""
+#     return {
+#         address: int(memory[address])
+#         for address in range(MENU_HANDLER_START, MENU_HANDLER_END + 1)
+#     }
 
 
-def draw_menu_handler_info(image: np.ndarray, x: int, y: int, memory: Any) -> None:
-    """Draw raw CC26-CC2F values without assuming their exact meanings."""
-    values = read_menu_handler_bytes(memory)
-    watch_snapshot = {address: {"address": address, "value": value, "previous": None, "changed": True} for address, value in values.items()}
-    draw_memory_watch_panel(image, x, y, 280, watch_snapshot, title="WRAM probe")
+# def draw_menu_handler_info(image: np.ndarray, x: int, y: int, memory: Any) -> None:
+#     """Draw raw CC26-CC2F values without assuming their exact meanings."""
+#     values = read_menu_handler_bytes(memory)
+#     watch_snapshot = {address: {"address": address, "value": value, "previous": None, "changed": True} for address, value in values.items()}
+#     draw_memory_watch_panel(image, x, y, 280, watch_snapshot, title="WRAM probe")

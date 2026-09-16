@@ -48,7 +48,7 @@ def make_env(rank: int, env_conf: dict[str, Any], env_setup_config: dict[str, An
             cfg["catch_directive"] = env_setup_config.get("catch_directive", [])
             cfg["train_directive"] = env_setup_config.get("train_directive", [])
             cfg["save_on_catch"] = env_setup_config.get("save_on_catch", False)
-            cfg["reset_on_catch"] = env_setup_config.get("reset_on_catch", True)
+            cfg["reset_on_catch"] = env_setup_config.get("reset_on_catch", False)
 
         base_env = RedGymEnv(cfg)
 
@@ -56,6 +56,7 @@ def make_env(rank: int, env_conf: dict[str, Any], env_setup_config: dict[str, An
             "disable_start": cfg.get("disable_start", True),
             "disable_select": cfg.get("disable_select", True),
             "disable_B": cfg.get("disable_B", False),
+            "disable_A": cfg.get("disable_A", False),
             "milestone_reward": cfg.get("milestone_reward", medium_reward),
             "milestones_path": cfg.get("milestones_path", None),
             "speed_bonus": cfg.get("speed_bonus", True),

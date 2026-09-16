@@ -22,6 +22,38 @@ from skill_lab.panel_data import (
 from skill_lab.party_reader import Gen1PartyReader, PyBoyMemoryReader
 
 
+def get_env_directives(env, env_index: int) -> dict[str, Any]:
+    """Extract directive information from the environment."""
+    env_obj = env.envs[env_index]
+    wrapper = getattr(env_obj, 'env', None)
+    if wrapper is None:
+        wrapper = env_obj
+    
+    # Get attributes from the wrapper
+    target_starter = getattr(wrapper, 'target_starter', None)
+    rom_path = getattr(wrapper, 'rom_path', '')
+    catch_directive = getattr(wrapper, 'catch_directive', [])
+    train_directive = getattr(wrapper, 'train_directive', [])
+    env_name = getattr(wrapper, 'env_name', f'Env{env_index+1}')
+    
+    # Determine ROM color (Red = red, Blue = blue)
+    rom_color = (0, 0, 255)  # Default red (BGR)
+    rom_label = "Red"
+    if 'Blue' in rom_path or 'blue' in rom_path:
+        rom_color = (255, 0, 0)  # Blue in BGR
+        rom_label = "Blue"
+    
+    return {
+        'env_name': env_name,
+        'target_starter': target_starter,
+        'rom_path': rom_path,
+        'rom_label': rom_label,
+        'rom_color': rom_color,
+        'catch_directive': catch_directive,
+        'train_directive': train_directive,
+    }
+
+
 class ObservationInspector:
     def __init__(self, title: str = "Observation Inspector") -> None:
         self.title = title
@@ -43,7 +75,7 @@ class ObservationInspector:
             return
         self.visible = True
         if not self._window_created:
-            cv2.namedWindow(self.title)
+            cv2.namedWindow(self.title, cv2.WINDOW_NORMAL)
             cv2.setMouseCallback(self.title, self._on_mouse)
             self._window_created = True
         self._needs_initial_render = True
@@ -55,12 +87,17 @@ class ObservationInspector:
     def _on_mouse(self, event: int, x: int, y: int, flags: int, param: Any) -> None:
         if event != cv2.EVENT_LBUTTONDOWN:
             return
+        # Check "Show more" button for memory watch
         rect = self._button_rect
-        if rect is None:
-            return
-        bx, by, bw, bh = rect
-        if bx <= x <= bx + bw and by <= y <= by + bh:
-            self._watch_window.show()
+        if rect is not None:
+            bx, by, bw, bh = rect
+            if bx <= x <= bx + bw and by <= y <= by + bh:
+                self._watch_window.show()
+                return
+        # Check memory watch window buttons if it's open
+        if self._watch_window.visible:
+            # The watch window has its own mouse callback
+            pass
 
     def render(self, env, env_index: int, reward_history: list[float] | None = None) -> bool:
         if not self.visible:
@@ -90,14 +127,58 @@ class ObservationInspector:
         wild_wins = int(env.envs[env_index].wild_wins)
         recent_actions = env.envs[env_index].recent_actions
 
-        left_panel_w = 280
-        right_panel_w = 520
-        panel_h = 440
+        # Get directive info
+        directives = get_env_directives(env, env_index)
+
+        # Larger panels (~20% increase)
+        left_panel_w = 410  # Was 340
+        right_panel_w = 700  # Was 580
+        panel_h = 620  # Was 520
         panel = np.full((panel_h, left_panel_w + right_panel_w, 3), 30, dtype=np.uint8)
 
         y = 25
-        cv2.putText(panel, f"Env {env_index + 1}", (15, y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        # Env label with ROM color
+        env_label = f"Env {env_index + 1} [{directives['env_name']}]"
+        cv2.putText(panel, env_label, (15, y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
         y += 28
+        
+        # ROM indicator with color
+        cv2.putText(panel, f"ROM: ", (15, y), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (200, 200, 200), 1)
+        rom_text_x = 15 + int(cv2.getTextSize("ROM: ", cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1)[0][0])
+        cv2.putText(panel, f"[{directives['rom_label']}]", (rom_text_x, y), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, directives['rom_color'], 2)
+        y += 24
+        
+        # Target starter directive
+        if directives['target_starter']:
+            cv2.putText(panel, f"Target: {directives['target_starter']}", (15, y), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 1)
+        else:
+            cv2.putText(panel, "Target: Any starter", (15, y), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 1)
+        y += 22
+        
+        # Catch directives
+        if directives['catch_directive']:
+            catch_str = ", ".join(directives['catch_directive'][:4])
+            if len(directives['catch_directive']) > 4:
+                catch_str += f" (+{len(directives['catch_directive'])-4} more)"
+            cv2.putText(panel, f"Catch: {catch_str}", (15, y), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, (180, 255, 180), 1)
+        else:
+            cv2.putText(panel, "Catch: (none)", (15, y), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, (150, 150, 150), 1)
+        y += 20
+        
+        # Train directives
+        if directives['train_directive']:
+            train_str = ", ".join(directives['train_directive'][:3])
+            if len(directives['train_directive']) > 3:
+                train_str += f" (+{len(directives['train_directive'])-3} more)"
+            cv2.putText(panel, f"Train: {train_str}", (15, y), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 180, 180), 1)
+        y += 24
+
         hp_color = (0, 255, 0) if hp > 0.5 else ((0, 255, 255) if hp > 0.2 else (0, 0, 255))
         cv2.putText(panel, f"HP: {hp:.0%}", (15, y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, hp_color, 1)
         y += 24
@@ -139,7 +220,7 @@ class ObservationInspector:
         })
 
         watch_snapshot = self.address_watch.record(mem)
-        self._button_rect = draw_memory_watch_panel(panel, 15, 330, 250, watch_snapshot, title="Addr watch")
+        self._button_rect = draw_memory_watch_panel(panel, 15, 360, left_panel_w - 30, watch_snapshot, title="Addr watch", max_rows=12)
         if self._watch_window.visible:
             self._watch_window.render(mem)
 
@@ -159,6 +240,13 @@ class ObservationInspector:
         screen_canvas[:screen.shape[0], :screen.shape[1]] = screen
         inspector = np.hstack([screen_canvas, panel])
         cv2.imshow(self.title, inspector)
+        
+        # Resize window to fit content
+        if self._window_created:
+            total_w = 320 + left_panel_w + right_panel_w
+            total_h = panel_h
+            cv2.resizeWindow(self.title, total_w, total_h)
+        
         self._needs_initial_render = False
         return True
 
