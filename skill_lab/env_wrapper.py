@@ -123,8 +123,12 @@ class SkillLabWrapper(gymnasium.Wrapper):
             PyBoyMemoryReader(self.env.unwrapped.pyboy.memory)
         )
 
-    def _save_objective_state(self) -> bool:
-        """Save state and inputs before DummyVecEnv automatically resets us."""
+    def _save_objective_state(self, check_dv_threshold: bool = True) -> bool:
+        """Save state and inputs before DummyVecEnv automatically resets us.
+        
+        Args:
+            check_dv_threshold: If True, only save if DVs meet minimum threshold.
+        """
         if not self.save_objective_states or not self.env_dir:
             return True
 
@@ -155,6 +159,15 @@ class SkillLabWrapper(gymnasium.Wrapper):
             int(pokemon.get("ivSpeed", 0)),
             int(pokemon.get("ivSpAttack", 0)),
         )
+
+        # Check DV threshold if required (for starter picks that aren't the target)
+        if check_dv_threshold and self.save_on_catch_enabled:
+            if not all(dv >= self.save_on_catch_min_dv for dv in dvs):
+                print(
+                    f"[{self.env_name}] Skipped saving {pokemon_name} - DVs {dvs} below threshold {self.save_on_catch_min_dv}"
+                )
+                return False
+
         suffix = "PERFECT" if all(dv == 15 for dv in dvs) else "-".join(map(str, dvs))
         safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(pokemon_name)).strip("._")
         base_name = f"{safe_name} - {suffix}"
@@ -414,7 +427,7 @@ class SkillLabWrapper(gymnasium.Wrapper):
 
             if status == "correct":
                 dvs = self._read_starter_dvs()
-                if dvs is not None and self._save_objective_state():
+                if dvs is not None and self._save_objective_state(check_dv_threshold=False):
                     self.objective_met = True
                     reward += calculate_starter_reward(*dvs)
                     # NOTE: Do NOT terminate on correct starter - continue playing!
@@ -425,11 +438,19 @@ class SkillLabWrapper(gymnasium.Wrapper):
                     info["objective_env_name"] = self.env_name
 
             elif status == "wrong":
-                if self._save_objective_state():
+                # Wrong starter picked - check if we should save based on DVs
+                dvs = self._read_starter_dvs()
+                if dvs is not None:
                     self.objective_met = True
+                    # Save if DVs meet threshold (for potential replay on correct profile)
+                    saved = self._save_objective_state(check_dv_threshold=True)
+                    # Apply wrong choice penalty but NOT the starter DV reward
                     reward += wrong_choice_penalty
                     terminated = True
-                    print(f"[{self.env_name}] ❌ WRONG starter (species=0x{species:02X}) at step {self.env.unwrapped.step_count} → continuing for inspection")
+                    if saved:
+                        print(f"[{self.env_name}] ❌ WRONG starter (species=0x{species:02X}) at step {self.env.unwrapped.step_count} → saved (DVs meet threshold)")
+                    else:
+                        print(f"[{self.env_name}] ❌ WRONG starter (species=0x{species:02X}) at step {self.env.unwrapped.step_count} → not saved (DVs below threshold)")
                     info["objective_success"] = False
                     info["objective_steps"] = self.env.unwrapped.step_count
                     info["objective_directive"] = self.target_starter or "any"
@@ -437,15 +458,26 @@ class SkillLabWrapper(gymnasium.Wrapper):
 
             elif status == "any":
                 dvs = self._read_starter_dvs()
-                if dvs is not None and self._save_objective_state():
+                if dvs is not None:
+                    # Starter picked - objective met regardless of DV threshold
                     self.objective_met = True
-                    reward += calculate_starter_reward(*dvs)
-                    # NOTE: Do NOT terminate on any starter - continue playing!
-                    print(f"[{self.env_name}] ✅ Picked a starter (species=0x{species:02X}) at step {self.env.unwrapped.step_count}")
-                    info["objective_success"] = True
-                    info["objective_steps"] = self.env.unwrapped.step_count
-                    info["objective_directive"] = "any"
-                    info["objective_env_name"] = self.env_name
+                    # Only save if DVs meet threshold
+                    saved = self._save_objective_state(check_dv_threshold=True)
+                    if saved:
+                        reward += calculate_starter_reward(*dvs)
+                        # NOTE: Do NOT terminate on any starter - continue playing!
+                        print(f"[{self.env_name}] ✅ Picked a starter (species=0x{species:02X}) at step {self.env.unwrapped.step_count}")
+                        info["objective_success"] = True
+                        info["objective_steps"] = self.env.unwrapped.step_count
+                        info["objective_directive"] = "any"
+                        info["objective_env_name"] = self.env_name
+                    else:
+                        # DVs below threshold - don't save, but objective is still met
+                        print(f"[{self.env_name}] ✅ Picked a starter (species=0x{species:02X}) but DVs below threshold - not saved")
+                        info["objective_success"] = True
+                        info["objective_steps"] = self.env.unwrapped.step_count
+                        info["objective_directive"] = "any"
+                        info["objective_env_name"] = self.env_name
 
         info["masked_action"] = (original_action != action)
         info["objective_met"] = self.objective_met
