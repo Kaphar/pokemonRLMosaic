@@ -5,15 +5,11 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
-.Python
-env/
-venv/
+
+# Dependencies
 .venv/
-.ENV
-.ENV.local
-.env
-.env.local
-.env.*
+venv/
+env/
 
 # Build artifacts
 build/
