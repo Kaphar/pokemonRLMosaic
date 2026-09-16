@@ -73,16 +73,12 @@ def make_config(profile: Profile, session_path: Path, args: argparse.Namespace) 
     if args.init_state and args.init_state.exists():
         init_state = args.init_state
 
-    # Get disable_B and disable_A from action_masks if present, otherwise from fields
-    disable_B = stage_config.get("disable_B", False)
-    disable_A = stage_config.get("disable_A", False)
-    action_masks = stage_config.get("action_masks", {})
-    if "B" in action_masks:
-        # action_masks.B = false means don't mask (allow B button)
-        # action_masks.B = true would mean mask it
-        disable_B = action_masks.get("B", disable_B)
-    if "A" in action_masks:
-        disable_A = action_masks.get("A", disable_A)
+    # Get button masks from unified button_masks dict
+    button_masks = stage_config.get("button_masks", {})
+    disable_start = button_masks.get("Start", True)
+    disable_select = button_masks.get("Select", True)
+    disable_B = button_masks.get("B", False)
+    disable_A = button_masks.get("A", False)
 
     return {
         "headless": True,
@@ -102,9 +98,9 @@ def make_config(profile: Profile, session_path: Path, args: argparse.Namespace) 
         "noop_button": True,
         "speed": getattr(args, "emulator_speed", 2),
         "training_mode": training_mode,
-        # Stage config from JSON
-        "disable_start": stage_config.get("disable_start", True),
-        "disable_select": stage_config.get("disable_select", True),
+        # Button masks from unified config
+        "disable_start": disable_start,
+        "disable_select": disable_select,
         "disable_B": disable_B,
         "disable_A": disable_A,
         "milestone_reward": stage_config.get("milestone_reward", medium_reward),
@@ -251,16 +247,13 @@ def main(args: argparse.Namespace | None = None) -> None:
     # Get stage configuration from JSON
     stage_config = load_stage_config(args.stage)
     print(f"Stage: {stage_config.get('name', args.stage)} - {stage_config.get('description', '')}")
-    print(f"  Start masked: {stage_config.get('disable_start', True)}")
-    print(f"  Select masked: {stage_config.get('disable_select', True)}")
-    print(f"  B button masked: {stage_config.get('disable_B', False)}")
     
-    # Extract action_masks from stage config
-    action_masks = stage_config.get("action_masks", {})
-    if "B" in action_masks and not action_masks["B"]:
-        print(f"  Note: B button masking controlled by action_masks.B = {action_masks['B']}")
-    if "A" in action_masks and not action_masks["A"]:
-        print(f"  Note: A button masking controlled by action_masks.A = {action_masks['A']}")
+    # Extract button masks from unified config
+    button_masks = stage_config.get("button_masks", {})
+    print(f"  Start masked: {button_masks.get('Start', True)}")
+    print(f"  Select masked: {button_masks.get('Select', True)}")
+    print(f"  B button masked: {button_masks.get('B', False)}")
+    print(f"  A button masked: {button_masks.get('A', False)}")
 
     if not args.rom.exists(): raise FileNotFoundError(f"ROM not found: {args.rom}")
     if not args.init_state.exists(): raise FileNotFoundError(f"Initial state not found: {args.init_state}")
@@ -361,13 +354,11 @@ def main(args: argparse.Namespace | None = None) -> None:
     
     # Stage config details
     print(f"\nStage Configuration ({args.stage}):")
-    print(f"  - Start Button Masked: {stage_config.get('disable_start', True)}")
-    print(f"  - Select Button Masked: {stage_config.get('disable_select', True)}")
-    print(f"  - B Button Masked: {stage_config.get('disable_B', False)}")
-    print(f"  - A Button Masked: {stage_config.get('disable_A', False)}")
-    action_masks = stage_config.get("action_masks", {})
-    if action_masks:
-        print(f"  - Action Masks: {json.dumps(action_masks)}")
+    button_masks = stage_config.get("button_masks", {})
+    print(f"  - Start Button Masked: {button_masks.get('Start', True)}")
+    print(f"  - Select Button Masked: {button_masks.get('Select', True)}")
+    print(f"  - B Button Masked: {button_masks.get('B', False)}")
+    print(f"  - A Button Masked: {button_masks.get('A', False)}")
     milestone_reward = stage_config.get("milestone_reward", "medium_reward")
     print(f"  - Milestone Reward: {milestone_reward}")
     print(f"  - Max Steps (stage default): {stage_config.get('max_steps', 7200)}")
