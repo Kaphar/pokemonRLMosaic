@@ -22,7 +22,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from skill_lab.config import EVENT_JSON_PATH, REWARD_MODIFIER_PRAISE, REWARD_MODIFIER_SLASH, SPECIALIZATION_PRESETS
+from skill_lab.config import EVENT_JSON_PATH, REWARD_MODIFIER_PRAISE, REWARD_MODIFIER_SLASH, SPECIALIZATION_PRESETS, SAVE_ON_CATCH_ENABLED, SAVE_ON_CATCH_MIN_DV
 from skill_lab.emulator import (
     ACTION_FREQ,
     make_vec_env,
@@ -106,6 +106,9 @@ def make_config(profile: Profile, session_path: Path, args: argparse.Namespace) 
         "milestone_reward": stage_config.get("milestone_reward", medium_reward),
         "milestones_path": str(PROJECT_ROOT / "skill_lab" / "milestones.json"),
         "names_path": str(PROJECT_ROOT / "skill_lab" / "names.json"),
+        # Save on catch settings
+        "save_on_catch_enabled": SAVE_ON_CATCH_ENABLED,
+        "save_on_catch_min_dv": SAVE_ON_CATCH_MIN_DV,
         # Plugin-based frame-exact input recording
         "record_input_with_plugin": getattr(args, "record_input_with_plugin", False),
         "record_input_path": str(Path(session_path) / "plugin_input_events.json"),
@@ -272,6 +275,8 @@ def main(args: argparse.Namespace | None = None) -> None:
         stage=args.stage,
         rom_path=args.rom,
         init_state=args.init_state,
+        mosaic_rows=getattr(args, "mosaic_rows", 6),
+        mosaic_cols=getattr(args, "mosaic_cols", 7),
     )
 
     # Ensure each environment exists (lazy creation on launch)
@@ -282,6 +287,8 @@ def main(args: argparse.Namespace | None = None) -> None:
             rom_source_path=args.rom,
             default_state_path=str(args.init_state),
             launcher_stage=args.stage,
+            mosaic_rows=getattr(args, "mosaic_rows", 6),
+            mosaic_cols=getattr(args, "mosaic_cols", 7),
         )
 
     # Print directive assignments (confirmation in logs)
@@ -515,6 +522,18 @@ def main(args: argparse.Namespace | None = None) -> None:
                     reward_modifiers[mosaic.last_action_target] = REWARD_MODIFIER_SLASH
                 elif mosaic.last_action == "Praise" and mosaic.last_action_target is not None:
                     reward_modifiers[mosaic.last_action_target] = REWARD_MODIFIER_PRAISE
+                elif mosaic.last_action == "RESET" and mosaic.last_action_target is not None:
+                    # Reset the selected environment
+                    target_idx = mosaic.last_action_target
+                    print(f"[Mosaic] Resetting environment {target_idx}")
+                    env.env_method("reset", indices=[target_idx])
+                elif mosaic.last_action == "KILL" and mosaic.last_action_target is not None:
+                    # Kill the selected environment - apply penalty then reset
+                    target_idx = mosaic.last_action_target
+                    penalty = -100.0  # Significant penalty for glitched games
+                    reward_modifiers[target_idx] = penalty
+                    print(f"[Mosaic] KILL: Applying penalty {penalty} and resetting environment {target_idx}")
+                    env.env_method("reset", indices=[target_idx])
                 mosaic.last_action = None
                 mosaic.last_action_target = None
 

@@ -12,6 +12,10 @@ import gymnasium
 import numpy as np
 from pyboy.utils import WindowEvent
 
+from skill_lab.config import (
+    SAVE_ON_CATCH_ENABLED,
+    SAVE_ON_CATCH_MIN_DV,
+)
 from skill_lab.milestones import MilestoneTracker
 from skill_lab.party_reader import Gen1PartyReader, PyBoyMemoryReader
 from skill_lab.rewards import calculate_starter_reward, medium_reward, wrong_choice_penalty
@@ -55,6 +59,13 @@ class SkillLabWrapper(gymnasium.Wrapper):
         self.train_directive = config.get("train_directive", [])
         self.save_on_catch = config.get("save_on_catch", False)
         self.reset_on_catch = config.get("reset_on_catch", True)
+
+        # Save on catch settings
+        self.save_on_catch_enabled = config.get("save_on_catch_enabled", SAVE_ON_CATCH_ENABLED)
+        self.save_on_catch_min_dv = config.get("save_on_catch_min_dv", SAVE_ON_CATCH_MIN_DV)
+
+        # Track party size to detect new catches
+        self._previous_party_size = 0
 
         # --- Detect action indices ---
         self.start_action_index = None
@@ -112,8 +123,12 @@ class SkillLabWrapper(gymnasium.Wrapper):
             PyBoyMemoryReader(self.env.unwrapped.pyboy.memory)
         )
 
-    def _save_objective_state(self) -> bool:
-        """Save state and inputs before DummyVecEnv automatically resets us."""
+    def _save_objective_state(self, check_dv_threshold: bool = True) -> bool:
+        """Save state and inputs before DummyVecEnv automatically resets us.
+        
+        Args:
+            check_dv_threshold: If True, only save if DVs meet minimum threshold.
+        """
         if not self.save_objective_states or not self.env_dir:
             return True
 
@@ -144,6 +159,15 @@ class SkillLabWrapper(gymnasium.Wrapper):
             int(pokemon.get("ivSpeed", 0)),
             int(pokemon.get("ivSpAttack", 0)),
         )
+
+        # Check DV threshold if required (for starter picks that aren't the target)
+        if check_dv_threshold and self.save_on_catch_enabled:
+            if not all(dv >= self.save_on_catch_min_dv for dv in dvs):
+                print(
+                    f"[{self.env_name}] Skipped saving {pokemon_name} - DVs {dvs} below threshold {self.save_on_catch_min_dv}"
+                )
+                return False
+
         suffix = "PERFECT" if all(dv == 15 for dv in dvs) else "-".join(map(str, dvs))
         safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(pokemon_name)).strip("._")
         base_name = f"{safe_name} - {suffix}"
@@ -185,6 +209,92 @@ class SkillLabWrapper(gymnasium.Wrapper):
                 # Audio is optional; never let it affect saved perfect states.
                 print(f"[{self.env_name}] Warning: could not play perfect-DV sound: {error}")
         return True
+
+    def _save_caught_pokemon(self, pokemon: dict, slot: int) -> bool:
+        """Save state and inputs when a Pokemon is caught, if DVs meet threshold."""
+        if not self.save_on_catch_enabled or not self.env_dir:
+            return False
+
+        # Get DVs for the caught Pokemon
+        dvs = (
+            int(pokemon.get("ivAttack", 0)),
+            int(pokemon.get("ivDefense", 0)),
+            int(pokemon.get("ivSpeed", 0)),
+            int(pokemon.get("ivSpAttack", 0)),
+        )
+
+        # Check if all DVs meet the minimum threshold
+        if not all(dv >= self.save_on_catch_min_dv for dv in dvs):
+            return False
+
+        pokemon_name = pokemon.get("speciesName", "Unknown")
+        suffix = "PERFECT" if all(dv == 15 for dv in dvs) else "-".join(map(str, dvs))
+        safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(pokemon_name)).strip("._")
+        base_name = f"{safe_name} - {suffix} (slot{slot+1})"
+
+        env_dir = Path(self.env_dir)
+        states_dir = env_dir / "states"
+        inputs_dir = env_dir / "inputs"
+        states_dir.mkdir(parents=True, exist_ok=True)
+        inputs_dir.mkdir(parents=True, exist_ok=True)
+
+        state_path = states_dir / f"{base_name}.state"
+        with state_path.open("wb") as state_file:
+            self.env.unwrapped.pyboy.save_state(state_file)
+
+        inputs_path = inputs_dir / f"{base_name}.json"
+        with inputs_path.open("w", encoding="utf-8") as inputs_file:
+            json.dump({
+                "env_index": self.env_index,
+                "init_state": self.init_state,
+                "rom": self.rom_path,
+                "action_freq": self.action_freq,
+                "noop_action": self.noop_action_index,
+                "total_actions": len(self._episode_actions),
+                "actions": self._episode_actions,
+                "source": "input_recorder",
+                "caught_pokemon": {
+                    "slot": slot,
+                    "species": pokemon_name,
+                    "species_id": int(pokemon.get("speciesID", 0)),
+                    "dvs": dvs,
+                    "level": int(pokemon.get("level", 0)),
+                },
+            }, inputs_file, indent=2)
+
+        print(
+            f"[{self.env_name}] 🎉 Saved caught Pokemon: {pokemon_name} "
+            f"DVs={dvs} at slot {slot+1} -> {state_path}"
+        )
+        if suffix == "PERFECT" and self.perfect_sound_enabled:
+            try:
+                sound_path = (
+                    Path(__file__).resolve().parent / "assets" / "sound" / "mario_coin.mp3"
+                )
+                os.startfile(str(sound_path))
+            except Exception as error:
+                print(f"[{self.env_name}] Warning: could not play perfect-DV sound: {error}")
+        return True
+
+    def _check_for_new_catches(self) -> None:
+        """Check if any new Pokemon were caught and save if DVs meet threshold."""
+        party = self.party_reader.read_party({
+            "partyAddr": Gen1PartyReader.PARTY_ADDRESS,
+            "partySlotsCounterAddr": Gen1PartyReader.PARTY_SIZE_ADDRESS,
+            "partySpeciesAddr": Gen1PartyReader.PARTY_SPECIES_ADDRESS,
+            "partyNicknamesAddr": Gen1PartyReader.PARTY_NICKNAMES_ADDRESS,
+        })
+        if not party:
+            self._previous_party_size = 0
+            return
+
+        current_size = len(party)
+        if current_size > self._previous_party_size:
+            # New Pokemon caught! Check each new slot
+            for slot in range(self._previous_party_size, current_size):
+                if slot < len(party):
+                    self._save_caught_pokemon(party[slot], slot)
+        self._previous_party_size = current_size
 
     def _read_starter_dvs(self) -> tuple[int, int, int, int] | None:
         """Read the four stored DVs for the first party Pokemon."""
@@ -317,10 +427,10 @@ class SkillLabWrapper(gymnasium.Wrapper):
 
             if status == "correct":
                 dvs = self._read_starter_dvs()
-                if dvs is not None and self._save_objective_state():
+                if dvs is not None and self._save_objective_state(check_dv_threshold=False):
                     self.objective_met = True
                     reward += calculate_starter_reward(*dvs)
-                    terminated = True
+                    # NOTE: Do NOT terminate on correct starter - continue playing!
                     print(f"[{self.env_name}] ✅ CORRECT starter (species=0x{species:02X}) at step {self.env.unwrapped.step_count}")
                     info["objective_success"] = True
                     info["objective_steps"] = self.env.unwrapped.step_count
@@ -328,11 +438,19 @@ class SkillLabWrapper(gymnasium.Wrapper):
                     info["objective_env_name"] = self.env_name
 
             elif status == "wrong":
-                if self._save_objective_state():
+                # Wrong starter picked - check if we should save based on DVs
+                dvs = self._read_starter_dvs()
+                if dvs is not None:
                     self.objective_met = True
+                    # Save if DVs meet threshold (for potential replay on correct profile)
+                    saved = self._save_objective_state(check_dv_threshold=True)
+                    # Apply wrong choice penalty but NOT the starter DV reward
                     reward += wrong_choice_penalty
                     terminated = True
-                    print(f"[{self.env_name}] ❌ WRONG starter (species=0x{species:02X}) at step {self.env.unwrapped.step_count} → continuing for inspection")
+                    if saved:
+                        print(f"[{self.env_name}] ❌ WRONG starter (species=0x{species:02X}) at step {self.env.unwrapped.step_count} → saved (DVs meet threshold)")
+                    else:
+                        print(f"[{self.env_name}] ❌ WRONG starter (species=0x{species:02X}) at step {self.env.unwrapped.step_count} → not saved (DVs below threshold)")
                     info["objective_success"] = False
                     info["objective_steps"] = self.env.unwrapped.step_count
                     info["objective_directive"] = self.target_starter or "any"
@@ -340,18 +458,32 @@ class SkillLabWrapper(gymnasium.Wrapper):
 
             elif status == "any":
                 dvs = self._read_starter_dvs()
-                if dvs is not None and self._save_objective_state():
+                if dvs is not None:
+                    # Starter picked - objective met regardless of DV threshold
                     self.objective_met = True
-                    reward += calculate_starter_reward(*dvs)
-                    terminated = True
-                    print(f"[{self.env_name}] ✅ Picked a starter (species=0x{species:02X}) at step {self.env.unwrapped.step_count}")
-                    info["objective_success"] = True
-                    info["objective_steps"] = self.env.unwrapped.step_count
-                    info["objective_directive"] = "any"
-                    info["objective_env_name"] = self.env_name
+                    # Only save if DVs meet threshold
+                    saved = self._save_objective_state(check_dv_threshold=True)
+                    if saved:
+                        reward += calculate_starter_reward(*dvs)
+                        # NOTE: Do NOT terminate on any starter - continue playing!
+                        print(f"[{self.env_name}] ✅ Picked a starter (species=0x{species:02X}) at step {self.env.unwrapped.step_count}")
+                        info["objective_success"] = True
+                        info["objective_steps"] = self.env.unwrapped.step_count
+                        info["objective_directive"] = "any"
+                        info["objective_env_name"] = self.env_name
+                    else:
+                        # DVs below threshold - don't save, but objective is still met
+                        print(f"[{self.env_name}] ✅ Picked a starter (species=0x{species:02X}) but DVs below threshold - not saved")
+                        info["objective_success"] = True
+                        info["objective_steps"] = self.env.unwrapped.step_count
+                        info["objective_directive"] = "any"
+                        info["objective_env_name"] = self.env_name
 
         info["masked_action"] = (original_action != action)
         info["objective_met"] = self.objective_met
+
+        # Check for new Pokemon catches (after step to catch the updated party)
+        self._check_for_new_catches()
 
         return observation, reward, terminated, truncated, info
 
@@ -368,6 +500,7 @@ class SkillLabWrapper(gymnasium.Wrapper):
         self.objective_met = False
         self._debug_printed = False  # Reset debug flag
         self._episode_actions = []
+        self._previous_party_size = 0
 
         return observation, info
 

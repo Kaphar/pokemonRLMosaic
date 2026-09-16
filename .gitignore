@@ -1,6 +1,7 @@
 ```
 # Python
 __pycache__/
+*/__pycache__/
 *.pyc
 *.pyo
 *.pyd
@@ -10,26 +11,34 @@ __pycache__/
 venv/
 env/
 
-# Logs and temporary files
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Logs
 *.log
-*.tmp
 
-# Environment
-.env
-.env.local
-*.env.*
-
-# Editors
+# IDE
 .vscode/
 .idea/
+*.swp
+*.swo
 
 # Coverage
 .coverage
-coverage/
 htmlcov/
+coverage/
 
-# Build artifacts
-dist/
-build/
-*.egg-info/
+# OS
+.DS_Store
+Thumbs.db
 ```
+mosaic_sessions
+skill_lab/starter_report.html
+skill_lab/envs/*
+skill_lab/backup
+PokemonRed.gb
+PokemonBlue.gb
+PokemonBlue.gb.ram
+PokemonRed.gb.ram

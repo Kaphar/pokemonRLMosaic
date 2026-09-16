@@ -233,10 +233,10 @@ class Launcher:
         self.rows_var = tk.IntVar(value=6)
         self.cols_var = tk.IntVar(value=7)
         self.num_envs_var = tk.IntVar(value=42)
-        self.max_steps_var = tk.IntVar(value=500)  # NEW: segment length
+        self.max_steps_var = tk.IntVar(value=DEFAULT_MAX_STEPS)  # Load from config
         self.batch_iterations_var = tk.IntVar(value=10_000_000)
         self.hud_var = tk.BooleanVar(value=True)
-        self.speed_var = tk.IntVar(value=2)  # NEW: emulator speed
+        self.speed_var = tk.IntVar(value=DEFAULT_EMULATOR_SPEED)  # Load from config (0=auto)
         self.continuous_var = tk.BooleanVar(value=False)
         self.record_input_var = tk.BooleanVar(value=True)  # Changed: record plugin enabled by default
         self.legacy_recorder_var = tk.BooleanVar(value=False)  # NEW: legacy recorder option
@@ -323,8 +323,8 @@ class Launcher:
         ttk.Label(main_frame, text="Speed:").grid(row=6, column=0, sticky="w", pady=2)
         speed_frame = ttk.Frame(main_frame)
         speed_frame.grid(row=6, column=1, sticky="w")
-        ttk.Spinbox(speed_frame, from_=1, to=10, textvariable=self.speed_var, width=4).pack(side=tk.LEFT, padx=5)
-        ttk.Label(speed_frame, text="(1=normal, 2=double, 0=turbo)").pack(side=tk.LEFT)
+        ttk.Spinbox(speed_frame, from_=0, to=10, textvariable=self.speed_var, width=4).pack(side=tk.LEFT, padx=5)
+        ttk.Label(speed_frame, text="(0=auto/turbo, 1=normal, 2=double)").pack(side=tk.LEFT)
 
         # Row 8: Worker environments
         ttk.Label(main_frame, text="Worker environments:").grid(row=8, column=0, sticky="w", pady=2)
