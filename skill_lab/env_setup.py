@@ -151,15 +151,20 @@ def setup_envs(
         with open(worker_config_file, "r") as f:
             worker_defaults = json.load(f)
     
-    # Create trainer directories (always 3 fixed trainers)
+    # Create trainer directories
+    # total_trainers is (mosaic_tiles // 3) * 3, split evenly across 3 starter types
+    mosaic_tiles = mosaic_rows * mosaic_cols
+    total_trainers = (mosaic_tiles // 3) * 3
+    trainers_per_type = total_trainers // 3
     workers_dir = ENVS_DIR / "Workers"
     workers_dir.mkdir(exist_ok=True)
     
     env_configs = []
     
-    # First 3 envs are the named trainers (use saved config or defaults)
-    for i in range(min(3, num_envs)):
-        trainer_name = trainer_names[i]
+    # First total_trainers envs are the named trainers (use saved config or defaults)
+    for i in range(min(total_trainers, num_envs)):
+        trainer_idx = i // trainers_per_type
+        trainer_name = trainer_names[trainer_idx]
         trainer_dir = ENVS_DIR / trainer_name
         trainer_dir.mkdir(exist_ok=True)
         
@@ -247,7 +252,9 @@ def setup_envs(
     worker_reward_scale = worker_defaults.get("reward_scale", None)
     worker_explore_weight = worker_defaults.get("explore_weight", None)
     
-    for i in range(3, num_envs):
+    num_trainers = min(total_trainers, num_envs)
+    
+    for i in range(num_trainers, num_envs):
         env_name = f"Env{i+1:03d}"
         env_dir = workers_dir / env_name
         env_dir.mkdir(exist_ok=True)
@@ -265,9 +272,9 @@ def setup_envs(
             worker_init_state = init_state
         
         # Copy ROM to env folder
-        rom_dest = env_dir / worker_rom.name
-        if not rom_dest.exists() and worker_rom.exists():
-            shutil.copy2(worker_rom, rom_dest)
+        rom_dest = env_dir / worker_rom_path.name
+        if not rom_dest.exists() and worker_rom_path.exists():
+            shutil.copy2(worker_rom_path, rom_dest)
         
         # Profile distribution based on config
         if profile_distribution == "all_trainer":
@@ -320,13 +327,12 @@ def setup_envs(
             "save_on_catch_enabled": profile["save_on_catch_enabled"],
             "save_on_catch_min_dv": profile["save_on_catch_min_dv"],
             "description": f"Worker {env_name} - {profile['name']} profile",
-            "rom_file": worker_rom.name,
+            "rom_file": worker_rom_path.name,
             "init_state_file": worker_init_state.name,
         }
         env_configs.append(config)
     
     # Print assignment summary
-    num_trainers = total_trainers
     num_workers = num_envs - num_trainers
     red_count = sum(1 for cfg in env_configs if cfg.get('rom_file', '') == 'PokemonRed.gb')
     blue_count = sum(1 for cfg in env_configs if cfg.get('rom_file', '') == 'PokemonBlue.gb')
