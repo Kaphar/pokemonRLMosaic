@@ -118,16 +118,22 @@ class EnvConfigWindow:
         ttk.Combobox(tab, textvariable=profile_var, values=["trainer", "explorer"], 
                      state="readonly", width=15).grid(row=0, column=1, sticky="w", pady=5)
         
-        # ROM selection
+        # ROM selection with file picker
         ttk.Label(tab, text="ROM File:").grid(row=1, column=0, sticky="w", pady=5)
         rom_var = tk.StringVar(value=config.get("rom", "PokemonRed.gb"))
-        ttk.Combobox(tab, textvariable=rom_var, values=["PokemonRed.gb", "PokemonBlue.gb"],
-                     state="readonly", width=20).grid(row=1, column=1, sticky="w", pady=5)
+        rom_frame = ttk.Frame(tab)
+        rom_frame.grid(row=1, column=1, sticky="w", pady=5)
+        ttk.Combobox(rom_frame, textvariable=rom_var, values=["PokemonRed.gb", "PokemonBlue.gb"],
+                     state="readonly", width=20).pack(side="left")
+        ttk.Button(rom_frame, text="...", command=lambda: self._browse_rom(rom_var)).pack(side="left", padx=5)
         
-        # Initial state
+        # Initial state with file picker
         ttk.Label(tab, text="Initial State:").grid(row=2, column=0, sticky="w", pady=5)
         state_var = tk.StringVar(value=config.get("init_state", "init.state"))
-        ttk.Entry(tab, textvariable=state_var, width=25).grid(row=2, column=1, sticky="w", pady=5)
+        state_frame = ttk.Frame(tab)
+        state_frame.grid(row=2, column=1, sticky="w", pady=5)
+        ttk.Entry(state_frame, textvariable=state_var, width=25).pack(side="left")
+        ttk.Button(state_frame, text="...", command=lambda: self._browse_state(state_var, rom_var)).pack(side="left", padx=5)
         
         # Stage selection
         ttk.Label(tab, text="Training Stage:").grid(row=3, column=0, sticky="w", pady=5)
@@ -147,6 +153,16 @@ class EnvConfigWindow:
         ttk.Spinbox(tab, from_=0.1, to=10.0, increment=0.1, textvariable=explore_weight_var,
                     width=8).grid(row=5, column=1, sticky="w", pady=5)
         
+        # Bind ROM change to auto-update state
+        def on_rom_change(*args):
+            if rom_var.get() == "PokemonBlue.gb":
+                state_var.set("blue.init.state")
+            elif state_var.get() == "blue.init.state":
+                # Reset to default if switching back from Blue
+                state_var.set(f"{trainer_name.replace('Trainer', '').lower()}.init.state")
+        
+        rom_var.trace_add("write", on_rom_change)
+        
         # Store variables for saving
         tab.config_vars = {
             "profile": profile_var,
@@ -157,6 +173,32 @@ class EnvConfigWindow:
             "explore_weight": explore_weight_var,
         }
         tab.trainer_name = trainer_name
+    
+    def _browse_rom(self, var: tk.StringVar) -> None:
+        """Open file picker for ROM file."""
+        from tkinter import filedialog
+        file_path = filedialog.askopenfilename(
+            title="Select ROM File",
+            filetypes=[("Game Boy ROMs", "*.gb *.gbc"), ("All Files", "*.*")],
+            initialdir=PROJECT_ROOT
+        )
+        if file_path:
+            # Store just the filename if it's in the project root, otherwise full path
+            file_name = Path(file_path).name
+            var.set(file_name)
+    
+    def _browse_state(self, var: tk.StringVar, rom_var: tk.StringVar) -> None:
+        """Open file picker for initial state file."""
+        from tkinter import filedialog
+        file_path = filedialog.askopenfilename(
+            title="Select Initial State File",
+            filetypes=[("State Files", "*.state"), ("All Files", "*.*")],
+            initialdir=PROJECT_ROOT
+        )
+        if file_path:
+            # Store just the filename if it's in the project root, otherwise full path
+            file_name = Path(file_path).name
+            var.set(file_name)
     
     def _build_worker_tab(self, tab) -> None:
         config = self.worker_defaults
@@ -432,15 +474,19 @@ class Launcher:
             font=("", 8), foreground="gray"
         ).grid(row=14, column=0, columnspan=2, sticky="w")
 
-        # Row 15: Setup Environment Config button
+        # Row 15: Setup Environment Config button (separate frame for spacing)
+        setup_frame = ttk.Frame(main_frame)
+        setup_frame.grid(row=15, column=0, columnspan=2, pady=(5, 15), sticky="ew")
         ttk.Button(
-            main_frame, text="Setup Environment Config", command=self._open_env_config
-        ).grid(row=15, column=0, columnspan=2, pady=5)
+            setup_frame, text="⚙️ Setup Environment Config", command=self._open_env_config
+        ).pack(side="left", padx=20)
 
-        # Row 16: Launch
+        # Row 16: Launch button (separate frame for spacing)
+        launch_frame = ttk.Frame(main_frame)
+        launch_frame.grid(row=16, column=0, columnspan=2, pady=(0, 10), sticky="ew")
         ttk.Button(
-            main_frame, text="Launch", command=self._launch
-        ).grid(row=16, column=0, columnspan=2, pady=10)
+            launch_frame, text="🚀 Launch Training", command=self._launch
+        ).pack(side="left", padx=20)
 
         # Initialize
         self._on_mode_change()
