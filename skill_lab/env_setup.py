@@ -26,6 +26,7 @@ Folder structure:
 
 from __future__ import annotations
 
+import copy
 import json
 import random
 import shutil
@@ -102,6 +103,22 @@ def load_stage_config(stage_name: str) -> dict[str, Any]:
             "A": False,
         },
     }
+
+
+def _resolve_init_state(
+    init_state_name: str, env_subdir: Path, rom_parent: Path
+) -> Path:
+    """Resolve an init_state filename to a concrete path.
+
+    Searches in: the env's root dir, the env's states/ dir, rom_parent,
+    then project root. Falls back to env_subdir / init_state_name if none found.
+    """
+    search_dirs = [env_subdir, env_subdir / "states", rom_parent, PROJECT_ROOT]
+    for d in search_dirs:
+        candidate = d / init_state_name
+        if candidate.exists():
+            return candidate
+    return env_subdir / init_state_name
 
 
 def setup_envs(
@@ -182,22 +199,34 @@ def setup_envs(
         # Set up ROM and init state paths
         if cfg_rom_name == "PokemonBlue.gb":
             trainer_rom_path = rom_path.parent / cfg_rom_name
-            trainer_init_state = rom_path.parent / cfg_init_state_name
         else:
             trainer_rom_path = rom_path
-            trainer_init_state = init_state
-        
+
         # Each trainer gets an Env# subfolder
         env_subdir = trainer_dir / f"Env{i+1:03d}"
         env_subdir.mkdir(exist_ok=True)
         (env_subdir / "checkpoints").mkdir(exist_ok=True)
         (env_subdir / "states").mkdir(exist_ok=True)
         (env_subdir / "inputs").mkdir(exist_ok=True)
-        
+
         # Copy ROM to env folder
         rom_dest = env_subdir / trainer_rom_path.name
         if not rom_dest.exists() and trainer_rom_path.exists():
             shutil.copy2(trainer_rom_path, rom_dest)
+
+        # Resolve the configured init_state file: search in the env's own
+        # root dir, states/ dir, rom_path.parent, then project root.
+        trainer_init_state = _resolve_init_state(
+            cfg_init_state_name, env_subdir, rom_path.parent
+        )
+        # Copy the init state into the env folder root if it's not already there
+        env_state_dest = env_subdir / trainer_init_state.name
+        if (
+            trainer_init_state.exists()
+            and trainer_init_state.resolve() != env_state_dest.resolve()
+            and not env_state_dest.exists()
+        ):
+            shutil.copy2(trainer_init_state, env_state_dest)
         
         # Assign profile based on config
         profile = PROFILES.get(cfg_profile_name, PROFILES["trainer"]).copy()
@@ -208,15 +237,20 @@ def setup_envs(
         if cfg_explore_weight is not None:
             profile["explore_weight"] = cfg_explore_weight
         
+        # Create per-env stage_config so init_state/rom_path point to env-local paths
+        env_stage_config = copy.deepcopy(stage_config)
+        env_stage_config["init_state"] = str(env_state_dest)
+        env_stage_config["rom_path"] = str(rom_dest)
+        
         # Create settings.json
         settings = {
             "env_index": i,
             "env_name": trainer_name,
             "env_dir": str(env_subdir),
             "stage": cfg_stage,  # Use configured stage
-            "stage_config": stage_config,
+            "stage_config": env_stage_config,
             "rom_path": str(rom_dest),
-            "init_state": str(trainer_init_state),  # Use configured init state
+            "init_state": str(env_state_dest),  # Use configured init state (env-local copy)
             "profile": profile,
             "catch_directive": profile["catch_directive"],
             "train_directive": profile["train_directive"],
@@ -240,7 +274,7 @@ def setup_envs(
             "train_directive": profile["train_directive"],
             "description": f"{trainer_name} - {profile['name']} profile",
             "rom_file": trainer_rom_path.name,  # Use actual ROM name
-            "init_state_file": trainer_init_state.name,  # Use actual init state name
+            "init_state_file": env_state_dest.name,  # Use env-local init state name
         }
         env_configs.append(config)
     
@@ -275,6 +309,15 @@ def setup_envs(
         rom_dest = env_dir / worker_rom_path.name
         if not rom_dest.exists() and worker_rom_path.exists():
             shutil.copy2(worker_rom_path, rom_dest)
+
+        # Copy the init state into the env folder root if it's not already there
+        env_state_dest = env_dir / worker_init_state.name
+        if (
+            worker_init_state.exists()
+            and worker_init_state.resolve() != env_state_dest.resolve()
+            and not env_state_dest.exists()
+        ):
+            shutil.copy2(worker_init_state, env_state_dest)
         
         # Profile distribution based on config
         if profile_distribution == "all_trainer":
@@ -292,15 +335,20 @@ def setup_envs(
         if worker_explore_weight is not None:
             profile["explore_weight"] = worker_explore_weight
         
+        # Create per-env stage_config so init_state/rom_path point to env-local paths
+        env_stage_config = copy.deepcopy(stage_config)
+        env_stage_config["init_state"] = str(env_state_dest)
+        env_stage_config["rom_path"] = str(rom_dest)
+        
         # Create settings.json
         settings = {
             "env_index": i,
             "env_name": env_name,
             "env_dir": str(env_dir),
             "stage": worker_stage,  # Use configured worker stage
-            "stage_config": stage_config,
+            "stage_config": env_stage_config,
             "rom_path": str(rom_dest),
-            "init_state": str(worker_init_state),
+            "init_state": str(env_state_dest),
             "profile": profile,
             "catch_directive": profile["catch_directive"],
             "train_directive": profile["train_directive"],

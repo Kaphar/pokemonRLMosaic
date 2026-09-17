@@ -276,6 +276,21 @@ class EnvConfigWindow:
                 }
                 with open(config_file, "w") as f:
                     json.dump(config_data, f, indent=2)
+                print(f"[EnvConfigWindow] Saved trainer_config.json for {trainer_name}: {config_data}")
+
+                # Propagate saved config into each Env*/settings.json under this trainer
+                try:
+                    from skill_lab.env_config_updater import update_envs_from_trainer_config
+                    prop_results = update_envs_from_trainer_config(trainer_name)
+                    print(f"[EnvConfigWindow] Propagated config to {prop_results['updated']} envs under {trainer_name} "
+                          f"(skipped: {prop_results['skipped']}, errors: {len(prop_results['errors'])})")
+                    for detail in prop_results["details"][:1]:
+                        print(f"  e.g. {detail}")
+                except Exception as e:
+                    messagebox.showwarning(
+                        "Partial Save",
+                        f"Trainer config saved for {trainer_name}, but failed to update env settings:\n{e}",
+                    )
         
         # Save worker defaults
         worker_config_file = ENVS_DIR / "worker_defaults.json"
