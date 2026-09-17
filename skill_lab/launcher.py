@@ -14,6 +14,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from skill_lab.config import DEFAULT_EMULATOR_SPEED, DEFAULT_MAX_STEPS
 from skill_lab.curriculum import list_stages, get_stage
 from skill_lab.rewards import medium_reward
 from skill_lab.env_setup import PROFILES, ENVS_DIR
@@ -385,7 +386,13 @@ class Launcher:
             font=("", 8), foreground="gray"
         ).grid(row=14, column=0, columnspan=2, sticky="w")
 
-        # Row 15: Launch
+
+        # Row 15: Setup Environment Config button
+        ttk.Button(
+            main_frame, text="Setup Environment Config", command=self._open_env_config
+        ).grid(row=15, column=0, columnspan=2, pady=5)
+
+        # Row 16: Launch
         ttk.Button(
             main_frame, text="Launch", command=self._launch
         ).grid(row=15, column=0, columnspan=2, pady=10)
