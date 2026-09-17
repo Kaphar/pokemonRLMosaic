@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import cv2
+import json
 import numpy as np
 from pyboy.utils import WindowEvent
 
@@ -49,6 +50,16 @@ def make_env(rank: int, env_conf: dict[str, Any], env_setup_config: dict[str, An
             cfg["train_directive"] = env_setup_config.get("train_directive", [])
             cfg["save_on_catch"] = env_setup_config.get("save_on_catch", False)
             cfg["reset_on_catch"] = env_setup_config.get("reset_on_catch", False)
+            # Override init_state and gb_path with per-env values from settings.json
+            settings_path = env_setup_config.get("settings_path")
+            if settings_path and Path(settings_path).exists():
+                with open(settings_path, "r", encoding="utf-8") as _f:
+                    _env_settings = json.load(_f)
+                _env_cfg = _env_settings.get("stage_config", {})
+                if _env_cfg.get("init_state"):
+                    cfg["init_state"] = _env_cfg["init_state"]
+                if _env_cfg.get("rom_path"):
+                    cfg["gb_path"] = _env_cfg["rom_path"]
 
         base_env = RedGymEnv(cfg)
 
@@ -69,7 +80,7 @@ def make_env(rank: int, env_conf: dict[str, Any], env_setup_config: dict[str, An
             "rom_path": cfg.get("gb_path", ""),
             "action_freq": cfg.get("action_freq", ACTION_FREQ),
             "save_objective_states": cfg.get("save_objective_states", True),
-            "perfect_sound": cfg.get("perfect_sound", True),
+            "perfect_sound": cfg.get("perfect_sound", False),
             "catch_directive": cfg.get("catch_directive", []),
             "train_directive": cfg.get("train_directive", []),
             "save_on_catch": cfg.get("save_on_catch", False),
