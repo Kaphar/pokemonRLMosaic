@@ -62,7 +62,6 @@ PROFILES = {
         "catch_directive": ["Nidoran♂", "Pidgey", "Rattata", "Spearow", "Pikachu"],
         "train_directive": ["Nidoran♂", "Pikachu"],
         "save_on_catch": True,
-        "reset_on_catch": False,
         "save_on_catch_enabled": True,
         "save_on_catch_min_dv": 11,
     },
@@ -73,7 +72,6 @@ PROFILES = {
         "catch_directive": [],
         "train_directive": [],
         "save_on_catch": False,
-        "reset_on_catch": True,
         "save_on_catch_enabled": False,
         "save_on_catch_min_dv": 11,
     },
@@ -128,6 +126,7 @@ def setup_envs(
     init_state: Path | None = None,
     mosaic_rows: int = GRID_ROWS,
     mosaic_cols: int = GRID_COLS,
+    override_trainer_stage: bool = False,
 ) -> list[dict[str, Any]]:
     """Set up environment folders and assign directives.
 
@@ -138,6 +137,9 @@ def setup_envs(
         init_state: Path to initial save state (defaults to DEFAULT_INIT_STATE).
         mosaic_rows: Number of rows in the mosaic grid.
         mosaic_cols: Number of columns in the mosaic grid.
+        override_trainer_stage: When True, trainers use the launcher-selected
+            ``stage`` instead of their own saved stage. Workers always use the
+            launcher-selected stage regardless of this flag.
 
     Returns:
         List of env configs, one per environment.
@@ -191,10 +193,11 @@ def setup_envs(
         # Use configured values or defaults
         cfg_rom_name = trainer_cfg.get("rom", rom_path.name)
         cfg_init_state_name = trainer_cfg.get("init_state", init_state.name)
-        cfg_stage = trainer_cfg.get("stage", stage)
+        cfg_stage = stage if override_trainer_stage else trainer_cfg.get("stage", stage)
         cfg_reward_scale = trainer_cfg.get("reward_scale", None)
         cfg_explore_weight = trainer_cfg.get("explore_weight", None)
         cfg_profile_name = trainer_cfg.get("profile", "trainer" if i == 0 else random.choice(["trainer", "explorer"]))
+        cfg_input_replay = trainer_cfg.get("input_replay", "")
         
         # Set up ROM and init state paths
         if cfg_rom_name == "PokemonBlue.gb":
@@ -247,15 +250,15 @@ def setup_envs(
             "env_index": i,
             "env_name": trainer_name,
             "env_dir": str(env_subdir),
-            "stage": cfg_stage,  # Use configured stage
+            "stage": cfg_stage,
+            "input_replay": cfg_input_replay,
             "stage_config": env_stage_config,
             "rom_path": str(rom_dest),
-            "init_state": str(env_state_dest),  # Use configured init state (env-local copy)
+            "init_state": str(env_state_dest),
             "profile": profile,
             "catch_directive": profile["catch_directive"],
             "train_directive": profile["train_directive"],
             "save_on_catch": profile["save_on_catch"],
-            "reset_on_catch": profile["reset_on_catch"],
         }
         
         settings_path = env_subdir / "settings.json"
@@ -272,9 +275,12 @@ def setup_envs(
             "profile": profile["name"],
             "catch_directive": profile["catch_directive"],
             "train_directive": profile["train_directive"],
+            "save_on_catch": profile["save_on_catch"],
+            "reset_on_catch": stage_config.get("reset_on_catch", False),
             "description": f"{trainer_name} - {profile['name']} profile",
-            "rom_file": trainer_rom_path.name,  # Use actual ROM name
-            "init_state_file": env_state_dest.name,  # Use env-local init state name
+            "rom_file": trainer_rom_path.name,
+            "init_state_file": env_state_dest.name,
+            "input_replay": cfg_input_replay,
         }
         env_configs.append(config)
     
@@ -282,9 +288,11 @@ def setup_envs(
     # Use worker_defaults config if available, otherwise 50/50 for Blue ROM
     blue_rom_chance = worker_defaults.get("blue_rom_chance", 0.5)
     profile_distribution = worker_defaults.get("profile_distribution", "50/50")
-    worker_stage = worker_defaults.get("stage", stage)
+    # Workers always take the current (launcher-selected) stage
+    worker_stage = stage
     worker_reward_scale = worker_defaults.get("reward_scale", None)
     worker_explore_weight = worker_defaults.get("explore_weight", None)
+    worker_input_replay = worker_defaults.get("input_replay", "")
     
     num_trainers = min(total_trainers, num_envs)
     
@@ -339,13 +347,13 @@ def setup_envs(
         env_stage_config = copy.deepcopy(stage_config)
         env_stage_config["init_state"] = str(env_state_dest)
         env_stage_config["rom_path"] = str(rom_dest)
-        
         # Create settings.json
         settings = {
             "env_index": i,
             "env_name": env_name,
             "env_dir": str(env_dir),
-            "stage": worker_stage,  # Use configured worker stage
+            "stage": worker_stage,
+            "input_replay": worker_input_replay,
             "stage_config": env_stage_config,
             "rom_path": str(rom_dest),
             "init_state": str(env_state_dest),
@@ -353,7 +361,6 @@ def setup_envs(
             "catch_directive": profile["catch_directive"],
             "train_directive": profile["train_directive"],
             "save_on_catch": profile["save_on_catch"],
-            "reset_on_catch": profile["reset_on_catch"],
         }
         
         settings_path = env_dir / "settings.json"
@@ -371,12 +378,13 @@ def setup_envs(
             "catch_directive": profile["catch_directive"],
             "train_directive": profile["train_directive"],
             "save_on_catch": profile["save_on_catch"],
-            "reset_on_catch": profile["reset_on_catch"],
+            "reset_on_catch": stage_config.get("reset_on_catch", False),
             "save_on_catch_enabled": profile["save_on_catch_enabled"],
             "save_on_catch_min_dv": profile["save_on_catch_min_dv"],
             "description": f"Worker {env_name} - {profile['name']} profile",
             "rom_file": worker_rom_path.name,
             "init_state_file": worker_init_state.name,
+            "input_replay": worker_input_replay,
         }
         env_configs.append(config)
     
@@ -459,7 +467,6 @@ def expand_envs(
             "catch_directive": profile["catch_directive"],
             "train_directive": profile["train_directive"],
             "save_on_catch": profile["save_on_catch"],
-            "reset_on_catch": profile["reset_on_catch"],
         }
         
         settings_path = env_dir / "settings.json"
@@ -477,7 +484,7 @@ def expand_envs(
             "catch_directive": profile["catch_directive"],
             "train_directive": profile["train_directive"],
             "save_on_catch": profile["save_on_catch"],
-            "reset_on_catch": profile["reset_on_catch"],
+            "reset_on_catch": stage_config.get("reset_on_catch", False),
             "save_on_catch_enabled": profile["save_on_catch_enabled"],
             "save_on_catch_min_dv": profile["save_on_catch_min_dv"],
             "description": f"Worker {env_name} - {profile['name']} profile (newly created)",
@@ -600,20 +607,41 @@ def ensure_env_exists(
         
         stage_config = load_stage_config(actual_stage)
         
-        # ROM destination filename matches the assigned ROM
-        rom_dest_name = assigned_rom.name
+        # Resolve the init state: search in the env's own dir, states/ dir, rom_parent, project root
+        init_state_name = Path(default_state_path).name if default_state_path else "init.state"
+        env_init_state = _resolve_init_state(init_state_name, env_path, DEFAULT_ROM_RED.parent)
+        
+        # Copy the init state into the env folder root if it's not already there
+        if default_state_path and Path(default_state_path).exists():
+            env_state_dest = env_path / Path(default_state_path).name
+            if (
+                Path(default_state_path).resolve() != env_state_dest.resolve()
+                and not env_state_dest.exists()
+            ):
+                shutil.copy2(default_state_path, env_state_dest)
+            init_state_str = str(env_state_dest)
+        else:
+            init_state_str = str(env_init_state)
+        
+        # Set env-local paths in stage_config
+        env_stage_config = copy.deepcopy(stage_config)
+        env_stage_config["name"] = actual_stage
+        env_stage_config["init_state"] = init_state_str
+        env_stage_config["rom_path"] = str(env_path / rom_dest_name)
         
         settings = {
             "env_index": env_index,
-            "stage_config": stage_config_name,
-            "launcher_override_stage": launcher_stage,
+            "env_name": env_path.name,
+            "env_dir": str(env_path),
+            "stage": actual_stage,
+            "input_replay": "",
+            "stage_config": env_stage_config,
             "rom_path": str(env_path / rom_dest_name),
-            "initial_state_path": default_state_path or "",
+            "init_state": init_state_str,
             "profile": profile,
             "catch_directive": profile["catch_directive"],
             "train_directive": profile["train_directive"],
             "save_on_catch": profile["save_on_catch"],
-            "reset_on_catch": profile["reset_on_catch"],
             "save_on_catch_enabled": profile["save_on_catch_enabled"],
             "save_on_catch_min_dv": profile["save_on_catch_min_dv"],
         }

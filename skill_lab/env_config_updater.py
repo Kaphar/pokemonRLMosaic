@@ -38,6 +38,7 @@ FIELD PATHS (dot notation):
     catch_directive               # Root level array
     train_directive               # Root level array
     rom_path                      # Root level path
+    input_replay                  # Root level path to a recorded inputs JSON
 """
 
 from pathlib import Path
@@ -59,7 +60,6 @@ PROFILES = {
         "catch_directive": ["Nidoran\u2642", "Pidgey", "Rattata", "Spearow", "Pikachu"],
         "train_directive": ["Nidoran\u2642", "Pikachu"],
         "save_on_catch": True,
-        "reset_on_catch": False,
         "save_on_catch_enabled": True,
         "save_on_catch_min_dv": 11,
     },
@@ -70,7 +70,6 @@ PROFILES = {
         "catch_directive": [],
         "train_directive": [],
         "save_on_catch": False,
-        "reset_on_catch": True,
         "save_on_catch_enabled": False,
         "save_on_catch_min_dv": 11,
     },
@@ -111,9 +110,10 @@ def apply_trainer_config_to_env(
     """Apply a trainer_config.json dict to a single env's settings.json.
 
     Mirrors the logic in env_setup.setup_envs: picks a profile, overrides
-    reward_scale / explore_weight, then writes stage, init_state, rom_path,
-    and profile fields into settings.json and the flattened top-level
-    catch_directive / train_directive / save_on_catch / reset_on_catch.
+    reward_scale / explore_weight, then writes stage, init_state,
+    rom_path, and profile fields into settings.json and the flattened top-level
+    catch_directive / train_directive / save_on_catch. (reset_on_catch is a
+    stage-level property, not a profile or root setting.)
 
     Returns True if the file was modified, False otherwise.
     """
@@ -161,6 +161,11 @@ def apply_trainer_config_to_env(
                     shutil.copy2(src, env_state_dest)
                     break
 
+    input_replay = trainer_config.get("input_replay")
+    if input_replay is not None and settings.get("input_replay") != input_replay:
+        settings["input_replay"] = input_replay
+        modified = True
+
     rom_file = trainer_config.get("rom")
     if rom_file is not None:
         env_dir = settings_path.parent
@@ -181,7 +186,7 @@ def apply_trainer_config_to_env(
             modified = True
     settings["profile"] = existing_profile
 
-    for flat_key in ("catch_directive", "train_directive", "save_on_catch", "reset_on_catch"):
+    for flat_key in ("catch_directive", "train_directive", "save_on_catch"):
         if existing_profile.get(flat_key, None) != profile.get(flat_key, None):
             if settings.get(flat_key) != profile.get(flat_key):
                 settings[flat_key] = profile.get(flat_key)
@@ -264,13 +269,18 @@ def update_envs_from_trainer_config(
                             changes.append(
                                 f"stage_config.rom_path: {stage_cfg.get('rom_path')} -> {stage_rom_path}"
                             )
+                replay_path = trainer_config.get("input_replay")
+                if replay_path is not None and before.get("input_replay") != replay_path:
+                    changes.append(
+                        f"input_replay: {before.get('input_replay')} -> {replay_path}"
+                    )
                 before_profile = before.get("profile", {})
                 for key, value in profile.items():
                     if before_profile.get(key) != value:
                         changes.append(
                             f"profile.{key}: {before_profile.get(key)} -> {value}"
                         )
-                    if key in ("catch_directive", "train_directive", "save_on_catch", "reset_on_catch"):
+                    if key in ("catch_directive", "train_directive", "save_on_catch"):
                         if before.get(key) != value:
                             changes.append(
                                 f"{key}: {before.get(key)} -> {value}"

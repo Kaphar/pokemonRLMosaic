@@ -49,7 +49,7 @@ def make_env(rank: int, env_conf: dict[str, Any], env_setup_config: dict[str, An
             cfg["catch_directive"] = env_setup_config.get("catch_directive", [])
             cfg["train_directive"] = env_setup_config.get("train_directive", [])
             cfg["save_on_catch"] = env_setup_config.get("save_on_catch", False)
-            cfg["reset_on_catch"] = env_setup_config.get("reset_on_catch", False)
+            # reset_on_catch is a stage-level property read from stage_config below
             # Override init_state and gb_path with per-env values from settings.json
             settings_path = env_setup_config.get("settings_path")
             if settings_path and Path(settings_path).exists():
@@ -60,6 +60,24 @@ def make_env(rank: int, env_conf: dict[str, Any], env_setup_config: dict[str, An
                     cfg["init_state"] = _env_cfg["init_state"]
                 if _env_cfg.get("rom_path"):
                     cfg["gb_path"] = _env_cfg["rom_path"]
+                # Per-env input replay path (path to a recorded inputs JSON)
+                _input_replay = env_setup_config.get("input_replay") or _env_settings.get("input_replay", "")
+                if _input_replay:
+                    cfg["input_replay"] = _input_replay
+                # Read stage-level properties from per-env stage_config
+                if _env_cfg.get("reset_on_catch") is not None:
+                    cfg["reset_on_catch"] = _env_cfg["reset_on_catch"]
+                # Per-env button masks override global ones for consistency
+                _button_masks = _env_cfg.get("button_masks", {})
+                if _button_masks:
+                    if "Start" in _button_masks:
+                        cfg["disable_start"] = _button_masks["Start"]
+                    if "Select" in _button_masks:
+                        cfg["disable_select"] = _button_masks["Select"]
+                    if "B" in _button_masks:
+                        cfg["disable_B"] = _button_masks["B"]
+                    if "A" in _button_masks:
+                        cfg["disable_A"] = _button_masks["A"]
 
         base_env = RedGymEnv(cfg)
 
@@ -84,9 +102,10 @@ def make_env(rank: int, env_conf: dict[str, Any], env_setup_config: dict[str, An
             "catch_directive": cfg.get("catch_directive", []),
             "train_directive": cfg.get("train_directive", []),
             "save_on_catch": cfg.get("save_on_catch", False),
-            "reset_on_catch": cfg.get("reset_on_catch", True),
+            "reset_on_catch": cfg.get("reset_on_catch", False),
             "save_on_catch_enabled": cfg.get("save_on_catch_enabled", SAVE_ON_CATCH_ENABLED),
             "save_on_catch_min_dv": cfg.get("save_on_catch_min_dv", SAVE_ON_CATCH_MIN_DV),
+            "input_replay": cfg.get("input_replay", ""),
         })
 
         return wrapped_env

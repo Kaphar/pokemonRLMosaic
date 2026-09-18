@@ -58,7 +58,7 @@ class SkillLabWrapper(gymnasium.Wrapper):
         self.catch_directive = config.get("catch_directive", [])
         self.train_directive = config.get("train_directive", [])
         self.save_on_catch = config.get("save_on_catch", False)
-        self.reset_on_catch = config.get("reset_on_catch", True)
+        self.reset_on_catch = config.get("reset_on_catch", False)
 
         # Save on catch settings
         self.save_on_catch_enabled = config.get("save_on_catch_enabled", SAVE_ON_CATCH_ENABLED)
@@ -122,6 +122,136 @@ class SkillLabWrapper(gymnasium.Wrapper):
         self.party_reader = Gen1PartyReader(
             PyBoyMemoryReader(self.env.unwrapped.pyboy.memory)
         )
+
+        # --- Input Replay ---
+        # Optional recorded input sequence replayed from the init state. Once the
+        # sequence is exhausted the model (or human) takes over automatically.
+        self.input_replay_path = config.get("input_replay", "")
+        self._replay_actions: list[int] = []
+        self._replay_events: list[dict[str, Any]] = []
+        self._replay_total_frames = 0
+        self._replay_noop_action = self.noop_action_index
+        self._replay_frame = 0
+        self._replay_index = 0
+        self._original_run_action = None
+        self._load_input_replay()
+
+    # --- Input Replay ---
+
+    def _load_input_replay(self) -> None:
+        """Load a recorded input sequence from the path in this env's settings.
+
+        Supports both the step-level ``actions`` list and the plugin/frame-exact
+        ``input_events`` list produced by :mod:`skill_lab.emulator_with_debug`.
+        When frame-exact events are available the replay drives the emulator with
+        those exact events (matching the original recording deterministically);
+        otherwise it falls back to replaying the step-level action indices through
+        the normal action cycle.
+        """
+        if not self.input_replay_path:
+            return
+        replay_path = Path(self.input_replay_path)
+        if not replay_path.is_absolute() and self.env_dir:
+            replay_path = Path(self.env_dir) / replay_path
+        if not replay_path.exists():
+            print(f"[{self.env_name}] Input replay file not found: {replay_path}")
+            return
+        try:
+            with open(replay_path, "r", encoding="utf-8") as replay_file:
+                data = json.load(replay_file)
+            entries = data.get("actions", [])
+            self._replay_actions = [
+                int(a.get("action", a.get("requested_action", 0))) for a in entries
+            ]
+            self._replay_noop_action = int(
+                data.get("noop_action", self.noop_action_index)
+            )
+            # Frame-exact events (plugin recordings) used for deterministic replay.
+            self._replay_events = data.get("input_events", []) or []
+            self._replay_total_frames = len(self._replay_actions) * self.action_freq
+            if self._replay_events:
+                print(
+                    f"[{self.env_name}] Loaded input replay (frame-exact): "
+                    f"{len(self._replay_actions)} actions / {len(self._replay_events)} events "
+                    f"from {replay_path}"
+                )
+            else:
+                print(
+                    f"[{self.env_name}] Loaded input replay: "
+                    f"{len(self._replay_actions)} actions from {replay_path}"
+                )
+        except (json.JSONDecodeError, OSError, TypeError, ValueError) as error:
+            print(f"[{self.env_name}] Failed to load input replay {replay_path}: {error}")
+            self._replay_actions = []
+            self._replay_events = []
+
+    def _driven_pyboy(self):
+        """Return the real PyBoy object (unwrap the plugin recording proxy)."""
+        pyboy = self.env.unwrapped.pyboy
+        return getattr(pyboy, "_pyboy", pyboy)
+
+    def _install_frame_exact_replay(self) -> None:
+        """Route the env's action cycle through frame-exact event replay."""
+        if self._replay_events and self._original_run_action is None:
+            self._original_run_action = self.env.run_action_on_emulator
+            self.env.run_action_on_emulator = self._frame_exact_run_action
+
+    def _restore_run_action(self) -> None:
+        """Restore the env's native action cycle after replay finishes."""
+        if self._original_run_action is not None:
+            self.env.run_action_on_emulator = self._original_run_action
+            self._original_run_action = None
+
+    def _frame_exact_run_action(self, action) -> None:
+        """Advance one action cycle using the recording's exact input events.
+
+        Replaces the env's ``run_action_on_emulator`` while a frame-exact replay
+        is in progress. Each call drives exactly ``action_freq`` frames, sending
+        the recorded events at their absolute frame offsets so the emulator
+        reaches the same state as the original run. When the events are
+        exhausted this falls back to the native action cycle so the model can
+        take over.
+        """
+        if not self._replay_events or self._replay_frame >= self._replay_total_frames:
+            self._restore_run_action()
+            return self._original_run_action(action)
+        try:
+            from skill_lab.emulator_with_debug import replay_frame_by_frame
+
+            replay_frame_by_frame(
+                self._driven_pyboy(),
+                self._replay_events,
+                self._replay_total_frames,
+                render=False,
+                start_frame=self._replay_frame,
+                max_frames=self.action_freq,
+            )
+            self._replay_frame += self.action_freq
+        except Exception as error:
+            print(
+                f"[{self.env_name}] Frame-exact replay failed, falling back to "
+                f"native action cycle: {error}"
+            )
+            self._restore_run_action()
+            return self._original_run_action(action)
+
+    def has_replay(self) -> bool:
+        """Return True while there are still replay actions to consume."""
+        return self._replay_index < len(self._replay_actions)
+
+    def consume_replay_action(self) -> int | None:
+        """Return the next replayed action (and advance) or None when exhausted.
+
+        During frame-exact replay the actual emulator input is driven by
+        :meth:`_frame_exact_run_action`, but callers still need the action index
+        for logging / rollout-buffer bookkeeping, so this still yields the
+        recorded step action while a replay is in progress.
+        """
+        if self._replay_index < len(self._replay_actions):
+            action = self._replay_actions[self._replay_index]
+            self._replay_index += 1
+            return action
+        return None
 
     def _save_objective_state(self, check_dv_threshold: bool = True) -> bool:
         """Save state and inputs before DummyVecEnv automatically resets us.
@@ -500,7 +630,20 @@ class SkillLabWrapper(gymnasium.Wrapper):
         self.objective_met = False
         self._debug_printed = False  # Reset debug flag
         self._episode_actions = []
+        self._replay_index = 0
+        self._replay_frame = 0
         self._previous_party_size = 0
+
+        # Restore a native action cycle left over from a previous (possibly
+        # interrupted) replay so step bookkeeping stays consistent.
+        self._restore_run_action()
+
+        # Install the frame-exact replay hook when the recording provides
+        # absolute frame-level input events. The plugin recorder captures exact
+        # frame offsets so no emulator priming/warming is needed — the events
+        # alone drive deterministic replay from the init state.
+        if self._replay_events:
+            self._install_frame_exact_replay()
 
         return observation, info
 

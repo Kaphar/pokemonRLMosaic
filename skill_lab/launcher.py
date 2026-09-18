@@ -154,6 +154,14 @@ class EnvConfigWindow:
         ttk.Spinbox(tab, from_=0.1, to=10.0, increment=0.1, textvariable=explore_weight_var,
                     width=8).grid(row=5, column=1, sticky="w", pady=5)
         
+        # Input replay file (path to a recorded inputs JSON)
+        ttk.Label(tab, text="Input Replay:").grid(row=6, column=0, sticky="w", pady=5)
+        replay_var = tk.StringVar(value=config.get("input_replay", ""))
+        replay_frame = ttk.Frame(tab)
+        replay_frame.grid(row=6, column=1, sticky="w", pady=5)
+        ttk.Entry(replay_frame, textvariable=replay_var, width=25).pack(side="left")
+        ttk.Button(replay_frame, text="...", command=lambda: self._browse_replay(replay_var)).pack(side="left", padx=5)
+        
         # Bind ROM change to auto-update state
         def on_rom_change(*args):
             if rom_var.get() == "PokemonBlue.gb":
@@ -172,6 +180,7 @@ class EnvConfigWindow:
             "stage": stage_var,
             "reward_scale": reward_scale_var,
             "explore_weight": explore_weight_var,
+            "input_replay": replay_var,
         }
         tab.trainer_name = trainer_name
     
@@ -200,6 +209,18 @@ class EnvConfigWindow:
             # Store just the filename if it's in the project root, otherwise full path
             file_name = Path(file_path).name
             var.set(file_name)
+
+    def _browse_replay(self, var: tk.StringVar) -> None:
+        """Open file picker for an input replay JSON file."""
+        from tkinter import filedialog
+        file_path = filedialog.askopenfilename(
+            title="Select Input Replay File",
+            filetypes=[("JSON Files", "*.json"), ("All Files", "*.*")],
+            initialdir=PROJECT_ROOT
+        )
+        if file_path:
+            # Store the absolute path so it can be resolved regardless of env dir
+            var.set(str(Path(file_path).resolve()))
     
     def _build_worker_tab(self, tab) -> None:
         config = self.worker_defaults
@@ -273,6 +294,7 @@ class EnvConfigWindow:
                     "stage": tab.config_vars["stage"].get(),
                     "reward_scale": tab.config_vars["reward_scale"].get(),
                     "explore_weight": tab.config_vars["explore_weight"].get(),
+                    "input_replay": tab.config_vars["input_replay"].get(),
                 }
                 with open(config_file, "w") as f:
                     json.dump(config_data, f, indent=2)
@@ -335,6 +357,7 @@ class Launcher:
         self.model_var = tk.StringVar()
         self.stage_var = tk.StringVar(value="starter")
         self.training_mode_var = tk.StringVar(value="segment")  # NEW
+        self.override_trainer_stage_var = tk.BooleanVar(value=False)  # NEW
         self.rows_var = tk.IntVar(value=6)
         self.cols_var = tk.IntVar(value=7)
         self.num_envs_var = tk.IntVar(value=42)
@@ -390,12 +413,18 @@ class Launcher:
 
         # Row 3: Stage
         ttk.Label(main_frame, text="Stage:").grid(row=3, column=0, sticky="w", pady=2)
+        stage_frame = ttk.Frame(main_frame)
+        stage_frame.grid(row=3, column=1, pady=2, sticky="w")
         self.stage_combo = ttk.Combobox(
-            main_frame, textvariable=self.stage_var,
+            stage_frame, textvariable=self.stage_var,
             values=list_stages(), state="readonly", width=15
         )
-        self.stage_combo.grid(row=3, column=1, pady=2, sticky="w")
+        self.stage_combo.pack(side=tk.LEFT)
         self.stage_combo.bind("<<ComboboxSelected>>", self._on_stage_change)
+        ttk.Checkbutton(
+            stage_frame, text="Override stage settings for trainers",
+            variable=self.override_trainer_stage_var,
+        ).pack(side=tk.LEFT, padx=(8, 0))
 
         # Row 4: Training Mode (Segment vs Fullrun)
         ttk.Label(main_frame, text="Training:").grid(row=4, column=0, sticky="w", pady=2)
@@ -596,6 +625,7 @@ class Launcher:
             continuous=self.continuous_var.get(),
             record_input_with_plugin=self.record_input_var.get(),
             use_legacy_recorder=self.legacy_recorder_var.get(),
+            override_trainer_stage=self.override_trainer_stage_var.get(),
         )
 
         if mode == "train" and self.checkpoints:

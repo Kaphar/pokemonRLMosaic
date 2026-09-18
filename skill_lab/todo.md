@@ -13,7 +13,29 @@ I am still arguing if I should not delete the old recorder, we are going to call
 
 
 
-the input recorder is based on the frequence of inputs for the replay of the model, but we should make sure we can make it work for a human replay, i didn't chck.
+# TUDO
+in effort for normalization we are going to continue unifying the rewards, so that every stage has the baselines rewards, the stage have multipliers, which need to appear more clearly in the variables' names so if a stage does need the baseline rewards (specific training, avoid 'noise' ) it could put a multiplier of 0 to ignore some aspects.
+
+We need to see how is handled the rewards, in our function in the gym, because we are going to give a baseline rewards for killing a wild pokemon, trainers.
+the flow is always : we have our settings file for our profiles (i as see it, the profile are also multiplier of rewards)
+seeing how 'far' the training has come we need to verify the rewards from the gym v2 for healing the pokemons, a good point would be to have the model training a grinding loop (defeat pokemon, progress, heal repeat), especially for our "trainer" profile. our progressers/speedrunner profile should be more breadcrumb milestone driven and more incline to push through the screens.
+
+
+# TODO: 
+Add more breadcrumb, check the breacrumb, have a neighboring visual milestone list and progress feedback
+
+
+# Check: the input recorder is based on the frequence of inputs for the replay of the model, but we should make sure we can make it work for a human replay, i didn't chck.
+
+# replay inputs_in mosaic through config.
+
+
+# emulator_with_debug :
+adapt interactive mode and dev mode so I can add more breadcrumb rewards and work on speeding up the training of route1 to pokemon center to chen to finally be able to catch pokemon and "progress".
+
+
+# when we have the abitility to catch pokemon :
+
 
 
 # for next model reset :
@@ -24,8 +46,9 @@ ACTION MASKING FOR B Button.
 
 
 
-# emulator_with_debug :
-fix replay to get the same state if we load from the same state and put the same inputs.
+
+
+
 
 
 # rather cool and more ambitious, we will need to make sure the observation changes (we will need to check the opencv part of the detection too)
@@ -46,3 +69,6 @@ make the model aware of the RNG address and the DV to train to handle the manipu
 ### low priority, later or never
 
 * calculate_starter_reward is it possible to have the model determine the ponderation of the different stats for the proper pokemon, and determine which is the most important stat ? (said to be special) so it could maybe ponder the rewards by himself ? (something i read gave me that idea, what do you think of it?)
+
+
+* optimise the replay inputs, try to have an better implementation of the replay of the inputs with no priming, fast input played at the gym on the exact same frame to keep a determinism while having no downside.

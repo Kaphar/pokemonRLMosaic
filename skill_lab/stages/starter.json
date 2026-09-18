@@ -12,6 +12,7 @@
     "B": false,
     "A": false
   },
+  "reset_on_catch": false,
   "target_milestones": [
     "0xD747-0",
     "0xD747-1", 

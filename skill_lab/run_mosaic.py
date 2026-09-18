@@ -109,6 +109,8 @@ def make_config(profile: Profile, session_path: Path, args: argparse.Namespace) 
         # Save on catch settings
         "save_on_catch_enabled": SAVE_ON_CATCH_ENABLED,
         "save_on_catch_min_dv": SAVE_ON_CATCH_MIN_DV,
+        # Stage-level reset_on_catch (read from stage config)
+        "reset_on_catch": stage_config.get("reset_on_catch", False),
         # Plugin-based frame-exact input recording
         "record_input_with_plugin": getattr(args, "record_input_with_plugin", False),
         "record_input_path": str(Path(session_path) / "plugin_input_events.json"),
@@ -165,6 +167,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-hud", action="store_true", help="Disable HUD overlay on emulator tiles")
 
     parser.add_argument("--continuous", action="store_true", help="Run indefinitely without batch limits")
+    parser.add_argument("--override-trainer-stage", action="store_true",
+                        help="Force trainers to use the launcher-selected stage instead of their own saved stage")
 
     parser.add_argument("--record-input-with-plugin", action="store_true",
                         help="Record frame-exact inputs via plugin-style hook for deterministic replay")
@@ -277,6 +281,7 @@ def main(args: argparse.Namespace | None = None) -> None:
         init_state=args.init_state,
         mosaic_rows=getattr(args, "mosaic_rows", 6),
         mosaic_cols=getattr(args, "mosaic_cols", 7),
+        override_trainer_stage=getattr(args, "override_trainer_stage", False),
     )
 
     # Ensure each environment exists (lazy creation on launch)
@@ -464,6 +469,12 @@ def main(args: argparse.Namespace | None = None) -> None:
                                     "action": int(human_action), "teacher_bonus": args.teacher_bonus,
                                 }, log_file)
                                 log_file.write("\n")
+                    # Input replay override: replay recorded actions while a
+                    # replay sequence is loaded and not yet exhausted. Once the
+                    # sequence is consumed the model/human automatically take over.
+                    _replay_action = env.envs[local_index].consume_replay_action()
+                    if _replay_action is not None:
+                        actions[local_index] = _replay_action
                     # REMOVED: boundary.apply() - Environment handles masking now
 
 
