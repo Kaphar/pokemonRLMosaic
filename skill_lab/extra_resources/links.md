@@ -14,3 +14,9 @@ https://github.com/atendev/pokemon-memory-reader/blob/main/debug/debugtools.lua
 
 
 https://www.youtube.com/watch?v=ci1ZkqkSMkE
+
+
+
+https://github.com/baekalfen/pyboy
+
+https://github.com/pret/pokered/blob/master/ram/hram.asm

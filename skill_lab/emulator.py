@@ -86,7 +86,12 @@ def make_env(rank: int, env_conf: dict[str, Any], env_setup_config: dict[str, An
             "disable_select": cfg.get("disable_select", True),
             "disable_B": cfg.get("disable_B", False),
             "disable_A": cfg.get("disable_A", False),
+            "reward_scale": cfg.get("reward_scale", 1.0),
             "milestone_reward": cfg.get("milestone_reward", medium_reward),
+            "healing_reward_multiplier": cfg.get(
+                "healing_reward_multiplier",
+                cfg.get("healing_reward", 1.0),
+            ),
             "milestones_path": cfg.get("milestones_path", None),
             "speed_bonus": cfg.get("speed_bonus", True),
             "training_mode": cfg.get("training_mode", "segment"),

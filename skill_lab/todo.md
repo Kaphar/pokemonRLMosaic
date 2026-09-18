@@ -34,6 +34,9 @@ but it would be better for those stats to be accessible on a browser, rather tha
 verify the weigh and behaviour of different profile to see if we are giving proper rewards for best incentives.
 
 
+* https://github.com/Baekalfen/PyBoy/pull/430/changes#diff-3c5a6b1ddcfa9e5017323513822689bb51b0b5e236a842eb462201675402e667
+implemment the game link and allow our emulators to exchange between them, first a script that prove feasability between 2 emulators, then we will make a pool of available pokemon, maybe have some "Pokemon Library' profile that list the pokemon it can trade. some function that could trigger a script at first to exchange pokemon on demand. so if as a dev, in the mosaic, I click a pokemon that is tradeable, it will set up the transfert with another emulator owning the pokemon i want in its state, maybe handle automatic system with "givers" an "takers" to fulfil the pokedex, we are going to see also which pokemon require being exchanged to evolve and pokemon red / blue only.
+
 
 # for next (or next's next's next...) model reset :
 # For later: rather cool and more ambitious, we will need to make sure the observation changes (we will need to check the opencv part of the detection too)

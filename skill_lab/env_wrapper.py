@@ -36,7 +36,11 @@ class SkillLabWrapper(gymnasium.Wrapper):
         # --- Configuration ---
         self.disable_start = config.get("disable_start", True)
         self.disable_select = config.get("disable_select", True)
+        self.reward_scale = float(config.get("reward_scale", 1.0))
         self.milestone_reward = config.get("milestone_reward", medium_reward)
+        self.healing_reward_multiplier = float(
+            config.get("healing_reward_multiplier", config.get("healing_reward", 1.0))
+        )
         self.milestones_path = config.get("milestones_path", None)
         self.speed_bonus_enabled = config.get("speed_bonus", True)
         self.training_mode = config.get("training_mode", "segment")
@@ -66,6 +70,7 @@ class SkillLabWrapper(gymnasium.Wrapper):
 
         # Track party size to detect new catches
         self._previous_party_size = 0
+        self._last_summary_map_id = int(getattr(self.env.unwrapped, "current_map_id", 0))
 
         # --- Detect action indices ---
         self.start_action_index = None
@@ -493,6 +498,26 @@ class SkillLabWrapper(gymnasium.Wrapper):
             return True
         return False
 
+    def _read_party_size(self) -> int:
+        """Return the current number of occupied party slots."""
+        try:
+            party = self.party_reader.read_party({
+                "partyAddr": Gen1PartyReader.PARTY_ADDRESS,
+                "partySlotsCounterAddr": Gen1PartyReader.PARTY_SIZE_ADDRESS,
+                "partySpeciesAddr": Gen1PartyReader.PARTY_SPECIES_ADDRESS,
+                "partyNicknamesAddr": Gen1PartyReader.PARTY_NICKNAMES_ADDRESS,
+            })
+            return len(party) if party else 0
+        except Exception:
+            return 0
+
+    def _current_hp_fraction(self) -> float:
+        """Read current party HP fraction with a safe fallback."""
+        try:
+            return float(self.read_hp_fraction())
+        except Exception:
+            return 0.0
+
     def _check_starter_status(self) -> tuple[str, int]:
         """Check if a starter has been picked and whether it matches the target.
         
@@ -568,13 +593,20 @@ class SkillLabWrapper(gymnasium.Wrapper):
             "masked": bool(original_action != action),
         })
 
+        prior_hp = self._current_hp_fraction()
+        prior_map_id = int(getattr(self.env.unwrapped, "current_map_id", 0))
+        prior_party_size = self._read_party_size()
+
         # Execute in real environment
         observation, reward, terminated, truncated, info = self.env.step(action)
 
+        milestone_reward = 0.0
+        milestone_triggered = False
         # Add milestone rewards with speed bonus
         if self.milestone_tracker is not None:
             milestone_reward = self.milestone_tracker.check_and_reward(self.env)
             if milestone_reward > 0:
+                milestone_triggered = True
                 steps_since_last = self.env.unwrapped.step_count - self.last_milestone_step
                 
                 # SPEED BONUS: fewer steps = higher multiplier
@@ -587,6 +619,36 @@ class SkillLabWrapper(gymnasium.Wrapper):
                 self.total_milestone_reward += milestone_reward
                 self.last_milestone_step = self.env.unwrapped.step_count
                 info["milestone_reward"] = milestone_reward
+
+        current_hp = self._current_hp_fraction()
+        current_map_id = int(getattr(self.env.unwrapped, "current_map_id", 0))
+        current_party_size = self._read_party_size()
+        hp_gain = max(0.0, current_hp - prior_hp)
+        progress_signal = milestone_triggered or (current_party_size > prior_party_size) or (current_map_id != prior_map_id)
+
+        if self.healing_reward_multiplier > 0.0 and progress_signal and hp_gain > 0.05 and prior_hp <= 0.9:
+            healing_reward = self.reward_scale * self.healing_reward_multiplier
+            reward += healing_reward
+            info["healing_reward"] = healing_reward
+            info["healing_reward_multiplier"] = self.healing_reward_multiplier
+            info["healing_reward_scale"] = self.reward_scale
+            info["healing_hp_before"] = prior_hp
+            info["healing_hp_after"] = current_hp
+            progress_labels = []
+            if milestone_triggered:
+                progress_labels.append("milestone")
+            if current_party_size > prior_party_size:
+                progress_labels.append("catch")
+            if current_map_id != prior_map_id:
+                progress_labels.append("map")
+            reasons = ", ".join(progress_labels) if progress_labels else "progress"
+            color = "\033[32m"
+            reset = "\033[0m"
+            print(
+                f"{color}[{self.env_name}] 💚 Healing reward! "
+                f"HP {prior_hp:.0%} -> {current_hp:.0%} after {reasons} "
+                f"→ +{healing_reward:.2f} = {self.reward_scale:.2f} × {self.healing_reward_multiplier:.2f}{reset}"
+            )
 
         # ========================================
         # EARLY TERMINATION: Check starter status

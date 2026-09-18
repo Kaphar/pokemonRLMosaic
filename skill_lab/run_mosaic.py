@@ -103,7 +103,9 @@ def make_config(profile: Profile, session_path: Path, args: argparse.Namespace) 
         "disable_select": disable_select,
         "disable_B": disable_B,
         "disable_A": disable_A,
+        "reward_scale": reward_scale,
         "milestone_reward": stage_config.get("milestone_reward", medium_reward),
+        "healing_reward_multiplier": stage_config.get("healing_reward_multiplier", stage_config.get("healing_reward", 1.0)),
         "milestones_path": str(PROJECT_ROOT / "skill_lab" / "milestones.json"),
         "names_path": str(PROJECT_ROOT / "skill_lab" / "names.json"),
         # Save on catch settings
@@ -254,12 +256,18 @@ def log_reward_configuration_summary(profile_name: str, profile_config: dict[str
     stage_multipliers = summary["stage_reward_multipliers"]
     effective = summary["effective_rewards"]
 
+    cyan = "\033[36m"
+    green = "\033[32m"
+    yellow = "\033[33m"
+    magenta = "\033[35m"
+    reset = "\033[0m"
+
     print("\n" + "=" * 90)
-    print("=== REWARD CONFIGURATION SUMMARY ===")
-    print(f"Profile: {profile_name}")
-    print(f"  - reward_scale: {summary['reward_scale']:.2f}")
-    print(f"  - explore_weight: {profile_config.get('explore_weight', 1.0):.2f}")
-    print(f"Stage: {stage_name}")
+    print(f"{cyan}=== REWARD CONFIGURATION SUMMARY ==={reset}")
+    print(f"{yellow}Profile:{reset} {profile_name}")
+    print(f"  - reward_scale: {green}{summary['reward_scale']:.2f}{reset}")
+    print(f"  - explore_weight: {green}{profile_config.get('explore_weight', 1.0):.2f}{reset}")
+    print(f"{yellow}Stage:{reset} {stage_name}")
     for label, key in (
         ("milestone_reward_multiplier", "milestone"),
         ("exploration_reward_multiplier", "exploration"),
@@ -268,8 +276,9 @@ def log_reward_configuration_summary(profile_name: str, profile_config: dict[str
         ("healing_reward_multiplier", "healing"),
     ):
         value = stage_multipliers.get(key, 0.0)
-        print(f"  - {label}: {value:.2f}")
-    print("\nFinal Effective Rewards:")
+        color = green if value > 0 else "\033[90m"
+        print(f"  - {label}: {color}{value:.2f}{reset}")
+    print(f"\n{magenta}Final Effective Rewards:{reset}")
     for label, key in (
         ("Milestone", "milestone"),
         ("Exploration", "exploration"),
@@ -279,8 +288,9 @@ def log_reward_configuration_summary(profile_name: str, profile_config: dict[str
     ):
         multiplier = stage_multipliers.get(key, 0.0)
         reward_value = effective.get(key, 0.0)
-        print(f"  - {label}: {reward_value:.2f} ({multiplier:.2f} x {summary['reward_scale']:.2f})")
-    print("=" * 90 + "\n")
+        calc = f"{multiplier:.2f} x {summary['reward_scale']:.2f}"
+        print(f"  - {label}: {green}{reward_value:.2f}{reset} ({yellow}{calc}{reset})")
+    print(f"{cyan}=" * 90 + f"{reset}\n")
 
 
 def main(args: argparse.Namespace | None = None) -> None:
