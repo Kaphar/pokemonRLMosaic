@@ -130,7 +130,9 @@ class SkillLabWrapper(gymnasium.Wrapper):
         self._replay_actions: list[int] = []
         self._replay_events: list[dict[str, Any]] = []
         self._replay_total_frames = 0
+        self._replay_action_freq = self.action_freq
         self._replay_noop_action = self.noop_action_index
+        self._replay_state_path: Path | None = None
         self._replay_frame = 0
         self._replay_index = 0
         self._original_run_action = None
@@ -159,16 +161,35 @@ class SkillLabWrapper(gymnasium.Wrapper):
         try:
             with open(replay_path, "r", encoding="utf-8") as replay_file:
                 data = json.load(replay_file)
-            entries = data.get("actions", [])
-            self._replay_actions = [
-                int(a.get("action", a.get("requested_action", 0))) for a in entries
-            ]
             self._replay_noop_action = int(
                 data.get("noop_action", self.noop_action_index)
             )
-            # Frame-exact events (plugin recordings) used for deterministic replay.
-            self._replay_events = data.get("input_events", []) or []
-            self._replay_total_frames = len(self._replay_actions) * self.action_freq
+            entries = data.get("actions", [])
+            self._replay_actions = []
+            for entry in entries:
+                if isinstance(entry, dict):
+                    if entry.get("masked", False):
+                        self._replay_actions.append(self._replay_noop_action)
+                    else:
+                        self._replay_actions.append(
+                            int(entry.get("action", entry.get("requested_action", 0)))
+                        )
+                else:
+                    self._replay_actions.append(int(entry))
+            self._replay_action_freq = int(data.get("action_freq", self.action_freq))
+            if self._replay_action_freq < 1:
+                raise ValueError("Replay action frequency must be positive")
+            # Match emulator_with_debug.load_replay(): recordings without an
+            # event list still take the plugin path with generated events.
+            from skill_lab.emulator_with_debug import generate_input_events
+            self._replay_events = data.get("input_events", []) or generate_input_events(
+                self._replay_actions,
+                self._replay_action_freq,
+                self._replay_noop_action,
+            )
+            from skill_lab.emulator_with_debug import resolve_recording_path
+            self._replay_state_path = resolve_recording_path(data.get("init_state"))
+            self._replay_total_frames = len(self._replay_actions) * self._replay_action_freq
             if self._replay_events:
                 print(
                     f"[{self.env_name}] Loaded input replay (frame-exact): "
@@ -213,27 +234,44 @@ class SkillLabWrapper(gymnasium.Wrapper):
         take over.
         """
         if not self._replay_events or self._replay_frame >= self._replay_total_frames:
+            original_run_action = self._original_run_action
             self._restore_run_action()
-            return self._original_run_action(action)
+            if original_run_action is None:
+                raise RuntimeError("Frame-exact replay lost the native action cycle")
+            return original_run_action(action)
         try:
-            from skill_lab.emulator_with_debug import replay_frame_by_frame
+            from skill_lab.emulator_with_debug import _prime_emulator, replay_frame_by_frame
+
+            if self._replay_frame == 0 and self._replay_state_path is not None:
+                _prime_emulator(
+                    self._driven_pyboy(),
+                    self._replay_state_path,
+                    self._replay_actions,
+                    self._replay_action_freq,
+                    self._replay_noop_action,
+                    # num_actions=len(self._replay_actions), # setting lower number to cut the cost of priming, but this may cause issues if the replay is longer than expected, 8 didn't work, but 24 did.
+                    num_actions=20,
+                )
 
             replay_frame_by_frame(
                 self._driven_pyboy(),
                 self._replay_events,
                 self._replay_total_frames,
-                render=False,
+                render=True,
                 start_frame=self._replay_frame,
-                max_frames=self.action_freq,
+                max_frames=self._replay_action_freq,
             )
-            self._replay_frame += self.action_freq
+            self._replay_frame += self._replay_action_freq
         except Exception as error:
             print(
                 f"[{self.env_name}] Frame-exact replay failed, falling back to "
                 f"native action cycle: {error}"
             )
+            original_run_action = self._original_run_action
             self._restore_run_action()
-            return self._original_run_action(action)
+            if original_run_action is None:
+                raise RuntimeError("Frame-exact replay lost the native action cycle") from error
+            return original_run_action(action)
 
     def has_replay(self) -> bool:
         """Return True while there are still replay actions to consume."""
@@ -633,6 +671,12 @@ class SkillLabWrapper(gymnasium.Wrapper):
         self._replay_index = 0
         self._replay_frame = 0
         self._previous_party_size = 0
+
+        # The standalone plugin replay loads the recording's state before
+        # priming. Do the same instead of relying on per-environment defaults.
+        if self._replay_events and self._replay_state_path is not None:
+            with self._replay_state_path.open("rb") as state_file:
+                self._driven_pyboy().load_state(state_file)
 
         # Restore a native action cycle left over from a previous (possibly
         # interrupted) replay so step bookkeeping stays consistent.

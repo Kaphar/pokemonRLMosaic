@@ -890,7 +890,9 @@ def finalize_input_recording(
     entry = _plugin_recording_registry.pop(pid, None)
     recorded: list[dict[str, Any]] = entry["events"] if entry else []
 
-    # Derive step-level actions from frame-level events
+    # Derive step-level actions from frame-level events only when the caller
+    # did not provide the original action sequence. Keeping the original
+    # sequence preserves trailing no-op cycles after the last button event.
     if not recorded:
         input_events: list[dict[str, Any]] = []
     else:
@@ -915,7 +917,7 @@ def finalize_input_recording(
             action_events[int(press)] = action_idx
             release_events[int(release)] = action_idx
 
-        actions: list[int] = []
+        reconstructed_actions: list[int] = []
         input_events = []
         for step in range(num_steps):
             step_start = step * action_freq
@@ -923,13 +925,15 @@ def finalize_input_recording(
             action_found = False
             for ev_code in cycle_events:
                 if ev_code in action_events:
-                    actions.append(action_events[ev_code])
+                    reconstructed_actions.append(action_events[ev_code])
                     action_found = True
                     break
             if not action_found:
-                actions.append(noop_action)
+                reconstructed_actions.append(noop_action)
 
         input_events = [{"frame": ev["frame"], "event": ev["event"]} for ev in recorded]
+        if not actions:
+            actions = reconstructed_actions
 
     data: dict[str, Any] = {
         "action_freq": action_freq,
@@ -1904,6 +1908,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
 
 

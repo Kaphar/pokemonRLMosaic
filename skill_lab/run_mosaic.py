@@ -618,22 +618,30 @@ def main(args: argparse.Namespace | None = None) -> None:
         stats_tracker.save_history()  # Save stats for next run
         # Save plugin-based frame-exact input recording
         if getattr(args, "record_input_with_plugin", False):
-            from skill_lab.emulator_with_debug import _plugin_recording_registry
-            from skill_lab.emulator_with_debug import ACTION_EVENTS
-            _event_to_action: dict[int, int] = {}
-            for _idx in range(8):
-                _press, _release = ACTION_EVENTS[_idx]
-                _event_to_action[int(_press)] = _idx
-                _event_to_action[int(_release)] = _idx
+            from skill_lab.emulator_with_debug import (
+                _plugin_recording_registry,
+                finalize_input_recording,
+            )
             save_paths = []
             for env_obj in env.envs:
                 pyboy = env_obj.pyboy
                 pid = id(pyboy)
                 entry = _plugin_recording_registry.get(pid)
                 if entry and entry["events"]:
-                    actions = [_event_to_action.get(ev["event"], entry["noop_action"]) for ev in entry["events"]]
                     output_path = Path(config["record_input_path"]).parent / f"plugin_inputs_env{env_obj.env_index}.json"
-                    env_obj.save_recording(actions=actions, output_path=output_path)
+                    effective_actions = [
+                        int(action["action"])
+                        for action in getattr(env_obj, "_episode_actions", [])
+                    ]
+                    finalize_input_recording(
+                        pyboy,
+                        output_path,
+                        actions=effective_actions,
+                        action_freq=int(entry["action_freq"]),
+                        noop_action=int(entry["noop_action"]),
+                        rom_path=Path(args.rom),
+                        init_state_path=Path(env_obj.init_state),
+                    )
                     save_paths.append(output_path)
             if save_paths:
                 print(f"[Plugin Recorder] Saved input recordings to: {save_paths}")
