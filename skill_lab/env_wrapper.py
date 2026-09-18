@@ -249,7 +249,8 @@ class SkillLabWrapper(gymnasium.Wrapper):
                     self._replay_actions,
                     self._replay_action_freq,
                     self._replay_noop_action,
-                    # num_actions=len(self._replay_actions), # setting lower number to cut the cost of priming, but this may cause issues if the replay is longer than expected, 8 didn't work, but 24 did.
+                    # num_actions=len(self._replay_actions), 
+                    # # setting lower number to cut the cost of priming,  1,8,12 didn't work, but 20,24 did.
                     num_actions=20,
                 )
 
