@@ -1,12 +1,18 @@
 
-# TUDO
+# TODO
 in effort for normalization we are going to continue unifying the rewards, so that every stage has the baselines rewards, the stage have multipliers, which need to appear more clearly in the variables' names so if a stage does need the baseline rewards (specific training, avoid 'noise' ) it could put a multiplier of 0 to ignore some aspects.
 
 We need to see how is handled the rewards, in our function in the gym, because we are going to give a baseline rewards for killing a wild pokemon, trainers. and we need to tackle/verify what we do to incentivise meaningful healing (healing pokemons after making some progress, either on the map, either by catching/tr)
 the flow is always : we have our settings file for our profiles (i as see it, the profile are also multiplier of rewards)
 seeing how 'far' the training has come we need to verify the rewards from the gym v2 for healing the pokemons, a good point would be to have the model training a grinding loop (defeat pokemon, progress, heal repeat), especially for our "trainer" profile. our progressers/speedrunner profile should be more breadcrumb milestone driven and more incline to push through the screens.
 
-We need a check function that verify that we have the baselines rewards, they should be the same values and included in every "final config" we need a good log in the terminal that sums up nicely the rewards settings.
+We need a check function that verify that we have the baselines rewards, they should be the same values and included in every "final config" we need a good detailed log in the terminal that sums up nicely the rewards settings, from profiles, stages,
+
+
+# rework the Ovsersvation Inspector data panel (and milestones) :
+I think i will need tools to Add more breadcrumb, check the breacrumb, I will need a vertical list of the neighboring milestones and progress feedback (green : done : keeps track of the number of steps for each "checkpoint"). this view should work in run_mosaic, but in emulator_with_debug as well, even if the inputs are player controlled. 
+
+* adjust the speed bonus based on the best number of step necessary, we can have a multiplier, especially for speedrunner, but as it is right now, some milestones can take more steps and never have the speed bonus triggered.
 
 # TOOLING WITH THE MAP:
 the original project built the map from the observed data I think, actually I think it even did more than that I think it could stream the position of each environement on the map. there was a side repo but i think the functionalities were merged and integrated in the V2. I currently do not know if the code of the run_mosaic script allows for such an option, like to visualize in the browser would be the best probably. also i could integrate some tooling to apply some specific map position action mapping. or an easi click on cell, to toggle a "lava zone" (continuous rewards penatly upon staying in the easily UI set position)
@@ -16,10 +22,7 @@ speaking of that can you look if the original scripts of the project (from the r
 # environement stats window : add a column to the left of the "score" column which would show "current core" the score the environement has since last reset.
 but it would be better for those stats to be accessible on a browser, rather than have that window, have a webpage would be a win at many levels. we wouldn't need to use cv2 to generate an image with the stats, we could introduce some front end functions like sorting by score or by a clicked column
 
-# rework the Ovsersvation Inspector data panel (and milestones) :
-I think i will need tools to Add more breadcrumb, check the breacrumb, I will need a vertical list of the neighboring milestones and progress feedback (green : done : keeps track of the number of steps for each "checkpoint"). this view should work in run_mosaic, but in emulator_with_debug as well, even if the inputs are player controlled. 
 
-* adjust the speed bonus based on the best number of step necessary, we can have a multiplier, especially for speedrunner, but as it is right now, some milestones can take more steps and never have the speed bonus triggered.
 
 # the stats watcher could be reworked to show more information about objectives, milstones, further milestone reached by an emulator. we initially had that window to track the starter training stage, but we would want our statistic in that window to reflect overall actions, not only the starter, especially since we are now also working past that segment.
 

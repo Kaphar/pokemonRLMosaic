@@ -45,7 +45,7 @@ from skill_lab.config import (
     GRID_COLS,
     GRID_ROWS,
 )
-from skill_lab.rewards import big_reward, huge_reward, medium_reward
+from skill_lab.rewards import big_reward, huge_reward, medium_reward, small_reward
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -78,6 +78,25 @@ PROFILES = {
 }
 
 
+def load_profile_config(profile_name: str) -> dict[str, Any]:
+    """Load profile data from the JSON file when available, else fallback.
+
+    This keeps the runtime config aligned with the actual JSON characteristics in
+    skill_lab/profiles/ while preserving the legacy in-memory defaults.
+    """
+    profile_name = profile_name.lower()
+    profile_path = PROFILES_DIR / f"{profile_name}_profile.json"
+    if profile_path.exists():
+        with open(profile_path, "r", encoding="utf-8") as f:
+            loaded = json.load(f)
+        if isinstance(loaded, dict) and loaded.get("settings"):
+            profile = dict(loaded.get("settings", {}))
+            profile.setdefault("name", profile_name)
+            return profile
+        return loaded
+    return PROFILES.get(profile_name, {}).copy()
+
+
 def load_stage_config(stage_name: str) -> dict[str, Any]:
     """Load stage configuration from JSON file."""
     stages_dir = PROJECT_ROOT / "skill_lab" / "stages"
@@ -85,7 +104,20 @@ def load_stage_config(stage_name: str) -> dict[str, Any]:
     
     if stage_path.exists():
         with open(stage_path, "r", encoding="utf-8") as f:
-            return json.load(f)
+            config = json.load(f)
+        alias_map = {
+            "milestone_reward": "milestone_reward_multiplier",
+            "exploration_reward": "exploration_reward_multiplier",
+            "combat_reward": "combat_reward_multiplier",
+            "capture_reward": "capture_reward_multiplier",
+            "healing_reward": "healing_reward_multiplier",
+        }
+        for legacy_key, canonical_key in alias_map.items():
+            if legacy_key not in config and canonical_key in config:
+                config[legacy_key] = config[canonical_key]
+            elif canonical_key not in config and legacy_key in config:
+                config[canonical_key] = config[legacy_key]
+        return config
     
     # Default fallback for starter stage
     return {
@@ -93,6 +125,11 @@ def load_stage_config(stage_name: str) -> dict[str, Any]:
         "description": f"Default {stage_name} stage",
         "max_steps": 7200,
         "milestone_reward": medium_reward,
+        "milestone_reward_multiplier": medium_reward,
+        "exploration_reward_multiplier": small_reward,
+        "combat_reward_multiplier": 0.0,
+        "capture_reward_multiplier": 0.0,
+        "healing_reward_multiplier": 0.0,
         "init_state": str(DEFAULT_INIT_STATE),
         "button_masks": {
             "Start": True,

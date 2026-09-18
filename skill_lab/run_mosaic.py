@@ -34,12 +34,12 @@ from skill_lab.mosaic import Mosaic
 from skill_lab.stats_window import StatsWindow
 
 
-from skill_lab.env_setup import setup_envs, ensure_env_exists, get_env_config, load_stage_config
+from skill_lab.env_setup import setup_envs, ensure_env_exists, get_env_config, load_profile_config, load_stage_config
 
 from skill_lab.curriculum import get_stage #, stage_to_config
 from skill_lab.recorder import InputRecorder
 from skill_lab.stats_tracker import StatsTracker
-from skill_lab.rewards import medium_reward
+from skill_lab.rewards import check_baseline_rewards, medium_reward
 from skill_lab.throughput import ThroughputLogger
 
 class Profile:
@@ -248,11 +248,55 @@ def show_report(stats: BatchStats, profile_name: str) -> None:
     cv2.destroyWindow("Batch Report")
 
 
+def log_reward_configuration_summary(profile_name: str, profile_config: dict[str, Any], stage_name: str, stage_config: dict[str, Any]) -> None:
+    """Print a clear reward summary derived from the JSON configuration."""
+    summary = check_baseline_rewards(profile_config, stage_config)
+    stage_multipliers = summary["stage_reward_multipliers"]
+    effective = summary["effective_rewards"]
+
+    print("\n" + "=" * 90)
+    print("=== REWARD CONFIGURATION SUMMARY ===")
+    print(f"Profile: {profile_name}")
+    print(f"  - reward_scale: {summary['reward_scale']:.2f}")
+    print(f"  - explore_weight: {profile_config.get('explore_weight', 1.0):.2f}")
+    print(f"Stage: {stage_name}")
+    for label, key in (
+        ("milestone_reward_multiplier", "milestone"),
+        ("exploration_reward_multiplier", "exploration"),
+        ("combat_reward_multiplier", "combat"),
+        ("capture_reward_multiplier", "capture"),
+        ("healing_reward_multiplier", "healing"),
+    ):
+        value = stage_multipliers.get(key, 0.0)
+        print(f"  - {label}: {value:.2f}")
+    print("\nFinal Effective Rewards:")
+    for label, key in (
+        ("Milestone", "milestone"),
+        ("Exploration", "exploration"),
+        ("Combat", "combat"),
+        ("Capture", "capture"),
+        ("Healing", "healing"),
+    ):
+        multiplier = stage_multipliers.get(key, 0.0)
+        reward_value = effective.get(key, 0.0)
+        print(f"  - {label}: {reward_value:.2f} ({multiplier:.2f} x {summary['reward_scale']:.2f})")
+    print("=" * 90 + "\n")
+
+
 def main(args: argparse.Namespace | None = None) -> None:
     if args is None: args = parse_args()
 
     # Get stage configuration from JSON
     stage_config = load_stage_config(args.stage)
+    profile_name = args.specialization or "trainer"
+    profile_config = load_profile_config(profile_name)
+    if args.specialization and args.specialization in SPECIALIZATION_PRESETS:
+        preset = SPECIALIZATION_PRESETS[args.specialization]
+        profile_config = {**profile_config, **preset}
+    else:
+        args.reward_scale = float(profile_config.get("reward_scale", args.reward_scale))
+        args.explore_weight = float(profile_config.get("explore_weight", args.explore_weight))
+
     print(f"Stage: {stage_config.get('name', args.stage)} - {stage_config.get('description', '')}")
     
     # Extract button masks from unified config
@@ -261,6 +305,8 @@ def main(args: argparse.Namespace | None = None) -> None:
     print(f"  Select masked: {button_masks.get('Select', True)}")
     print(f"  B button masked: {button_masks.get('B', False)}")
     print(f"  A button masked: {button_masks.get('A', False)}")
+
+    log_reward_configuration_summary(profile_name, profile_config, stage_config.get('name', args.stage), stage_config)
 
     if not args.rom.exists(): raise FileNotFoundError(f"ROM not found: {args.rom}")
     if not args.init_state.exists(): raise FileNotFoundError(f"Initial state not found: {args.init_state}")
@@ -371,8 +417,16 @@ def main(args: argparse.Namespace | None = None) -> None:
     print(f"  - Select Button Masked: {button_masks.get('Select', True)}")
     print(f"  - B Button Masked: {button_masks.get('B', False)}")
     print(f"  - A Button Masked: {button_masks.get('A', False)}")
-    milestone_reward = stage_config.get("milestone_reward", "medium_reward")
-    print(f"  - Milestone Reward: {milestone_reward}")
+    milestone_multiplier = stage_config.get("milestone_reward_multiplier", stage_config.get("milestone_reward", "medium_reward"))
+    exploration_multiplier = stage_config.get("exploration_reward_multiplier", stage_config.get("exploration_reward", 0.0))
+    combat_multiplier = stage_config.get("combat_reward_multiplier", stage_config.get("combat_reward", 0.0))
+    capture_multiplier = stage_config.get("capture_reward_multiplier", stage_config.get("capture_reward", 0.0))
+    healing_multiplier = stage_config.get("healing_reward_multiplier", stage_config.get("healing_reward", 0.0))
+    print(f"  - Milestone Reward Multiplier: {milestone_multiplier}")
+    print(f"  - Exploration Reward Multiplier: {exploration_multiplier}")
+    print(f"  - Combat Reward Multiplier: {combat_multiplier}")
+    print(f"  - Capture Reward Multiplier: {capture_multiplier}")
+    print(f"  - Healing Reward Multiplier: {healing_multiplier}")
     print(f"  - Max Steps (stage default): {stage_config.get('max_steps', 7200)}")
     print("="*120 + "\n")
 
