@@ -1,72 +1,58 @@
-Add a "Save Checkpoint" button in your mosaic UI that calls recorder.save() only when clicked.
-
-check speed bonus: this obersavation might be wrong, look the code first.
-I see an issue with the speed bonus, if it is slow or very slow, it is still a 1.0x modifier, i would make it like, would it be bad to make a bonus that doesn't multiply, more like a fixed bonus that decreases the more step has been done. i imagine it would help the model get the fact that it needs to be faster quicklier.
-
-
-I will tell you more about the state of the training, but it would be nice to have a window that would have a scrollable list of all the reset and the scores. 
-
-
-but we could use some cleaning in the emulator_with_denug
-firstly : use_plugin_replay is the default, use_plugin_replay false = use legacy
-I am still arguing if I should not delete the old recorder, we are going to call that legacy, keep it for now, but only use it if the use legacy checkbox is checked (not by default)
-
-
 
 # TUDO
 in effort for normalization we are going to continue unifying the rewards, so that every stage has the baselines rewards, the stage have multipliers, which need to appear more clearly in the variables' names so if a stage does need the baseline rewards (specific training, avoid 'noise' ) it could put a multiplier of 0 to ignore some aspects.
 
-We need to see how is handled the rewards, in our function in the gym, because we are going to give a baseline rewards for killing a wild pokemon, trainers.
+We need to see how is handled the rewards, in our function in the gym, because we are going to give a baseline rewards for killing a wild pokemon, trainers. and we need to tackle/verify what we do to incentivise meaningful healing (healing pokemons after making some progress, either on the map, either by catching/tr)
 the flow is always : we have our settings file for our profiles (i as see it, the profile are also multiplier of rewards)
 seeing how 'far' the training has come we need to verify the rewards from the gym v2 for healing the pokemons, a good point would be to have the model training a grinding loop (defeat pokemon, progress, heal repeat), especially for our "trainer" profile. our progressers/speedrunner profile should be more breadcrumb milestone driven and more incline to push through the screens.
 
+We need a check function that verify that we have the baselines rewards, they should be the same values and included in every "final config" we need a good log in the terminal that sums up nicely the rewards settings.
 
-# TODO: 
-Add more breadcrumb, check the breacrumb, have a neighboring visual milestone list and progress feedback
-
-
-# Check: the input recorder is based on the frequence of inputs for the replay of the model, but we should make sure we can make it work for a human replay, i didn't chck.
-
-# replay inputs_in mosaic through config.
+# TOOLING WITH THE MAP:
+the original project built the map from the observed data I think, actually I think it even did more than that I think it could stream the position of each environement on the map. there was a side repo but i think the functionalities were merged and integrated in the V2. I currently do not know if the code of the run_mosaic script allows for such an option, like to visualize in the browser would be the best probably. also i could integrate some tooling to apply some specific map position action mapping. or an easi click on cell, to toggle a "lava zone" (continuous rewards penatly upon staying in the easily UI set position)
+speaking of that can you look if the original scripts of the project (from the root)
 
 
-# emulator_with_debug :
-adapt interactive mode and dev mode so I can add more breadcrumb rewards and work on speeding up the training of route1 to pokemon center to chen to finally be able to catch pokemon and "progress".
+# environement stats window : add a column to the left of the "score" column which would show "current core" the score the environement has since last reset.
+but it would be better for those stats to be accessible on a browser, rather than have that window, have a webpage would be a win at many levels. we wouldn't need to use cv2 to generate an image with the stats, we could introduce some front end functions like sorting by score or by a clicked column
 
+# rework the Ovsersvation Inspector data panel (and milestones) :
+I think i will need tools to Add more breadcrumb, check the breacrumb, I will need a vertical list of the neighboring milestones and progress feedback (green : done : keeps track of the number of steps for each "checkpoint"). this view should work in run_mosaic, but in emulator_with_debug as well, even if the inputs are player controlled. 
+
+* adjust the speed bonus based on the best number of step necessary, we can have a multiplier, especially for speedrunner, but as it is right now, some milestones can take more steps and never have the speed bonus triggered.
+
+# the stats watcher could be reworked to show more information about objectives, milstones, further milestone reached by an emulator. we initially had that window to track the starter training stage, but we would want our statistic in that window to reflect overall actions, not only the starter, especially since we are now also working past that segment.
+
+
+
+================
 
 # when we have the abitility to catch pokemon :
+verify the weigh and behaviour of different profile to see if we are giving proper rewards for best incentives.
 
 
 
-# for next model reset :
-change the milestone reward to big_reward for starter stage.
-ACTION MASKING FOR B Button.
+# for next (or next's next's next...) model reset :
+# For later: rather cool and more ambitious, we will need to make sure the observation changes (we will need to check the opencv part of the detection too)
 
+* add to observation RNG and maybe more combat information (hp of opponent, wild/trainer, try a readparty at the address the ennemy)
 
-
-
-
-
-
-
-
-
-# rather cool and more ambitious, we will need to make sure the observation changes (we will need to check the opencv part of the detection too)
 * I think when the character is in motion, it's possible to 'buffer' an input movement, so it might be a bit confusing and we would have to debug with cv2 to make sure we can make the detection that the script uses can handle the new input rate / frame rate. it would be interesting to ask if we can have 2 input that last 8/10
 apparently, the 17 first frame of the 24 will not buffer, if the button is pressed between frame 18 and last, it will buffer the move and be faster.
 
 
+* make the model aware of the RNG address and the DV to train to handle the manipulation of RNG that speedrunners do, save the game before we load a new zone, set the RNG with the trick it needs to learn, reset the game, load the game and go pick the manipulated pokemon.
 
-# handle Save game load game after game reset.
-*we need to make a copy of the rom for each env, as they will save their data inside/next to it, and the emulator will need to have separate rom location for sure.
-*train the model to
-# and would go with it
-make the model aware of the RNG address and the DV to train to handle the manipulation of RNG that speedrunners do, save the game before we load a new zone, set the RNG with the trick it needs to learn, reset the game, load the game and go pick the manipulated pokemon.
-
-
+* cleaning code:
+- not delete the legacy input recorder/replayer, or fix it, or do something better that keeps the determinism? split recording/replaying logic to lighten the files. (see "* optimise the replay inputs" under)
 
 
 ### low priority, later or never
+
+
+* Add a "Save Checkpoint" button in your mosaic UI that calls recorder.save() only when clicked. (the implementation is not finished)
+
+* Check: the input recorder is based on the frequence of inputs for the replay of the model, but we should make sure we can make it work for a human replay, i didn't chck. we could have a mode "player to replayable input for model"
 
 * calculate_starter_reward is it possible to have the model determine the ponderation of the different stats for the proper pokemon, and determine which is the most important stat ? (said to be special) so it could maybe ponder the rewards by himself ? (something i read gave me that idea, what do you think of it?)
 
