@@ -27,6 +27,8 @@ but it would be better for those stats to be accessible on a browser, rather tha
 # the stats watcher could be reworked to show more information about objectives, milstones, further milestone reached by an emulator. we initially had that window to track the starter training stage, but we would want our statistic in that window to reflect overall actions, not only the starter, especially since we are now also working past that segment.
 
 
+# HEALING REWARDS : MAKE SURE THEY DON'T GET THEM WHEN THEY ARE HEALED BECAUSE THEY DIED ? sorry caps lol they are rewarded for dying, not good.
+
 
 ================
 

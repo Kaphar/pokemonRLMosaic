@@ -247,17 +247,33 @@ class BrowserMapDashboard:
       margin: 0; font-family: system-ui, sans-serif; background: var(--bg); color: #eef4ff;
       min-height: 100vh;
     }}
-    .layout {{
-      display: grid; grid-template-columns: minmax(420px, 2fr) minmax(260px, 1fr); gap: 18px; padding: 18px; height: 100vh;
+    .tab-bar {{
+      display: flex; gap: 4px; padding: 4px 16px; background: rgba(15, 22, 34, 0.96); border-bottom: 1px solid rgba(255,255,255,0.08);
     }}
+    .tab-bar .tab-btn {{
+      padding: 10px 20px; border-radius: 8px 8px 0 0; border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.04); color: var(--muted); font-size: 0.9rem; font-weight: 600;
+      cursor: pointer; transition: all 0.15s ease;
+    }}
+    .tab-bar .tab-btn:hover {{ background: rgba(255,255,255,0.08); }}
+    .tab-bar .tab-btn.active {{ background: var(--panel); color: var(--accent); border-bottom: 2px solid var(--accent); }}
+    .tab-content {{ padding: 18px; height: calc(100vh - 120px); }}
+    .tab-pane {{ display: none; height: 100%; }}
+    .tab-pane.active {{ display: block; }}
     .panel {{ background: rgba(20, 29, 46, 0.9); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; overflow: hidden; }}
-    .map-panel {{ position: relative; display: flex; flex-direction: column; }}
+    .map-panel {{ position: relative; display: flex; flex-direction: column; height: 100%; }}
     .header {{ padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,0.08); display: flex; justify-content: space-between; align-items: center; }}
     .title {{ font-size: 1.05rem; font-weight: 700; }}
     .badge {{ color: var(--accent); font-size: 0.8rem; font-weight: 600; }}
-    .map-wrap {{ flex: 1; padding: 12px; position: relative; min-height: 500px; }}
-    svg {{ width: 100%; height: 100%; background: linear-gradient(180deg, #0d1728, #111c2e); border-radius: 10px; border: 1px solid rgba(255,255,255,0.08); cursor: crosshair; }}
-    .stats-panel {{ display: flex; flex-direction: column; }}
+    .map-wrap {{ flex: 1; padding: 12px; position: relative; }}
+    .map-wrap svg {{ width: 100%; height: 100%; background: linear-gradient(180deg, #0d1728, #111c2e); border-radius: 10px; border: 1px solid rgba(255,255,255,0.08); cursor: grab; touch-action: none; }}
+    .map-wrap svg.grabbing {{ cursor: grabbing; }}
+    .zoom-controls {{ position: absolute; right: 14px; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 6px; z-index: 10; }}
+    .zoom-controls button {{ width: 36px; height: 36px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.15); background: rgba(15, 22, 34, 0.85); color: #eef4ff; font-size: 1.1rem; font-weight: 700; cursor: pointer; transition: all 0.15s ease; }}
+    .zoom-controls button:hover {{ background: var(--accent); color: var(--bg); border-color: var(--accent); }}
+    .meta {{ color: var(--muted); font-size: 0.75rem; padding: 8px 12px; border-top: 1px solid rgba(255,255,255,0.08); }}
+    .stats-panel {{ display: flex; flex-direction: column; height: 100%; }}
+    .stats-scroll {{ flex: 1; overflow: auto; }}
     table {{ width: 100%; border-collapse: collapse; }}
     th, td {{ padding: 7px 8px; border-bottom: 1px solid rgba(255,255,255,0.06); text-align: left; font-size: 0.85rem; }}
     th {{ position: sticky; top: 0; background: rgba(15, 22, 34, 0.98); color: var(--accent); }}
@@ -266,43 +282,61 @@ class BrowserMapDashboard:
     .chip.good {{ background: rgba(103, 243, 155, 0.2); color: var(--good); }}
     .chip.warn {{ background: rgba(255, 209, 102, 0.2); color: var(--warning); }}
     .chip.bad {{ background: rgba(255, 107, 107, 0.2); color: var(--danger); }}
-    .meta {{ color: var(--muted); font-size: 0.75rem; padding: 8px 12px; border-top: 1px solid rgba(255,255,255,0.08); }}
   </style>
 </head>
 <body>
-  <div class="layout">
-    <div class="panel map-panel">
-      <div class="header">
-        <div class="title">Live map</div>
-        <div class="badge" id="status">waiting…</div>
+  <div class="tab-bar">
+    <button class="tab-btn active" data-tab="map-tab">Map</button>
+    <button class="tab-btn" data-tab="stats-tab">Environment Stats</button>
+  </div>
+  <div class="tab-content">
+    <div id="map-tab" class="tab-pane active">
+      <div class="panel map-panel">
+        <div class="header">
+          <div class="title">Live map</div>
+          <div class="badge" id="status">waiting…</div>
+        </div>
+        <div class="map-wrap">
+          <svg id="map" viewBox="0 0 {svg_w} {svg_h}" preserveAspectRatio="xMidYMid meet">
+            <g id="map-zoom-group">
+              <image href="/map.png" x="0" y="0" width="{svg_w}" height="{svg_h}" preserveAspectRatio="none" />
+              <g id="lava-layer"></g>
+              <g id="env-layer"></g>
+            </g>
+          </svg>
+          <div class="zoom-controls">
+            <button id="zoom-in" title="Zoom in (+)">+</button>
+            <button id="zoom-reset" title="Reset zoom">R</button>
+            <button id="zoom-out" title="Zoom out (-)">-</button>
+          </div>
+        </div>
+        <div class="meta">Scroll to zoom, drag to pan. Click a highlighted cell to toggle a lava zone penalty.</div>
       </div>
-      <div class="map-wrap">
-        <svg id="map" viewBox="0 0 {svg_w} {svg_h}" preserveAspectRatio="xMidYMid meet">
-          <image href="/map.png" x="0" y="0" width="{svg_w}" height="{svg_h}" preserveAspectRatio="none" />
-          <g id="lava-layer"></g>
-          <g id="env-layer"></g>
-        </svg>
-      </div>
-      <div class="meta">Click a highlighted cell to toggle a lava zone penalty. The clicked cell is sent to the live dashboard state.</div>
     </div>
-    <div class="panel stats-panel">
-      <div class="header">
-        <div class="title">Live environment stats</div>
-        <div class="badge"><span id="env-count">0</span> envs</div>
-      </div>
-      <div style="overflow: auto;">
-        <table>
-          <thead>
-            <tr>
-              <th>Env</th>
-              <th>HP</th>
-              <th>Steps</th>
-              <th>Map</th>
-              <th>Score</th>
-            </tr>
-          </thead>
-          <tbody id="stats-body"></tbody>
-        </table>
+    <div id="stats-tab" class="tab-pane">
+      <div class="panel stats-panel">
+        <div class="header">
+          <div class="title">Live environment stats</div>
+          <div class="badge"><span id="env-count">0</span> envs</div>
+        </div>
+        <div class="stats-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Env</th>
+                <th>HP</th>
+                <th>Pokémon</th>
+                <th>Trainer Wins</th>
+                <th>Wild Wins</th>
+                <th>Walls</th>
+                <th>Steps</th>
+                <th>Map</th>
+                <th>Score</th>
+              </tr>
+            </thead>
+            <tbody id="stats-body"></tbody>
+          </table>
+        </div>
       </div>
     </div>
   </div>
@@ -314,6 +348,35 @@ class BrowserMapDashboard:
     const statsBody = document.getElementById('stats-body');
     const envCount = document.getElementById('env-count');
     const status = document.getElementById('status');
+    const zoomInBtn = document.getElementById('zoom-in');
+    const zoomOutBtn = document.getElementById('zoom-out');
+    const zoomResetBtn = document.getElementById('zoom-reset');
+    const tabBtns = document.querySelectorAll('.tab-bar .tab-btn');
+    const tabPanes = document.querySelectorAll('.tab-pane');
+    let zoomScale = 1;
+    let panX = 0;
+    let panY = 0;
+    let isPanning = false;
+    let panStart = {{ x: 0, y: 0 }};
+    const mapGroup = document.getElementById('map-zoom-group');
+
+    function applyTransform() {{
+      mapGroup.setAttribute('transform', 'translate(' + panX + ',' + panY + ') scale(' + zoomScale + ')');
+    }}
+
+    function setZoom(delta) {{
+      const newScale = zoomScale * delta;
+      if (newScale < 0.4 || newScale > 8) return;
+      zoomScale = newScale;
+      applyTransform();
+    }}
+
+    function resetZoom() {{
+      zoomScale = 1;
+      panX = 0;
+      panY = 0;
+      applyTransform();
+    }}
 
     function hpChip(value) {{
       const label = (value * 100).toFixed(0) + '%';
@@ -361,7 +424,7 @@ class BrowserMapDashboard:
       statsBody.innerHTML = envs.map(function(env) {{
         var hpHtml = hpChip(env.hp);
         var scoreText = (env.score >= 0 ? '+' : '') + env.score.toFixed(1);
-        return '<tr><td>Env ' + (env.env_index + 1) + '</td><td>' + hpHtml + '</td><td>' + env.steps + '</td><td>' + env.map_id.toString(16).toUpperCase().padStart(2, '0') + '</td><td>' + scoreText + '</td></tr>';
+        return '<tr><td>Env ' + (env.env_index + 1) + '</td><td>' + hpHtml + '</td><td>' + env.pkmn + '</td><td>' + env.trainer_wins + '</td><td>' + env.wild_wins + '</td><td>' + env.walls + '</td><td>' + env.steps + '</td><td>' + env.map_id.toString(16).toUpperCase().padStart(2, '0') + '</td><td>' + scoreText + '</td></tr>';
       }}).join('');
       envCount.textContent = String(envs.length);
     }}
@@ -380,6 +443,58 @@ class BrowserMapDashboard:
         }});
     }}
 
+    mapSvg.addEventListener('wheel', function(event) {{
+      event.preventDefault();
+      event.stopPropagation();
+      const delta = event.deltaY < 0 ? 1.15 : 0.85;
+      setZoom(delta);
+    }}, {{ passive: false }});
+
+    mapSvg.addEventListener('mousedown', function(event) {{
+      isPanning = true;
+      panStart = {{ x: event.clientX, y: event.clientY }};
+      mapSvg.classList.add('grabbing');
+    }});
+
+    document.addEventListener('mousemove', function(event) {{
+      if (!isPanning) return;
+      const dx = event.clientX - panStart.x;
+      const dy = event.clientY - panStart.y;
+      panX += dx;
+      panY += dy;
+      panStart = {{ x: event.clientX, y: event.clientY }};
+      applyTransform();
+    }});
+
+    document.addEventListener('mouseup', function(event) {{
+      if (!isPanning) return;
+      isPanning = false;
+      mapSvg.classList.remove('grabbing');
+    }});
+
+    document.addEventListener('keydown', function(event) {{
+      if (isMapTabActive() && (event.key === '+' || event.key === '-' || event.key === '=')) {{
+        event.preventDefault();
+        if (event.key === '+' || event.key === '=') {{
+          setZoom(1.15);
+        }} else {{
+          setZoom(0.85);
+        }}
+      }}
+      if (isMapTabActive() && event.key === 'r' && (event.ctrlKey || event.metaKey)) {{
+        event.preventDefault();
+        resetZoom();
+      }}
+    }});
+
+    function isMapTabActive() {{
+      return document.getElementById('map-tab').classList.contains('active');
+    }}
+
+    zoomInBtn.addEventListener('click', function() {{ setZoom(1.15); }});
+    zoomOutBtn.addEventListener('click', function() {{ setZoom(0.85); }});
+    zoomResetBtn.addEventListener('click', function() {{ resetZoom(); }});
+
     mapSvg.addEventListener('click', function(event) {{
       const rect = mapSvg.getBoundingClientRect();
       const x = ((event.clientX - rect.left) / rect.width) * {svg_w};
@@ -389,6 +504,16 @@ class BrowserMapDashboard:
         headers: {{ 'Content-Type': 'application/json' }},
         body: JSON.stringify({{ x: Math.round(x), y: Math.round(y) }})
       }}).catch(function() {{}});
+    }});
+
+    tabBtns.forEach(function(btn) {{
+      btn.addEventListener('click', function() {{
+        tabBtns.forEach(function(b) {{ b.classList.remove('active'); }});
+        tabPanes.forEach(function(p) {{ p.classList.remove('active'); }});
+        btn.classList.add('active');
+        const target = btn.getAttribute('data-tab');
+        document.getElementById(target).classList.add('active');
+      }});
     }});
 
     update();
