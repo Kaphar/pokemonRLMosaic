@@ -21,6 +21,7 @@ class Mosaic:
         self.page = 0
         self.view_mode = "pages"
         self.display_paused = False
+        self._last_frame: np.ndarray | None = None
         self._visible_indices: list[int] = []
         self.selected_index: int | None = None
         self.pending_human_action: int | None = None
@@ -144,6 +145,7 @@ class Mosaic:
         if self.control_active and self.selected_index is not None:
             cv2.putText(panel, "CONTROL ON", (20, panel_h - 70), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
         mosaic = np.hstack([grid, panel])
+        self._last_frame = mosaic
         cv2.imshow(self.title, mosaic)
         if self.foreground:
             cv2.setWindowProperty(self.title, cv2.WND_PROP_TOPMOST, 1)

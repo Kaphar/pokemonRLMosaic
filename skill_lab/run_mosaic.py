@@ -658,8 +658,9 @@ def main(args: argparse.Namespace | None = None) -> None:
                         objective_info=objective_info, step_count=step_count, batch_number=batch_number,
                         model_name=model_path, tile_indices=visible_indices,
                     )
+                    dashboard.set_mosaic_frame(mosaic._last_frame)
 
-                if step_count % max(1, args.num_envs * 10) == 0: print(f"Progress: {step_count} steps")
+                if step_count % max(1, args.num_envs * 100) == 0: print(f"Progress: {step_count} steps")
                 # Save recordings periodically
                 # if step_count % 10000 < env.num_envs: # see how we handle this, we could just save when we decide to save a state.
                 #     save_path = recorder.save() # run this action from the button

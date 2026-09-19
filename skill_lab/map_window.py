@@ -12,7 +12,8 @@ V2_DIR = PROJECT_ROOT / "v2"
 if str(V2_DIR) not in __import__("sys").path:
     __import__("sys").path.insert(0, str(V2_DIR))
 
-from global_map import local_to_global, GLOBAL_MAP_SHAPE
+from global_map import GLOBAL_MAP_SHAPE
+from red_gym_env_v2 import RedGymEnv
 
 
 class MapWindow:
@@ -105,7 +106,7 @@ class MapWindow:
         x_pos = e.pyboy.memory[0xD362]
         y_pos = e.pyboy.memory[0xD361]
         map_n = e.pyboy.memory[0xD35E]
-        gy, gx = local_to_global(y_pos, x_pos, map_n)
+        gx, gy = RedGymEnv.project_position(x_pos, y_pos, map_n)
         self.history.append((gx, gy))
         if len(self.history) > self.max_history:
             self.history = self.history[-self.max_history:]

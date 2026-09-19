@@ -627,7 +627,7 @@ class SkillLabWrapper(gymnasium.Wrapper):
         hp_gain = max(0.0, current_hp - prior_hp)
         progress_signal = milestone_triggered or (current_party_size > prior_party_size) or (current_map_id != prior_map_id)
 
-        if self.healing_reward_multiplier > 0.0 and progress_signal and hp_gain > 0.05 and prior_hp <= 0.9:
+        if self.healing_reward_multiplier > 0.0 and progress_signal and hp_gain > 0.05 and 0 < prior_hp <= 0.9:
             healing_reward = self.reward_scale * self.healing_reward_multiplier
             reward += healing_reward
             info["healing_reward"] = healing_reward

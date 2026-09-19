@@ -16,6 +16,7 @@ from pyboy.utils import WindowEvent
 from global_map import local_to_global, GLOBAL_MAP_SHAPE
 
 _V2_DIR = Path(__file__).resolve().parent
+LAVA_JSON_PATH = _V2_DIR.parent / "skill_lab" / "lava.json"
 
 event_flags_start = 0xD747
 event_flags_end = 0xD87E # expand for SS Anne # old - 0xD7F6 
@@ -175,6 +176,10 @@ class RedGymEnv(Env):
         self.wall_collisions = 0
         self._same_dir_count = 0
         self._last_dir = None
+        self.first_trainer_win_step = 0
+        self._last_trainer_wins = 0
+        self._combat_speed_bonus = 0.0
+        self.lava_zones = self._load_lava_zones()
 
         self.base_event_flags = sum([
                 self.bit_count(self.read_m(i))
@@ -254,6 +259,8 @@ class RedGymEnv(Env):
         # i will keep it
         wall_penalty = self._detect_wall_collision(action, old_x, old_y, old_map)
 
+        # if self.step_count % 100 == 0:
+        self.lava_zones = self._load_lava_zones()
         new_reward = self.update_reward() # + wall_penalty
 
         self.last_health = self.read_hp_fraction()
@@ -343,6 +350,8 @@ class RedGymEnv(Env):
                 "wild_wins": self.wild_wins,
                 "game_minutes": game_minutes,
                 "wall_collisions": self.wall_collisions,
+                "in_lava": self._in_lava_zone()[0],
+                "first_trainer_win_step": self.first_trainer_win_step,
             }
         )
 
@@ -394,6 +403,77 @@ class RedGymEnv(Env):
 
     def get_game_coords(self):
         return (self.read_m(0xD362), self.read_m(0xD361), self.read_m(0xD35E))
+
+    @staticmethod
+    def project_position(x_pos: int, y_pos: int, map_n: int) -> tuple[int, int]:
+        """Convert game coordinates to the stitched map's pixel coordinates.
+
+        Matches the web dashboard's projection so lava zones drawn on the
+        browser map align with the agent's in-game position.
+        """
+        map_offsets = {
+            0: (0, 0), 1: (-10, 72), 2: (-10, 180),
+            12: (0, 36), 13: (0, 144), 14: (30, 172),
+            15: (80, 190), 33: (-50, 64), 37: (-9, 2),
+            38: (-9, -7), 39: (21, 2), 40: (21, -6),
+            41: (30, 47), 42: (30, 55), 43: (30, 72),
+            44: (30, 64), 47: (21, 136), 49: (21, 108),
+            50: (21, 108), 51: (-35, 137), 52: (-10, 189),
+            53: (-10, 198), 54: (-21, 169), 55: (-19, 177),
+            56: (-30, 163), 57: (-19, 177), 58: (-25, 154),
+            59: (83, 227), 60: (123, 227), 61: (152, 227),
+            68: (65, 190),
+        }
+        offset_x, offset_y = map_offsets.get(map_n, (0, 0))
+        pixel_x = 864 + 16 * (offset_x + x_pos)
+        pixel_y = 4000 - (331 + 16 * (offset_y - y_pos))
+        return int(pixel_x), int(pixel_y)
+
+    @staticmethod
+    def _load_lava_zones() -> list[tuple[int, int]]:
+        """Load lava zones from lava.json if it exists."""
+        try:
+            if LAVA_JSON_PATH.exists():
+                with LAVA_JSON_PATH.open("r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    return [(int(z[0]), int(z[1])) for z in data.get("lava_zones", [])]
+        except Exception:
+            pass
+        return []
+
+    def _in_lava_zone(self) -> tuple[bool, tuple[int, int]] | tuple[bool, None]:
+        """Check if the agent's current position is inside a lava zone.
+
+        Returns (True, (x, y)) if inside, (False, None) otherwise.
+        """
+        try:
+            x_pos, y_pos, map_n = self.get_game_coords()
+            px, py = self.project_position(x_pos, y_pos, map_n)
+            for zx, zy in self.lava_zones:
+                if abs(px - zx) < 8 and abs(py - zy) < 8:
+                    return True, (zx, zy)
+        except Exception:
+            pass
+        return False, None
+
+    def _get_lava_penalty(self) -> float:
+        """Return a step penalty if the agent is standing in a lava zone."""
+        in_lava, _ = self._in_lava_zone()
+        if in_lava:
+            return -0.5 * self.reward_scale
+        return 0.0
+
+    def _get_combat_speed_bonus(self) -> float:
+        """One-time speed bonus for the first trainer victory.
+
+        Fewer steps to first trainer win = higher bonus (max 3x base).
+        The value is cumulative (stays constant after the first win) so the
+        delta-based reward system picks it up exactly once.
+        """
+        if self.first_trainer_win_step > 0:
+            speed_multiplier = max(1.0, 3.0 - (self.first_trainer_win_step / 100.0))
+            return self.reward_scale * 10.0 * speed_multiplier
+        return 0.0
 
     def update_seen_coords(self):
         # if not in battle
@@ -583,7 +663,11 @@ class RedGymEnv(Env):
             #"dead": self.reward_scale * self.died_count * -0.1,
             "badge": self.reward_scale * self.get_badges() * 10,
             "explore": self.reward_scale * self.explore_weight * len(self.seen_coords) * 0.1,
-            "stuck": self.reward_scale * self.get_current_coord_count_reward() * -0.05
+            "stuck": self.reward_scale * self.get_current_coord_count_reward() * -0.05,
+            "trainer_wins": self.reward_scale * self.trainer_wins * 10.0,
+            "wild_wins": self.reward_scale * self.wild_wins * 2.0,
+            "combat_speed_bonus": self._get_combat_speed_bonus(),
+            "lava_penalty": self._get_lava_penalty(),
         }
 
         return state_scores
@@ -626,6 +710,9 @@ class RedGymEnv(Env):
                     self.wild_wins += 1
                 elif self.battle_type >= 2:
                     self.trainer_wins += 1
+                    if self.first_trainer_win_step == 0:
+                        self.first_trainer_win_step = self.step_count
+                        print(f"[Combat] 🥊 First trainer win at step {self.step_count} — speed bonus active!")
             self.battle_type = 0
 
     def read_hp_fraction(self):

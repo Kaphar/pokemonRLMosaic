@@ -40,6 +40,8 @@ verify the weigh and behaviour of different profile to see if we are giving prop
 implemment the game link and allow our emulators to exchange between them, first a script that prove feasability between 2 emulators, then we will make a pool of available pokemon, maybe have some "Pokemon Library' profile that list the pokemon it can trade. some function that could trigger a script at first to exchange pokemon on demand. so if as a dev, in the mosaic, I click a pokemon that is tradeable, it will set up the transfert with another emulator owning the pokemon i want in its state, maybe handle automatic system with "givers" an "takers" to fulfil the pokedex, we are going to see also which pokemon require being exchanged to evolve and pokemon red / blue only.
 
 
+* when we override the settings (checkbox) in the launcher.py I think it does not set up the stage steps. Fix that, if you can implement a Tab Config in our webserver, to start with it would need a slider, from 256 to 50k, this would update the setting used at environement reset to set the amount of steps for the next iteration, by default it should use the settings default for the given stage. this would allow me to adjust the training segment length more dynamically. we could also change the setting for save_on_catch there with a checkbox.
+
 # for next (or next's next's next...) model reset :
 # For later: rather cool and more ambitious, we will need to make sure the observation changes (we will need to check the opencv part of the detection too)
 

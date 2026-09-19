@@ -12,6 +12,12 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 import webbrowser
 
+try:
+    import cv2
+    _HAS_CV2 = True
+except ImportError:
+    _HAS_CV2 = False
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MAP_IMAGE_PATH = (
     PROJECT_ROOT
@@ -19,6 +25,7 @@ MAP_IMAGE_PATH = (
     / "poke_map"
     / "pokemap_full_calibrated_CROPPED_1.png"
 )
+LAVA_JSON_PATH = PROJECT_ROOT / "skill_lab" / "lava.json"
 
 try:
     from v2.global_map import GLOBAL_MAP_SHAPE
@@ -38,12 +45,56 @@ class BrowserMapDashboard:
         self._thread: threading.Thread | None = None
         self._browser_opened = False
         self.map_width, self.map_height = self._read_map_size()
+        self._mosaic_frame: bytes | None = None
         self.state: dict[str, Any] = {
             "title": "Skill Lab Dashboard",
             "envs": [],
             "lava_zones": [],
+            "map_width": self.map_width,
+            "map_height": self.map_height,
             "last_updated": 0.0,
         }
+        self._load_lava_zones()
+
+    def set_mosaic_frame(self, frame) -> None:
+        """Store a mosaic frame (numpy array) as JPEG for browser streaming."""
+        if frame is None:
+            print("[MOSAIC DEBUG] No frame to store", flush=True)
+            return
+        if not _HAS_CV2:
+            print("[MOSAIC DEBUG] cv2 not available, skipping mosaic frame", flush=True)
+            return
+        try:
+            ok, encoded = cv2.imencode(
+                ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70]
+            )
+            if not ok or encoded is None:
+                print("[MOSAIC DEBUG] cv2 failed to encode mosaic frame", flush=True)
+                return
+            with self._lock:
+                self._mosaic_frame = encoded.tobytes()
+            print(f"[MOSAIC DEBUG] Frame stored: {len(self._mosaic_frame)} bytes", flush=True)
+        except Exception as e:
+            print(f"[MOSAIC DEBUG] Error encoding frame: {e}", flush=True)
+
+    def _save_lava_zones(self) -> None:
+        """Persist lava zones to lava.json so the env can read them."""
+        with self._lock:
+            zones = list(self.state["lava_zones"])
+        with suppress(Exception):
+            with LAVA_JSON_PATH.open("w", encoding="utf-8") as f:
+                json.dump({"lava_zones": zones}, f, indent=2)
+
+    def _load_lava_zones(self) -> None:
+        """Load lava zones from lava.json if it exists."""
+        with suppress(Exception):
+            if LAVA_JSON_PATH.exists():
+                with LAVA_JSON_PATH.open("r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    with self._lock:
+                        self.state["lava_zones"] = [
+                            (int(z[0]), int(z[1])) for z in data.get("lava_zones", [])
+                        ]
 
     def _read_map_size(self) -> tuple[int, int]:
         """Read PNG dimensions without requiring an image-processing package."""
@@ -81,6 +132,19 @@ class BrowserMapDashboard:
     def update_state(self, env, env_count: int, *, scores: list[float] | None = None) -> None:
         entries: list[dict[str, Any]] = []
         for idx in range(env_count):
+            hp = 0.0
+            pcount = 0
+            trainer_wins = 0
+            wild_wins = 0
+            wall_collisions = 0
+            steps = 0
+            current_map_id = 0
+            x_pos = 0
+            y_pos = 0
+            map_n = 0
+            gx = 0
+            gy = 0
+            position_error: str | None = None
             try:
                 hp = float(env.get_attr("read_hp_fraction")[idx]())
                 pcount = int(env.get_attr("read_m")[idx](0xD163))
@@ -89,23 +153,17 @@ class BrowserMapDashboard:
                 wall_collisions = int(env.get_attr("wall_collisions")[idx])
                 steps = int(env.get_attr("step_count")[idx])
                 current_map_id = int(env.get_attr("current_map_id")[idx])
+            except Exception as exc:
+                position_error = f"stats: {type(exc).__name__}: {exc}"
+            try:
                 x_pos = int(env.envs[idx].pyboy.memory[0xD362])
                 y_pos = int(env.envs[idx].pyboy.memory[0xD361])
                 map_n = int(env.envs[idx].pyboy.memory[0xD35E])
-                try:
-                    gx, gy = self._project_position(x_pos, y_pos, map_n)
-                except Exception:
-                    gx, gy = 0, 0
-            except Exception:
-                hp = 0.0
-                pcount = 0
-                trainer_wins = 0
-                wild_wins = 0
-                wall_collisions = 0
-                steps = 0
-                current_map_id = 0
-                gx = 0
-                gy = 0
+                gx, gy = self._project_position(x_pos, y_pos, map_n)
+            except Exception as exc:
+                position_error = f"position: {type(exc).__name__}: {exc}"
+            if position_error is not None:
+                print(f"[MAP DEBUG] Env {idx}: {position_error}", flush=True)
             score = float(scores[idx]) if scores is not None and idx < len(scores) else 0.0
             entries.append(
                 {
@@ -120,6 +178,11 @@ class BrowserMapDashboard:
                     "score": score,
                     "x": gx,
                     "y": gy,
+                    "raw_x": x_pos,
+                    "raw_y": y_pos,
+                    "map_n": map_n,
+                    "position_error": position_error,
+                    "in_bounds": 0 <= gx < self.map_width and 0 <= gy < self.map_height,
                 }
             )
         with self._lock:
@@ -146,7 +209,7 @@ class BrowserMapDashboard:
         }
         offset_x, offset_y = map_offsets.get(map_n, (0, 0))
         pixel_x = 864 + 16 * (offset_x + x_pos)
-        pixel_y = 4000 - (331 + 16 * (offset_y + y_pos))
+        pixel_y = 4000 - (331 + 16 * (offset_y - y_pos))
         return int(pixel_x), int(pixel_y)
 
     def add_lava_zone(self, x: int, y: int) -> None:
@@ -167,8 +230,11 @@ class BrowserMapDashboard:
             current = self.state["lava_zones"]
             if zone in current:
                 self.state["lava_zones"] = [z for z in current if z != zone]
+                print(f"[LAVA DEBUG] Removed zone {zone}, count={len(self.state['lava_zones'])}", flush=True)
             else:
                 current.append(zone)
+                print(f"[LAVA DEBUG] Added zone {zone}, count={len(self.state['lava_zones'])}", flush=True)
+        self._save_lava_zones()
 
     def _build_handler(self):
         dashboard = self
@@ -180,15 +246,20 @@ class BrowserMapDashboard:
                     self._send_html()
                     return
                 if parsed.path == "/api/state":
-                    data = json.dumps(dashboard.state).encode("utf-8")
+                    with dashboard._lock:
+                        data = json.dumps(dashboard.state).encode("utf-8")
                     self.send_response(200)
                     self.send_header("Content-Type", "application/json")
+                    self.send_header("Cache-Control", "no-store")
                     self.send_header("Content-Length", str(len(data)))
                     self.end_headers()
                     self.wfile.write(data)
                     return
                 if parsed.path == "/map.png":
                     self._send_map_image()
+                    return
+                if parsed.path == "/api/mosaic":
+                    self._send_mosaic_frame()
                     return
                 self.send_error(404)
 
@@ -204,13 +275,24 @@ class BrowserMapDashboard:
                 except json.JSONDecodeError:
                     self.send_error(400, "invalid json")
                     return
-                x = int(payload.get("x", 0))
-                y = int(payload.get("y", 0))
-                dashboard.toggle_lava_zone(x, y)
+                if "zones" in payload:
+                    zones = payload["zones"]
+                    for zone in zones:
+                        dashboard.toggle_lava_zone(int(zone["x"]), int(zone["y"]))
+                    print(f"[LAVA DEBUG] Batch toggle: {len(zones)} zones, first={zones[0] if zones else 'none'}", flush=True)
+                    print(f"[LAVA DEBUG] After batch: zones={dashboard.state['lava_zones']}", flush=True)
+                else:
+                    x = int(payload.get("x", 0))
+                    y = int(payload.get("y", 0))
+                    print(f"[LAVA DEBUG] Toggle request received: x={x}, y={y}", flush=True)
+                    dashboard.toggle_lava_zone(x, y)
+                    print(f"[LAVA DEBUG] After toggle: zones={dashboard.state['lava_zones']}", flush=True)
+                with dashboard._lock:
+                    lava_zones = list(dashboard.state["lava_zones"])
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
-                self.wfile.write(json.dumps({"ok": True, "lava_zones": dashboard.state["lava_zones"]}).encode("utf-8"))
+                self.wfile.write(json.dumps({"ok": True, "lava_zones": lava_zones}).encode("utf-8"))
 
             def _send_map_image(self) -> None:
                 if not MAP_IMAGE_PATH.exists():
@@ -222,6 +304,21 @@ class BrowserMapDashboard:
                 self.send_header("Content-Length", str(len(content)))
                 self.end_headers()
                 self.wfile.write(content)
+
+            def _send_mosaic_frame(self) -> None:
+                with dashboard._lock:
+                    frame = dashboard._mosaic_frame
+                if frame is None:
+                    self.send_response(204)
+                    self.end_headers()
+                    return
+                # print(f"[MOSAIC DEBUG] Serving frame: {len(frame)} bytes", flush=True) 
+                self.send_response(200)
+                self.send_header("Content-Type", "image/jpeg")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(frame)))
+                self.end_headers()
+                self.wfile.write(frame)
 
             def _send_html(self) -> None:
                 svg_w, svg_h = dashboard.map_width, dashboard.map_height
@@ -257,22 +354,27 @@ class BrowserMapDashboard:
     }}
     .tab-bar .tab-btn:hover {{ background: rgba(255,255,255,0.08); }}
     .tab-bar .tab-btn.active {{ background: var(--panel); color: var(--accent); border-bottom: 2px solid var(--accent); }}
-    .tab-content {{ padding: 18px; height: calc(100vh - 120px); }}
+    .tab-content {{ padding: 18px; height: calc(100vh - 60px); }}
     .tab-pane {{ display: none; height: 100%; }}
     .tab-pane.active {{ display: block; }}
     .panel {{ background: rgba(20, 29, 46, 0.9); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; overflow: hidden; }}
     .map-panel {{ position: relative; display: flex; flex-direction: column; height: 100%; }}
-    .header {{ padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,0.08); display: flex; justify-content: space-between; align-items: center; }}
-    .title {{ font-size: 1.05rem; font-weight: 700; }}
-    .badge {{ color: var(--accent); font-size: 0.8rem; font-weight: 600; }}
-    .map-wrap {{ flex: 1; padding: 12px; position: relative; }}
-    .map-wrap svg {{ width: 100%; height: 100%; background: linear-gradient(180deg, #0d1728, #111c2e); border-radius: 10px; border: 1px solid rgba(255,255,255,0.08); cursor: grab; touch-action: none; }}
+    .map-wrap {{ flex: 1; padding: 12px; position: relative; border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; }}
+    .map-wrap svg {{ width: 100%; height: 100%; background: linear-gradient(180deg, #0d1728, #111c2e); border-radius: 10px; cursor: grab; touch-action: none; }}
     .map-wrap svg.grabbing {{ cursor: grabbing; }}
-    .zoom-controls {{ position: absolute; right: 14px; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 6px; z-index: 10; }}
-    .zoom-controls button {{ width: 36px; height: 36px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.15); background: rgba(15, 22, 34, 0.85); color: #eef4ff; font-size: 1.1rem; font-weight: 700; cursor: pointer; transition: all 0.15s ease; }}
-    .zoom-controls button:hover {{ background: var(--accent); color: var(--bg); border-color: var(--accent); }}
+    .map-controls {{ position: absolute; right: 14px; top: 12px; display: flex; flex-direction: column; gap: 6px; z-index: 10; }}
+    .map-controls button {{ width: 36px; height: 36px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.15); background: rgba(15, 22, 34, 0.85); color: #eef4ff; font-size: 1.1rem; font-weight: 700; cursor: pointer; transition: all 0.15s ease; }}
+    .map-controls button:hover {{ background: var(--accent); color: var(--bg); border-color: var(--accent); }}
+    .map-controls button.toggle-active {{ background: var(--accent); color: var(--bg); }}
+    .map-controls .zoom-h {{ display: flex; gap: 6px; }}
+    .status-overlay {{ position: absolute; bottom: 12px; left: 14px; background: rgba(15, 22, 34, 0.85); border-radius: 8px; padding: 4px 10px; font-size: 0.78rem; z-index: 10; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+    .status-overlay#status {{ right: 14px; left: auto; overflow-x: auto; }}
+    .status-overlay#lava-mode-status {{ bottom: 44px; left: 14px; background: rgba(255, 107, 107, 0.85); }}
     .meta {{ color: var(--muted); font-size: 0.75rem; padding: 8px 12px; border-top: 1px solid rgba(255,255,255,0.08); }}
     .stats-panel {{ display: flex; flex-direction: column; height: 100%; }}
+    .stats-panel .header {{ padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,0.08); display: flex; justify-content: space-between; align-items: center; }}
+    .stats-panel .title {{ font-size: 1.05rem; font-weight: 700; }}
+    .stats-panel .badge {{ color: var(--accent); font-size: 0.8rem; font-weight: 600; }}
     .stats-scroll {{ flex: 1; overflow: auto; }}
     table {{ width: 100%; border-collapse: collapse; }}
     th, td {{ padding: 7px 8px; border-bottom: 1px solid rgba(255,255,255,0.06); text-align: left; font-size: 0.85rem; }}
@@ -282,64 +384,82 @@ class BrowserMapDashboard:
     .chip.good {{ background: rgba(103, 243, 155, 0.2); color: var(--good); }}
     .chip.warn {{ background: rgba(255, 209, 102, 0.2); color: var(--warning); }}
     .chip.bad {{ background: rgba(255, 107, 107, 0.2); color: var(--danger); }}
+    .mosaic-panel {{ display: flex; flex-direction: column; height: 100%; }}
+    .mosaic-content {{ flex: 1; display: flex; align-items: center; justify-content: center; overflow: auto; padding: 12px; }}
+    .mosaic-content img {{ max-width: 100%; max-height: 100%; border-radius: 10px; border: 1px solid rgba(255,255,255,0.08); }}
   </style>
 </head>
 <body>
-  <div class="tab-bar">
-    <button class="tab-btn active" data-tab="map-tab">Map</button>
-    <button class="tab-btn" data-tab="stats-tab">Environment Stats</button>
-  </div>
+   <div class="tab-bar">
+     <button class="tab-btn active" data-tab="map-tab">Map</button>
+     <button class="tab-btn" data-tab="mosaic-tab">Mosaic Stream</button>
+     <button class="tab-btn" data-tab="stats-tab">Environment Stats</button>
+   </div>
   <div class="tab-content">
     <div id="map-tab" class="tab-pane active">
       <div class="panel map-panel">
-        <div class="header">
-          <div class="title">Live map</div>
-          <div class="badge" id="status">waiting…</div>
-        </div>
         <div class="map-wrap">
           <svg id="map" viewBox="0 0 {svg_w} {svg_h}" preserveAspectRatio="xMidYMid meet">
             <g id="map-zoom-group">
               <image href="/map.png" x="0" y="0" width="{svg_w}" height="{svg_h}" preserveAspectRatio="none" />
-              <g id="lava-layer"></g>
-              <g id="env-layer"></g>
+               <g id="lava-layer"></g>
+               <g id="env-layer"></g>
+               <g id="highlight-layer"></g>
             </g>
           </svg>
-          <div class="zoom-controls">
-            <button id="zoom-in" title="Zoom in (+)">+</button>
-            <button id="zoom-reset" title="Reset zoom">R</button>
-            <button id="zoom-out" title="Zoom out (-)">-</button>
-          </div>
+           <div class="map-controls">
+             <div class="zoom-h">
+               <button id="zoom-in" title="Zoom in (+)">+</button>
+               <button id="zoom-reset" title="Reset zoom">R</button>
+               <button id="zoom-out" title="Zoom out (-)">-</button>
+             </div>
+             <button id="toggle-lava" title="Toggle lava placement mode (L)" class="toggle-active">🔥</button>
+           </div>
+            <div class="status-overlay" id="status">waiting…</div>
+            <div class="status-overlay" id="lava-mode-status"></div>
         </div>
-        <div class="meta">Scroll to zoom, drag to pan. Click a highlighted cell to toggle a lava zone penalty.</div>
+        <div class="meta">Scroll to zoom, drag to pan. Click map in lava placement mode to add/remove 16x16 tile zones. 🔥 toggles placement mode.</div>
       </div>
-    </div>
-    <div id="stats-tab" class="tab-pane">
-      <div class="panel stats-panel">
-        <div class="header">
-          <div class="title">Live environment stats</div>
-          <div class="badge"><span id="env-count">0</span> envs</div>
-        </div>
-        <div class="stats-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>Env</th>
-                <th>HP</th>
-                <th>Pokémon</th>
-                <th>Trainer Wins</th>
-                <th>Wild Wins</th>
-                <th>Walls</th>
-                <th>Steps</th>
-                <th>Map</th>
-                <th>Score</th>
-              </tr>
-            </thead>
-            <tbody id="stats-body"></tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  </div>
+     </div>
+     <div id="mosaic-tab" class="tab-pane">
+       <div class="panel mosaic-panel">
+         <div class="header">
+           <div class="title">Mosaic Stream</div>
+           <div class="badge" id="mosaic-status">waiting…</div>
+         </div>
+         <div class="mosaic-content">
+           <img id="mosaic-image" src="" alt="Mosaic stream" />
+         </div>
+       </div>
+     </div>
+     <div id="stats-tab" class="tab-pane">
+       <div class="panel stats-panel">
+         <div class="header">
+           <div class="title">Live environment stats</div>
+           <div class="badge"><span id="env-count">0</span> envs</div>
+         </div>
+         <div class="stats-scroll">
+           <table>
+             <thead>
+               <tr>
+                 <th>Env</th>
+                 <th>HP</th>
+                 <th>Pokémon</th>
+                 <th>Trainer Wins</th>
+                 <th>Wild Wins</th>
+                 <th>Walls</th>
+                 <th>Steps</th>
+                 <th>Map</th>
+                 <th>Game XY</th>
+                 <th>Score</th>
+               </tr>
+             </thead>
+             <tbody id="stats-body"></tbody>
+           </table>
+         </div>
+       </div>
+     </div>
+   </div>
 
   <script>
     const mapSvg = document.getElementById('map');
@@ -348,17 +468,49 @@ class BrowserMapDashboard:
     const statsBody = document.getElementById('stats-body');
     const envCount = document.getElementById('env-count');
     const status = document.getElementById('status');
+    const mosaicImage = document.getElementById('mosaic-image');
+    const mosaicStatus = document.getElementById('mosaic-status');
+    let mosaicObjectUrl = null;
+    mosaicImage.addEventListener('error', function() {{
+      mosaicStatus.textContent = 'offline';
+    }});
     const zoomInBtn = document.getElementById('zoom-in');
     const zoomOutBtn = document.getElementById('zoom-out');
     const zoomResetBtn = document.getElementById('zoom-reset');
+    const toggleLavaBtn = document.getElementById('toggle-lava');
+    const lavaModeStatus = document.getElementById('lava-mode-status');
     const tabBtns = document.querySelectorAll('.tab-bar .tab-btn');
     const tabPanes = document.querySelectorAll('.tab-pane');
-    let zoomScale = 1;
+     let zoomScale = 1;
     let panX = 0;
     let panY = 0;
     let isPanning = false;
+    let lavaPlacementMode = true;
+    let clickStart = null;
+    let dragStart = null;
     let panStart = {{ x: 0, y: 0 }};
+    let lastState = {{ envs: [], lava_zones: [] }};
     const mapGroup = document.getElementById('map-zoom-group');
+    const highlightLayer = document.getElementById('highlight-layer');
+    const lavaHighlight = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    lavaHighlight.setAttribute('width', 16);
+    lavaHighlight.setAttribute('height', 16);
+    lavaHighlight.setAttribute('fill', '#ff6b6b');
+    lavaHighlight.setAttribute('opacity', '0.3');
+    lavaHighlight.setAttribute('stroke', '#ff6b6b');
+    lavaHighlight.setAttribute('stroke-width', '1');
+    lavaHighlight.setAttribute('pointer-events', 'none');
+    highlightLayer.appendChild(lavaHighlight);
+    lavaHighlight.style.display = 'none';
+    const selectRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    selectRect.setAttribute('fill', '#ff6b6b');
+    selectRect.setAttribute('opacity', '0.15');
+    selectRect.setAttribute('stroke', '#ff6b6b');
+    selectRect.setAttribute('stroke-width', '1');
+    selectRect.setAttribute('stroke-dasharray', '4,2');
+    selectRect.setAttribute('pointer-events', 'none');
+    highlightLayer.appendChild(selectRect);
+    selectRect.style.display = 'none';
 
     function applyTransform() {{
       mapGroup.setAttribute('transform', 'translate(' + panX + ',' + panY + ') scale(' + zoomScale + ')');
@@ -385,18 +537,19 @@ class BrowserMapDashboard:
       return '<span class="chip bad">' + label + '</span>';
     }}
 
-    function renderMap(data) {{
+     function renderMap(data) {{
+      lastState = data;
       envLayer.innerHTML = '';
       lavaLayer.innerHTML = '';
       const lavaZones = data.lava_zones || [];
       for (const zone of lavaZones) {{
         const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-        rect.setAttribute('x', zone[0] - 2);
-        rect.setAttribute('y', zone[1] - 2);
-        rect.setAttribute('width', 8);
-        rect.setAttribute('height', 8);
+        rect.setAttribute('x', zone[0]);
+        rect.setAttribute('y', zone[1]);
+        rect.setAttribute('width', 16);
+        rect.setAttribute('height', 16);
         rect.setAttribute('fill', '#ff6b6b');
-        rect.setAttribute('opacity', '0.8');
+        rect.setAttribute('opacity', '0.5');
         lavaLayer.appendChild(rect);
       }}
 
@@ -424,7 +577,7 @@ class BrowserMapDashboard:
       statsBody.innerHTML = envs.map(function(env) {{
         var hpHtml = hpChip(env.hp);
         var scoreText = (env.score >= 0 ? '+' : '') + env.score.toFixed(1);
-        return '<tr><td>Env ' + (env.env_index + 1) + '</td><td>' + hpHtml + '</td><td>' + env.pkmn + '</td><td>' + env.trainer_wins + '</td><td>' + env.wild_wins + '</td><td>' + env.walls + '</td><td>' + env.steps + '</td><td>' + env.map_id.toString(16).toUpperCase().padStart(2, '0') + '</td><td>' + scoreText + '</td></tr>';
+        return '<tr><td>Env ' + (env.env_index + 1) + '</td><td>' + hpHtml + '</td><td>' + env.pkmn + '</td><td>' + env.trainer_wins + '</td><td>' + env.wild_wins + '</td><td>' + env.walls + '</td><td>' + env.steps + '</td><td>' + env.map_id.toString(16).toUpperCase().padStart(2, '0') + '</td><td>' + (env.raw_x ?? 0) + ',' + (env.raw_y ?? 0) + '</td><td>' + scoreText + '</td></tr>';
       }}).join('');
       envCount.textContent = String(envs.length);
     }}
@@ -441,6 +594,9 @@ class BrowserMapDashboard:
         .catch(function() {{
           status.textContent = 'offline';
         }});
+      if (document.getElementById('mosaic-tab').classList.contains('active')) {{
+        updateMosaic();
+      }}
     }}
 
     mapSvg.addEventListener('wheel', function(event) {{
@@ -450,29 +606,137 @@ class BrowserMapDashboard:
       setZoom(delta);
     }}, {{ passive: false }});
 
-    mapSvg.addEventListener('mousedown', function(event) {{
-      isPanning = true;
-      panStart = {{ x: event.clientX, y: event.clientY }};
-      mapSvg.classList.add('grabbing');
-    }});
+     mapSvg.addEventListener('mousedown', function(event) {{
+       if (event.button !== 0) return;
+       if (lavaPlacementMode) {{
+         dragStart = {{ x: event.clientX, y: event.clientY }};
+         clickStart = null;
+         isPanning = false;
+         return;
+       }}
+       clickStart = {{ x: event.clientX, y: event.clientY }};
+       isPanning = true;
+       panStart = {{ x: event.clientX, y: event.clientY }};
+       mapSvg.classList.add('grabbing');
+     }});
 
-    document.addEventListener('mousemove', function(event) {{
-      if (!isPanning) return;
-      const dx = event.clientX - panStart.x;
-      const dy = event.clientY - panStart.y;
-      panX += dx;
-      panY += dy;
-      panStart = {{ x: event.clientX, y: event.clientY }};
-      applyTransform();
-    }});
+     document.addEventListener('mousemove', function(event) {{
+       if (lavaPlacementMode && dragStart) {{
+         const rect = mapSvg.getBoundingClientRect();
+         const svgX = ((event.clientX - rect.left) / rect.width) * {svg_w};
+         const svgY = ((event.clientY - rect.top) / rect.height) * {svg_h};
+         const invScale = 1 / zoomScale;
+         const viewBoxX = (svgX - panX) * invScale;
+         const viewBoxY = (svgY - panY) * invScale;
+         const startRect = mapSvg.getBoundingClientRect();
+         const startSvgX = ((dragStart.x - startRect.left) / startRect.width) * {svg_w};
+         const startSvgY = ((dragStart.y - startRect.top) / startRect.height) * {svg_h};
+         const startViewX = (startSvgX - panX) * invScale;
+         const startViewY = (startSvgY - panY) * invScale;
+         const startX = Math.min(startViewX, viewBoxX);
+         const startY = Math.min(startViewY, viewBoxY);
+         const endX = Math.max(startViewX, viewBoxX);
+         const endY = Math.max(startViewY, viewBoxY);
+         selectRect.setAttribute('x', startX);
+         selectRect.setAttribute('y', startY);
+         selectRect.setAttribute('width', endX - startX);
+         selectRect.setAttribute('height', endY - startY);
+          selectRect.style.display = 'block';
+          lavaHighlight.style.display = 'none';
+          return;
+        }}
+        if (!isPanning && !lavaPlacementMode) return;
+       if (isPanning) {{
+         const dx = event.clientX - panStart.x;
+         const dy = event.clientY - panStart.y;
+         panX += dx;
+         panY += dy;
+         panStart = {{ x: event.clientX, y: event.clientY }};
+         applyTransform();
+       }}
+       if (lavaPlacementMode) {{
+         const rect = mapSvg.getBoundingClientRect();
+         const svgX = ((event.clientX - rect.left) / rect.width) * {svg_w};
+         const svgY = ((event.clientY - rect.top) / rect.height) * {svg_h};
+         const invScale = 1 / zoomScale;
+         const viewBoxX = (svgX - panX) * invScale;
+         const viewBoxY = (svgY - panY) * invScale;
+         const tileX = Math.round(viewBoxX / 16) * 16;
+         const tileY = Math.round(viewBoxY / 16) * 16;
+         lavaHighlight.setAttribute('x', tileX);
+         lavaHighlight.setAttribute('y', tileY);
+         lavaHighlight.style.display = 'block';
+       }}
+     }});
 
-    document.addEventListener('mouseup', function(event) {{
-      if (!isPanning) return;
-      isPanning = false;
-      mapSvg.classList.remove('grabbing');
-    }});
+      document.addEventListener('mouseup', function(event) {{
+        if (lavaPlacementMode && dragStart) {{
+          if (selectRect.style.display !== 'none') {{
+            const rect = mapSvg.getBoundingClientRect();
+            const invScale = 1 / zoomScale;
+            const startSvgX = ((dragStart.x - rect.left) / rect.width) * {svg_w};
+            const startSvgY = ((dragStart.y - rect.top) / rect.height) * {svg_h};
+            const startViewX = (startSvgX - panX) * invScale;
+            const startViewY = (startSvgY - panY) * invScale;
+            const endSvgX = ((event.clientX - rect.left) / rect.width) * {svg_w};
+            const endSvgY = ((event.clientY - rect.top) / rect.height) * {svg_h};
+            const endViewX = (endSvgX - panX) * invScale;
+            const endViewY = (endSvgY - panY) * invScale;
+            const startX = Math.min(startViewX, endViewX);
+            const startY = Math.min(startViewY, endViewY);
+            const endX = Math.max(startViewX, endViewX);
+            const endY = Math.max(startViewY, endViewY);
+            const zones = [];
+            for (let tx = Math.floor(startX / 16); tx <= Math.floor(endX / 16); tx++) {{
+              for (let ty = Math.floor(startY / 16); ty <= Math.floor(endY / 16); ty++) {{
+                zones.push({{ x: tx * 16, y: ty * 16 }});
+              }}
+            }}
+            console.log('[LAVA DEBUG] Drag select zones:', zones.length, 'tiles, first:', zones[0]);
+            fetch('/api/lava', {{
+              method: 'POST',
+              headers: {{ 'Content-Type': 'application/json' }},
+              body: JSON.stringify({{ zones: zones }})
+            }}).then(function(r) {{ return r.json(); }}).then(function(data) {{
+              console.log('[LAVA DEBUG] Lava zones after drag:', data.lava_zones);
+            }}).catch(function() {{}});
+          }} else {{
+            const rect = mapSvg.getBoundingClientRect();
+            const svgX = ((event.clientX - rect.left) / rect.width) * {svg_w};
+            const svgY = ((event.clientY - rect.top) / rect.height) * {svg_h};
+            const invScale = 1 / zoomScale;
+            const viewBoxX = (svgX - panX) * invScale;
+            const viewBoxY = (svgY - panY) * invScale;
+            const tileX = Math.round(viewBoxX / 16) * 16;
+            const tileY = Math.round(viewBoxY / 16) * 16;
+            console.log('[LAVA DEBUG] Single click tile:', tileX, tileY);
+            fetch('/api/lava', {{
+              method: 'POST',
+              headers: {{ 'Content-Type': 'application/json' }},
+              body: JSON.stringify({{ x: tileX, y: tileY }})
+            }}).then(function(r) {{ return r.json(); }}).then(function(data) {{
+              console.log('[LAVA DEBUG] Lava zones after click:', data.lava_zones);
+            }}).catch(function() {{}});
+          }}
+          dragStart = null;
+          selectRect.style.display = 'none';
+          return;
+        }}
+        if (!isPanning) return;
+        isPanning = false;
+        clickStart = null;
+        mapSvg.classList.remove('grabbing');
+      }});
+
+    function isMapTabActive() {{
+      return document.getElementById('map-tab').classList.contains('active');
+    }}
 
     document.addEventListener('keydown', function(event) {{
+      if (event.key === 'l' && (event.ctrlKey || event.metaKey)) {{
+        event.preventDefault();
+        updateLavaToggle();
+      }}
       if (isMapTabActive() && (event.key === '+' || event.key === '-' || event.key === '=')) {{
         event.preventDefault();
         if (event.key === '+' || event.key === '=') {{
@@ -487,34 +751,70 @@ class BrowserMapDashboard:
       }}
     }});
 
-    function isMapTabActive() {{
-      return document.getElementById('map-tab').classList.contains('active');
-    }}
-
     zoomInBtn.addEventListener('click', function() {{ setZoom(1.15); }});
     zoomOutBtn.addEventListener('click', function() {{ setZoom(0.85); }});
     zoomResetBtn.addEventListener('click', function() {{ resetZoom(); }});
 
-    mapSvg.addEventListener('click', function(event) {{
-      const rect = mapSvg.getBoundingClientRect();
-      const x = ((event.clientX - rect.left) / rect.width) * {svg_w};
-      const y = ((event.clientY - rect.top) / rect.height) * {svg_h};
-      fetch('/api/lava', {{
-        method: 'POST',
-        headers: {{ 'Content-Type': 'application/json' }},
-        body: JSON.stringify({{ x: Math.round(x), y: Math.round(y) }})
-      }}).catch(function() {{}});
-    }});
+    function updateLavaToggle() {{
+      lavaPlacementMode = !lavaPlacementMode;
+      toggleLavaBtn.classList.toggle('toggle-active', lavaPlacementMode);
+      if (lavaPlacementMode) {{
+        lavaModeStatus.textContent = 'LAVA PLACEMENT MODE - click to place/remove zones';
+        mapSvg.style.cursor = 'crosshair';
+      }} else {{
+        lavaModeStatus.textContent = '';
+        mapSvg.style.cursor = '';
+        lavaHighlight.style.display = 'none';
+      }}
+    }}
 
-    tabBtns.forEach(function(btn) {{
-      btn.addEventListener('click', function() {{
-        tabBtns.forEach(function(b) {{ b.classList.remove('active'); }});
-        tabPanes.forEach(function(p) {{ p.classList.remove('active'); }});
-        btn.classList.add('active');
-        const target = btn.getAttribute('data-tab');
-        document.getElementById(target).classList.add('active');
-      }});
-    }});
+     toggleLavaBtn.addEventListener('click', updateLavaToggle);
+
+    if (lavaPlacementMode) {{
+      lavaModeStatus.textContent = 'LAVA PLACEMENT MODE - click to place/remove zones';
+      mapSvg.style.cursor = 'crosshair';
+    }}
+
+     tabBtns.forEach(function(btn) {{
+       btn.addEventListener('click', function() {{
+         tabBtns.forEach(function(b) {{ b.classList.remove('active'); }});
+         tabPanes.forEach(function(p) {{ p.classList.remove('active'); }});
+         btn.classList.add('active');
+         const target = btn.getAttribute('data-tab');
+         document.getElementById(target).classList.add('active');
+         if (target === 'mosaic-tab') {{
+           updateMosaic();
+         }}
+       }});
+     }});
+
+    function updateMosaic() {{
+      fetch('/api/mosaic', {{ cache: 'no-store' }})
+        .then(function(r) {{
+          if (r.status === 204) {{
+            mosaicStatus.textContent = 'no stream';
+            if (mosaicObjectUrl) {{
+              URL.revokeObjectURL(mosaicObjectUrl);
+              mosaicObjectUrl = null;
+            }}
+            mosaicImage.removeAttribute('src');
+            return null;
+          }}
+          return r.blob();
+        }})
+        .then(function(blob) {{
+          if (!blob) return;
+          if (mosaicObjectUrl) {{
+            URL.revokeObjectURL(mosaicObjectUrl);
+          }}
+          mosaicObjectUrl = URL.createObjectURL(blob);
+          mosaicImage.src = mosaicObjectUrl;
+          mosaicStatus.textContent = 'live';
+        }})
+        .catch(function() {{
+          mosaicStatus.textContent = 'offline';
+        }});
+    }}
 
     update();
     setInterval(update, 500);
