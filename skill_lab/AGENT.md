@@ -28,8 +28,8 @@ This project is a **reinforcement learning laboratory** built on top of the Poke
 │   ├── launcher.py         # GUI launcher application
 │   │
 │   ├── profiles/           # Agent profile configurations
-│   │   ├── trainer_profile.json    # Battle-focused profile
-│   │   └── explorer_profile.json   # Exploration-focused profile
+│   │   ├── trainer.json           # Battle-focused profile
+│   │   └── speedrunner.json       # Speedrun-focused profile
 │   │
 │   ├── stages/             # Stage/level configurations
 │   │   ├── starter.json    # Starter selection stage
@@ -61,10 +61,10 @@ Profiles define agent behavior through reward multipliers and directives:
 - **explore_weight**: Weight for exploration rewards
 - **catch_directive**: List of Pokemon to prioritize catching
 - **train_directive**: List of Pokemon to prioritize training
-- **save_on_catch**: Whether to save state after catching
-- **reset_on_catch**: Whether to reset episode after catching
 
-**Example**: `trainer_profile.json` has `reward_scale: 2.0` and focuses on battling, while `explorer_profile.json` has `explore_weight: 3.0` for mapping.
+**Example**: `trainer.json` has `reward_scale: 1.0` and focuses on battling, while `speedrunner.json` has `explore_weight: 0.1` for speedrunning.
+
+**Note**: `save_on_catch` is a global setting (in `settings.json` / `config.py`) and defaults to `true`, gated by the DV threshold. `reset_on_catch` is a stage-level setting, not a profile property.
 
 ### 2. **Stages** (`skill_lab/stages/`)
 
@@ -76,7 +76,7 @@ Stages define specific training scenarios with:
 - **capture_reward**: Reward for catching Pokemon
 - **button_masks**: Which buttons to disable (action masking)
 - **target_milestones**: Specific event bits to track
-- **reset_on_catch**: Reset episode after catch
+  - **reset_on_catch**: Reset episode after catch (stage-level setting)
 
 **Key Idea**: All stages have **baseline rewards**, but stages can apply **multipliers** to emphasize or ignore certain aspects. A stage can set a multiplier to 0 to ignore "noise" rewards.
 
@@ -135,7 +135,7 @@ The `SkillLabWrapper` adds:
 ```bash
 --stage starter           # Stage to train on
 --model path/to/model.zip # Load pretrained model
---specialization trainer  # Use preset profile (trainer/explorer/speedrunner)
+--specialization trainer  # Use preset profile (trainer/speedrunner)
 --reward-scale 1.0        # Global reward multiplier
 --explore-weight 1.0      # Exploration reward weight
 --num-envs 42             # Number of parallel environments
@@ -197,17 +197,12 @@ Shows all environments in a table:
 ### Trainer Profile
 - **Goal**: Battle trainers, level specific Pokemon
 - **Behavior**: Grinding loop (defeat → progress → heal → repeat)
-- **Rewards**: High combat rewards, moderate exploration
+- **Rewards**: Moderate combat rewards, balanced exploration
 
-### Explorer Profile
-- **Goal**: Map discovery, reach milestones
-- **Behavior**: Push through screens, breadcrumb-driven
-- **Rewards**: High exploration, milestone-focused
-
-### Speedrunner Profile (preset)
+### Speedrunner Profile
 - **Goal**: Fast completion
 - **Behavior**: Optimize path, minimize steps
-- **Rewards**: Speed bonuses, milestone efficiency
+- **Rewards**: High reward scale, speed bonuses, milestone efficiency
 
 ## How Rewards Work (Detailed)
 
@@ -301,6 +296,15 @@ Global settings:
 - `REWARD_MODIFIER_PRAISE/SLASH`: Teacher feedback values
 - `SPECIALIZATION_PRESETS`: Profile presets
 - `SAVE_ON_CATCH_ENABLED/MIN_DV`: Catch-save thresholds
+- `COLS`/`ROWS`/`DEFAULT_ENV_AMOUNT`: Launcher grid defaults (from `settings.json`)
+
+### `settings.json`
+General script settings (in `skill_lab/`):
+- `launcher.cols/rows`: Mosaic grid dimensions
+- `launcher.default_env_amount`: Default number of environments
+- `catch.save_on_catch`: Global flag to save state on any Pokemon catch (default true)
+- `catch.save_on_catch_enabled`: DV threshold gating (default true)
+- `catch.save_on_catch_min_dv`: Minimum DV value for all stats (default 11)
 
 ### `controls.json`
 Button mappings for emulator input.
@@ -316,7 +320,8 @@ Button mappings for emulator input.
 ### Add New Profile
 1. Create `skill_lab/profiles/my_profile.json`
 2. Set reward_scale, explore_weight, directives
-3. Reference in `run_mosaic.py` with `--specialization`
+3. Add to `SPECIALIZATION_PRESETS` in `config.py`
+4. Reference in `run_mosaic.py` with `--specialization`
 
 ### Add New Stage
 1. Create `skill_lab/stages/my_stage.json`

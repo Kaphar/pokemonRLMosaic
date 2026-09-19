@@ -1,0 +1,10 @@
+{
+  "name": "speedrunner",
+  "description": "Focus on rapid completion of milestones and efficient navigation",
+  "settings": {
+    "reward_scale": 2.0,
+    "explore_weight": 0.1,
+    "catch_directive": [],
+    "train_directive": []
+  }
+}

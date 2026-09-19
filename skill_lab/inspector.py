@@ -179,6 +179,22 @@ class ObservationInspector:
                         cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 180, 180), 1)
         y += 24
 
+        milestone_tracker = getattr(env.envs[env_index], "milestone_tracker", None)
+        if milestone_tracker is not None:
+            cv2.putText(panel, "Milestones:", (15, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+            y += 18
+            for idx, milestone in enumerate(milestone_tracker.milestones[:6]):
+                name = milestone.get("name", f"m{idx}")
+                done = name in milestone_tracker.achieved
+                color = (0, 255, 0) if done else ((255, 255, 0) if idx == 0 else (100, 100, 100))
+                label = "✓" if done else ("▶" if idx == 0 else "○")
+                cv2.putText(panel, f"{label} {name}", (20, y), cv2.FONT_HERSHEY_SIMPLEX, 0.38, color, 1)
+                y += 15
+            y += 8
+        else:
+            cv2.putText(panel, "Milestones: (not available)", (15, y), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (150, 150, 150), 1)
+            y += 18
+
         hp_color = (0, 255, 0) if hp > 0.5 else ((0, 255, 255) if hp > 0.2 else (0, 0, 255))
         cv2.putText(panel, f"HP: {hp:.0%}", (15, y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, hp_color, 1)
         y += 24

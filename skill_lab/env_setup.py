@@ -40,6 +40,7 @@ from skill_lab.config import (
     ENVS_DIR,
     PROFILES_DIR,
     TRAIN_DIRECTIVES,
+    SAVE_ON_CATCH,
     SAVE_ON_CATCH_ENABLED,
     SAVE_ON_CATCH_MIN_DV,
     GRID_COLS,
@@ -57,23 +58,17 @@ DEFAULT_ROM_BLUE = PROJECT_ROOT / "PokemonBlue.gb"
 PROFILES = {
     "trainer": {
         "name": "trainer",
-        "reward_scale": 2.0,
-        "explore_weight": 0.5,
+        "reward_scale": 1.0,
+        "explore_weight": 1.0,
         "catch_directive": ["Nidoran♂", "Pidgey", "Rattata", "Spearow", "Pikachu"],
         "train_directive": ["Nidoran♂", "Pikachu"],
-        "save_on_catch": True,
-        "save_on_catch_enabled": True,
-        "save_on_catch_min_dv": 11,
     },
-    "explorer": {
-        "name": "explorer",
-        "reward_scale": 0.5,
-        "explore_weight": 3.0,
+    "speedrunner": {
+        "name": "speedrunner",
+        "reward_scale": 3.0,
+        "explore_weight": 0.1,
         "catch_directive": [],
         "train_directive": [],
-        "save_on_catch": False,
-        "save_on_catch_enabled": False,
-        "save_on_catch_min_dv": 11,
     },
 }
 
@@ -85,16 +80,20 @@ def load_profile_config(profile_name: str) -> dict[str, Any]:
     skill_lab/profiles/ while preserving the legacy in-memory defaults.
     """
     profile_name = profile_name.lower()
-    profile_path = PROFILES_DIR / f"{profile_name}_profile.json"
+    profile_path = PROFILES_DIR / f"{profile_name}.json"
     if profile_path.exists():
         with open(profile_path, "r", encoding="utf-8") as f:
             loaded = json.load(f)
         if isinstance(loaded, dict) and loaded.get("settings"):
             profile = dict(loaded.get("settings", {}))
             profile.setdefault("name", profile_name)
+            profile["__source__"] = str(profile_path)
             return profile
+        loaded["__source__"] = str(profile_path)
         return loaded
-    return PROFILES.get(profile_name, {}).copy()
+    fallback = PROFILES.get(profile_name, {}).copy()
+    fallback["__source__"] = "default profile fallback in skill_lab/env_setup.py"
+    return fallback
 
 
 def load_stage_config(stage_name: str) -> dict[str, Any]:
@@ -117,19 +116,20 @@ def load_stage_config(stage_name: str) -> dict[str, Any]:
                 config[legacy_key] = config[canonical_key]
             elif canonical_key not in config and legacy_key in config:
                 config[canonical_key] = config[legacy_key]
+        config["__source__"] = str(stage_path)
         return config
     
     # Default fallback for starter stage
-    return {
+    fallback = {
         "name": stage_name,
         "description": f"Default {stage_name} stage",
         "max_steps": 7200,
         "milestone_reward": medium_reward,
-        "milestone_reward_multiplier": medium_reward,
-        "exploration_reward_multiplier": small_reward,
-        "combat_reward_multiplier": 0.0,
-        "capture_reward_multiplier": 0.0,
-        "healing_reward_multiplier": 0.0,
+        "milestone_reward_multiplier": 1.0,
+        "exploration_reward_multiplier": 1.0,
+        "combat_reward_multiplier": 1.0,
+        "capture_reward_multiplier": 1.0,
+        "healing_reward_multiplier": 1.0,
         "init_state": str(DEFAULT_INIT_STATE),
         "button_masks": {
             "Start": True,
@@ -138,6 +138,8 @@ def load_stage_config(stage_name: str) -> dict[str, Any]:
             "A": False,
         },
     }
+    fallback["__source__"] = "default stage fallback in skill_lab/env_setup.py"
+    return fallback
 
 
 def _resolve_init_state(
@@ -233,7 +235,7 @@ def setup_envs(
         cfg_stage = stage if override_trainer_stage else trainer_cfg.get("stage", stage)
         cfg_reward_scale = trainer_cfg.get("reward_scale", None)
         cfg_explore_weight = trainer_cfg.get("explore_weight", None)
-        cfg_profile_name = trainer_cfg.get("profile", "trainer" if i == 0 else random.choice(["trainer", "explorer"]))
+        cfg_profile_name = trainer_cfg.get("profile", "trainer" if i == 0 else random.choice(["trainer", "speedrunner"]))
         cfg_input_replay = trainer_cfg.get("input_replay", "")
         
         # Set up ROM and init state paths
@@ -295,7 +297,7 @@ def setup_envs(
             "profile": profile,
             "catch_directive": profile["catch_directive"],
             "train_directive": profile["train_directive"],
-            "save_on_catch": profile["save_on_catch"],
+            "save_on_catch": SAVE_ON_CATCH,
         }
         
         settings_path = env_subdir / "settings.json"
@@ -312,7 +314,7 @@ def setup_envs(
             "profile": profile["name"],
             "catch_directive": profile["catch_directive"],
             "train_directive": profile["train_directive"],
-            "save_on_catch": profile["save_on_catch"],
+            "save_on_catch": SAVE_ON_CATCH,
             "reset_on_catch": stage_config.get("reset_on_catch", False),
             "description": f"{trainer_name} - {profile['name']} profile",
             "rom_file": trainer_rom_path.name,
@@ -367,10 +369,10 @@ def setup_envs(
         # Profile distribution based on config
         if profile_distribution == "all_trainer":
             profile_name = "trainer"
-        elif profile_distribution == "all_explorer":
-            profile_name = "explorer"
+        elif profile_distribution == "all_speedrunner":
+            profile_name = "speedrunner"
         else:  # 50/50
-            profile_name = random.choice(["trainer", "explorer"])
+            profile_name = random.choice(["trainer", "speedrunner"])
         
         profile = PROFILES[profile_name].copy()
         
@@ -397,7 +399,7 @@ def setup_envs(
             "profile": profile,
             "catch_directive": profile["catch_directive"],
             "train_directive": profile["train_directive"],
-            "save_on_catch": profile["save_on_catch"],
+            "save_on_catch": SAVE_ON_CATCH,
         }
         
         settings_path = env_dir / "settings.json"
@@ -414,10 +416,10 @@ def setup_envs(
             "profile": profile["name"],
             "catch_directive": profile["catch_directive"],
             "train_directive": profile["train_directive"],
-            "save_on_catch": profile["save_on_catch"],
+            "save_on_catch": SAVE_ON_CATCH,
             "reset_on_catch": stage_config.get("reset_on_catch", False),
-            "save_on_catch_enabled": profile["save_on_catch_enabled"],
-            "save_on_catch_min_dv": profile["save_on_catch_min_dv"],
+            "save_on_catch_enabled": SAVE_ON_CATCH_ENABLED,
+            "save_on_catch_min_dv": SAVE_ON_CATCH_MIN_DV,
             "description": f"Worker {env_name} - {profile['name']} profile",
             "rom_file": worker_rom_path.name,
             "init_state_file": worker_init_state.name,
@@ -488,7 +490,7 @@ def expand_envs(
             shutil.copy2(worker_rom, rom_dest)
         
         # 50/50 random profile distribution for new workers
-        profile_name = random.choice(["trainer", "explorer"])
+        profile_name = random.choice(["trainer", "speedrunner"])
         profile = PROFILES[profile_name].copy()
         
         # Create settings.json with default initial state
@@ -503,7 +505,7 @@ def expand_envs(
             "profile": profile,
             "catch_directive": profile["catch_directive"],
             "train_directive": profile["train_directive"],
-            "save_on_catch": profile["save_on_catch"],
+            "save_on_catch": SAVE_ON_CATCH,
         }
         
         settings_path = env_dir / "settings.json"
@@ -520,10 +522,10 @@ def expand_envs(
             "profile": profile["name"],
             "catch_directive": profile["catch_directive"],
             "train_directive": profile["train_directive"],
-            "save_on_catch": profile["save_on_catch"],
+            "save_on_catch": SAVE_ON_CATCH,
             "reset_on_catch": stage_config.get("reset_on_catch", False),
-            "save_on_catch_enabled": profile["save_on_catch_enabled"],
-            "save_on_catch_min_dv": profile["save_on_catch_min_dv"],
+            "save_on_catch_enabled": SAVE_ON_CATCH_ENABLED,
+            "save_on_catch_min_dv": SAVE_ON_CATCH_MIN_DV,
             "description": f"Worker {env_name} - {profile['name']} profile (newly created)",
             "rom_file": worker_rom.name,
         }
@@ -614,10 +616,10 @@ def ensure_env_exists(
             if trainer_offset == 0:
                 profile_type = "trainer"
             else:
-                profile_type = random.choice(["trainer", "explorer"])
+                profile_type = random.choice(["trainer", "speedrunner"])
         else:
             # Workers = 50/50 random
-            profile_type = random.choice(["trainer", "explorer"])
+            profile_type = random.choice(["trainer", "speedrunner"])
         
         profile = PROFILES[profile_type].copy()
         
@@ -678,9 +680,9 @@ def ensure_env_exists(
             "profile": profile,
             "catch_directive": profile["catch_directive"],
             "train_directive": profile["train_directive"],
-            "save_on_catch": profile["save_on_catch"],
-            "save_on_catch_enabled": profile["save_on_catch_enabled"],
-            "save_on_catch_min_dv": profile["save_on_catch_min_dv"],
+            "save_on_catch": SAVE_ON_CATCH,
+            "save_on_catch_enabled": SAVE_ON_CATCH_ENABLED,
+            "save_on_catch_min_dv": SAVE_ON_CATCH_MIN_DV,
         }
         
         with open(settings_file, "w", encoding="utf-8") as f:

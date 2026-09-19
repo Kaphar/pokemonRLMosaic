@@ -1,0 +1,12 @@
+{
+  "launcher": {
+    "cols": 7,
+    "rows": 6,
+    "default_env_amount": 42
+  },
+  "catch": {
+    "save_on_catch": true,
+    "save_on_catch_enabled": true,
+    "save_on_catch_min_dv": 11
+  }
+}

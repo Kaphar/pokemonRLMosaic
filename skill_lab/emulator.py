@@ -28,7 +28,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from v2.red_gym_env_v2 import RedGymEnv
-from skill_lab.config import ACTION_FREQ, TILE_HEIGHT, TILE_WIDTH, EVENT_JSON_PATH, SAVE_ON_CATCH_ENABLED, SAVE_ON_CATCH_MIN_DV
+from skill_lab.config import ACTION_FREQ, TILE_HEIGHT, TILE_WIDTH, EVENT_JSON_PATH, SAVE_ON_CATCH, SAVE_ON_CATCH_ENABLED, SAVE_ON_CATCH_MIN_DV
 from skill_lab.env_wrapper import SkillLabWrapper
 from skill_lab.rewards import medium_reward
 
@@ -48,7 +48,7 @@ def make_env(rank: int, env_conf: dict[str, Any], env_setup_config: dict[str, An
             # Pass profile settings for catch/train directives
             cfg["catch_directive"] = env_setup_config.get("catch_directive", [])
             cfg["train_directive"] = env_setup_config.get("train_directive", [])
-            cfg["save_on_catch"] = env_setup_config.get("save_on_catch", False)
+            cfg["save_on_catch"] = env_setup_config.get("save_on_catch", SAVE_ON_CATCH)
             # reset_on_catch is a stage-level property read from stage_config below
             # Override init_state and gb_path with per-env values from settings.json
             settings_path = env_setup_config.get("settings_path")
@@ -106,7 +106,7 @@ def make_env(rank: int, env_conf: dict[str, Any], env_setup_config: dict[str, An
             "perfect_sound": cfg.get("perfect_sound", False),
             "catch_directive": cfg.get("catch_directive", []),
             "train_directive": cfg.get("train_directive", []),
-            "save_on_catch": cfg.get("save_on_catch", False),
+            "save_on_catch": cfg.get("save_on_catch", SAVE_ON_CATCH),
             "reset_on_catch": cfg.get("reset_on_catch", False),
             "save_on_catch_enabled": cfg.get("save_on_catch_enabled", SAVE_ON_CATCH_ENABLED),
             "save_on_catch_min_dv": cfg.get("save_on_catch_min_dv", SAVE_ON_CATCH_MIN_DV),

@@ -14,7 +14,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from skill_lab.config import DEFAULT_EMULATOR_SPEED, DEFAULT_MAX_STEPS
+from skill_lab.config import DEFAULT_EMULATOR_SPEED, DEFAULT_MAX_STEPS, COLS, ROWS, DEFAULT_ENV_AMOUNT
 from skill_lab.curriculum import list_stages, get_stage
 from skill_lab.rewards import medium_reward
 from skill_lab.env_setup import PROFILES, ENVS_DIR
@@ -49,7 +49,7 @@ class EnvConfigWindow:
             else:
                 # Default config
                 configs[trainer_name] = {
-                    "profile": "trainer" if trainer_name == "CharmanderTrainer" else "explorer",
+                    "profile": "trainer" if trainer_name == "CharmanderTrainer" else "speedrunner",
                     "rom": "PokemonRed.gb",
                     "init_state": f"{trainer_name.replace('Trainer', '').lower()}.init.state",
                     "stage": "progress",
@@ -116,7 +116,7 @@ class EnvConfigWindow:
         # Profile selection
         ttk.Label(tab, text="Profile:").grid(row=0, column=0, sticky="w", pady=5)
         profile_var = tk.StringVar(value=config.get("profile", "trainer"))
-        ttk.Combobox(tab, textvariable=profile_var, values=["trainer", "explorer"], 
+        ttk.Combobox(tab, textvariable=profile_var, values=["trainer", "speedrunner"], 
                      state="readonly", width=15).grid(row=0, column=1, sticky="w", pady=5)
         
         # ROM selection with file picker
@@ -237,7 +237,7 @@ class EnvConfigWindow:
         ttk.Label(tab, text="Profile Distribution:").grid(row=1, column=0, sticky="w", pady=5)
         profile_dist_var = tk.StringVar(value=config.get("profile_distribution", "50/50"))
         ttk.Combobox(tab, textvariable=profile_dist_var, 
-                     values=["50/50", "all_trainer", "all_explorer"],
+                     values=["50/50", "all_trainer", "all_speedrunner"],
                      state="readonly", width=15).grid(row=1, column=1, sticky="w", pady=5)
         
         # Stage selection
@@ -358,9 +358,9 @@ class Launcher:
         self.stage_var = tk.StringVar(value="starter")
         self.training_mode_var = tk.StringVar(value="segment")  # NEW
         self.override_trainer_stage_var = tk.BooleanVar(value=False)  # NEW
-        self.rows_var = tk.IntVar(value=6)
-        self.cols_var = tk.IntVar(value=7)
-        self.num_envs_var = tk.IntVar(value=42)
+        self.rows_var = tk.IntVar(value=ROWS)
+        self.cols_var = tk.IntVar(value=COLS)
+        self.num_envs_var = tk.IntVar(value=DEFAULT_ENV_AMOUNT)
         self.max_steps_var = tk.IntVar(value=DEFAULT_MAX_STEPS)  # Load from config
         self.batch_iterations_var = tk.IntVar(value=10_000_000)
         self.hud_var = tk.BooleanVar(value=True)

@@ -6,7 +6,7 @@
   "exploration_reward_multiplier": 1.0,
   "combat_reward_multiplier": 1.0,
   "capture_reward_multiplier": 1.0,
-  "healing_reward_multiplier": 0.0,
+  "healing_reward_multiplier": 1.0,
   "button_masks": {
     "Start": true,
     "Select": true,

@@ -55,23 +55,17 @@ TRAINER_NAMES = ["CharmanderTrainer", "SquirtleTrainer", "BulbasaurTrainer"]
 PROFILES = {
     "trainer": {
         "name": "trainer",
-        "reward_scale": 2.0,
-        "explore_weight": 0.5,
+        "reward_scale": 1.0,
+        "explore_weight": 1.0,
         "catch_directive": ["Nidoran\u2642", "Pidgey", "Rattata", "Spearow", "Pikachu"],
         "train_directive": ["Nidoran\u2642", "Pikachu"],
-        "save_on_catch": True,
-        "save_on_catch_enabled": True,
-        "save_on_catch_min_dv": 11,
     },
-    "explorer": {
-        "name": "explorer",
-        "reward_scale": 0.5,
-        "explore_weight": 3.0,
+    "speedrunner": {
+        "name": "speedrunner",
+        "reward_scale": 3.0,
+        "explore_weight": 0.1,
         "catch_directive": [],
         "train_directive": [],
-        "save_on_catch": False,
-        "save_on_catch_enabled": False,
-        "save_on_catch_min_dv": 11,
     },
 }
 
@@ -112,8 +106,8 @@ def apply_trainer_config_to_env(
     Mirrors the logic in env_setup.setup_envs: picks a profile, overrides
     reward_scale / explore_weight, then writes stage, init_state,
     rom_path, and profile fields into settings.json and the flattened top-level
-    catch_directive / train_directive / save_on_catch. (reset_on_catch is a
-    stage-level property, not a profile or root setting.)
+    catch_directive / train_directive. (save_on_catch is a global setting from
+    config; reset_on_catch is a stage-level property.)
 
     Returns True if the file was modified, False otherwise.
     """
@@ -186,7 +180,7 @@ def apply_trainer_config_to_env(
             modified = True
     settings["profile"] = existing_profile
 
-    for flat_key in ("catch_directive", "train_directive", "save_on_catch"):
+    for flat_key in ("catch_directive", "train_directive"):
         if existing_profile.get(flat_key, None) != profile.get(flat_key, None):
             if settings.get(flat_key) != profile.get(flat_key):
                 settings[flat_key] = profile.get(flat_key)
@@ -280,7 +274,7 @@ def update_envs_from_trainer_config(
                         changes.append(
                             f"profile.{key}: {before_profile.get(key)} -> {value}"
                         )
-                    if key in ("catch_directive", "train_directive", "save_on_catch"):
+                    if key in ("catch_directive", "train_directive"):
                         if before.get(key) != value:
                             changes.append(
                                 f"{key}: {before.get(key)} -> {value}"

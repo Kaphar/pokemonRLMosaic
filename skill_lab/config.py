@@ -1,6 +1,8 @@
 """Central configuration for the Skill Lab."""
 
+import json
 from pathlib import Path
+from typing import Any
 
 from skill_lab.rewards import medium_reward, reward_penalty, small_reward
 
@@ -73,11 +75,34 @@ TRAIN_DIRECTIVES = {
 
 SPECIALIZATION_PRESETS = {
     "default": {"reward_scale": 1.0, "explore_weight": 1.0},
-    "explorer": {"reward_scale": 0.5, "explore_weight": 3.0},
     "trainer": {"reward_scale": 2.0, "explore_weight": 0.5},
     "speedrunner": {"reward_scale": 3.0, "explore_weight": 0.1},
 }
 
+# --- Settings Loader ---
+SETTINGS_FILE = PROJECT_ROOT / "skill_lab" / "settings.json"
+
+
+def _load_settings_json() -> dict[str, Any]:
+    """Load settings.json if it exists, returning an empty dict on failure."""
+    try:
+        if SETTINGS_FILE.exists():
+            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        pass
+    return {}
+
+
+_APP_SETTINGS = _load_settings_json()
+
 # --- Save on Catch Settings ---
-SAVE_ON_CATCH_MIN_DV = 11  # Minimum DV for all stats to save state/inputs
-SAVE_ON_CATCH_ENABLED = True  # Enable saving on any Pokemon catch
+SAVE_ON_CATCH = _APP_SETTINGS.get("catch", {}).get("save_on_catch", True)
+SAVE_ON_CATCH_MIN_DV = _APP_SETTINGS.get("catch", {}).get("save_on_catch_min_dv", 11)
+SAVE_ON_CATCH_ENABLED = _APP_SETTINGS.get("catch", {}).get("save_on_catch_enabled", True)
+
+# --- Launcher Defaults (from settings.json) ---
+SETTINGS_LAUNCHER = _APP_SETTINGS.get("launcher", {})
+COLS = SETTINGS_LAUNCHER.get("cols", GRID_COLS)
+ROWS = SETTINGS_LAUNCHER.get("rows", GRID_ROWS)
+DEFAULT_ENV_AMOUNT = SETTINGS_LAUNCHER.get("default_env_amount", GRID_COLS * GRID_ROWS)

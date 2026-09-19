@@ -13,6 +13,7 @@ import numpy as np
 from pyboy.utils import WindowEvent
 
 from skill_lab.config import (
+    SAVE_ON_CATCH,
     SAVE_ON_CATCH_ENABLED,
     SAVE_ON_CATCH_MIN_DV,
 )
@@ -61,7 +62,7 @@ class SkillLabWrapper(gymnasium.Wrapper):
         # Catch/train directives from profile
         self.catch_directive = config.get("catch_directive", [])
         self.train_directive = config.get("train_directive", [])
-        self.save_on_catch = config.get("save_on_catch", False)
+        self.save_on_catch = config.get("save_on_catch", SAVE_ON_CATCH)
         self.reset_on_catch = config.get("reset_on_catch", False)
 
         # Save on catch settings

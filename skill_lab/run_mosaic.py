@@ -22,7 +22,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from skill_lab.config import EVENT_JSON_PATH, REWARD_MODIFIER_PRAISE, REWARD_MODIFIER_SLASH, SPECIALIZATION_PRESETS, SAVE_ON_CATCH_ENABLED, SAVE_ON_CATCH_MIN_DV
+from skill_lab.config import EVENT_JSON_PATH, REWARD_MODIFIER_PRAISE, REWARD_MODIFIER_SLASH, SPECIALIZATION_PRESETS, SAVE_ON_CATCH, SAVE_ON_CATCH_ENABLED, SAVE_ON_CATCH_MIN_DV, COLS, ROWS
 from skill_lab.emulator import (
     ACTION_FREQ,
     make_vec_env,
@@ -150,7 +150,7 @@ def find_latest_checkpoint(checkpoint_dir: Path) -> Path | None:
 
 
 def parse_args() -> argparse.Namespace:
-    from skill_lab.config import ACTION_FREQ, DEFAULT_INIT_STATE, DEFAULT_ROM, DEFAULT_MAX_STEPS, TOTAL_TILES
+    from skill_lab.config import ACTION_FREQ, DEFAULT_INIT_STATE, DEFAULT_ROM, DEFAULT_MAX_STEPS, TOTAL_TILES, DEFAULT_ENV_AMOUNT
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", help="PPO checkpoint to load (skips training)")
     parser.add_argument("--dry-run", action="store_true", help="Run random actions, no training")
@@ -162,7 +162,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--foreground", action="store_true", help="Keep the mosaic window above other windows")
     parser.add_argument("--teacher-bonus", type=float, default=medium_reward, help="Logged reward bonus for each human-guided action")
     parser.add_argument("--teacher-log", type=Path, default=Path("mosaic_sessions/teacher_actions.jsonl"))
-    parser.add_argument("--num-envs", type=int, default=TOTAL_TILES, help="Number of environments to run")
+    parser.add_argument("--num-envs", type=int, default=DEFAULT_ENV_AMOUNT, help="Number of environments to run")
     parser.add_argument("--reward-scale", type=float, default=1.0)
     parser.add_argument("--explore-weight", type=float, default=1.0)
     parser.add_argument("--specialization", type=str, default=None, choices=list(SPECIALIZATION_PRESETS.keys()))
@@ -260,14 +260,20 @@ def log_reward_configuration_summary(profile_name: str, profile_config: dict[str
     green = "\033[32m"
     yellow = "\033[33m"
     magenta = "\033[35m"
+    red = "\033[31m"
     reset = "\033[0m"
+
+    profile_source = profile_config.get("__source__", "unknown profile source")
+    stage_source = stage_config.get("__source__", "unknown stage source")
 
     print("\n" + "=" * 90)
     print(f"{cyan}=== REWARD CONFIGURATION SUMMARY ==={reset}")
     print(f"{yellow}Profile:{reset} {profile_name}")
+    print(f"  - source: {profile_source}")
     print(f"  - reward_scale: {green}{summary['reward_scale']:.2f}{reset}")
     print(f"  - explore_weight: {green}{profile_config.get('explore_weight', 1.0):.2f}{reset}")
     print(f"{yellow}Stage:{reset} {stage_name}")
+    print(f"  - source: {stage_source}")
     for label, key in (
         ("milestone_reward_multiplier", "milestone"),
         ("exploration_reward_multiplier", "exploration"),
@@ -276,7 +282,7 @@ def log_reward_configuration_summary(profile_name: str, profile_config: dict[str
         ("healing_reward_multiplier", "healing"),
     ):
         value = stage_multipliers.get(key, 0.0)
-        color = green if value > 0 else "\033[90m"
+        color = green if value > 0 else red
         print(f"  - {label}: {color}{value:.2f}{reset}")
     print(f"\n{magenta}Final Effective Rewards:{reset}")
     for label, key in (
@@ -335,8 +341,8 @@ def main(args: argparse.Namespace | None = None) -> None:
         stage=args.stage,
         rom_path=args.rom,
         init_state=args.init_state,
-        mosaic_rows=getattr(args, "mosaic_rows", 6),
-        mosaic_cols=getattr(args, "mosaic_cols", 7),
+        mosaic_rows=getattr(args, "mosaic_rows", ROWS),
+        mosaic_cols=getattr(args, "mosaic_cols", COLS),
         override_trainer_stage=getattr(args, "override_trainer_stage", False),
     )
 
@@ -348,8 +354,8 @@ def main(args: argparse.Namespace | None = None) -> None:
             rom_source_path=args.rom,
             default_state_path=str(args.init_state),
             launcher_stage=args.stage,
-            mosaic_rows=getattr(args, "mosaic_rows", 6),
-            mosaic_cols=getattr(args, "mosaic_cols", 7),
+            mosaic_rows=getattr(args, "mosaic_rows", ROWS),
+            mosaic_cols=getattr(args, "mosaic_cols", COLS),
         )
 
     # Print directive assignments (confirmation in logs)
@@ -396,7 +402,7 @@ def main(args: argparse.Namespace | None = None) -> None:
         if len(cfg.get('train_directive', [])) > 2:
             train_list += f" (+{len(cfg['train_directive'])-2})"
         
-        save_flag = "Y" if cfg.get('save_on_catch', False) else "N"
+        save_flag = "Y" if cfg.get('save_on_catch', SAVE_ON_CATCH) else "N"
         reset_flag = "Y" if cfg.get('reset_on_catch', False) else "N"
         target = cfg.get('target_starter', '-') or "-"
         rom_file = cfg.get('rom_file', 'N/A')
@@ -412,8 +418,8 @@ def main(args: argparse.Namespace | None = None) -> None:
     
     # Profile distribution summary
     trainer_count = sum(1 for cfg in env_configs if cfg['profile'] == 'trainer')
-    explorer_count = sum(1 for cfg in env_configs if cfg['profile'] == 'explorer')
-    print(f"\nProfile Distribution: {trainer_count} Trainer, {explorer_count} Explorer")
+    speedrunner_count = sum(1 for cfg in env_configs if cfg['profile'] == 'speedrunner')
+    print(f"\nProfile Distribution: {trainer_count} Trainer, {speedrunner_count} Speedrunner")
     
     # Count ROM distribution
     red_count = sum(1 for cfg in env_configs if cfg.get('rom_file', '').endswith('.gb') and 'Blue' not in cfg.get('rom_file', ''))
@@ -478,8 +484,8 @@ def main(args: argparse.Namespace | None = None) -> None:
     mosaic = Mosaic(
         num_tiles=env.num_envs,
         foreground=args.foreground,
-        rows=getattr(args, "mosaic_rows", 6),
-        cols=getattr(args, "mosaic_cols", 7),
+        rows=getattr(args, "mosaic_rows", ROWS),
+        cols=getattr(args, "mosaic_cols", COLS),
     )
     inspector = ObservationInspector()
     map_window = MapWindow()
