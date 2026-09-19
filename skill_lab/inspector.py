@@ -183,12 +183,33 @@ class ObservationInspector:
         if milestone_tracker is not None:
             cv2.putText(panel, "Milestones:", (15, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
             y += 18
-            for idx, milestone in enumerate(milestone_tracker.milestones[:6]):
-                name = milestone.get("name", f"m{idx}")
+            milestone_names = [m.get("name", f"m{i}") for i, m in enumerate(milestone_tracker.milestones)]
+            current_target_index = None
+            for idx, name in enumerate(milestone_names):
+                if name not in milestone_tracker.achieved:
+                    current_target_index = idx
+                    break
+            if current_target_index is None:
+                current_target_index = len(milestone_names) - 1
+            start_index = max(0, current_target_index - 2)
+            end_index = min(len(milestone_names), current_target_index + 4)
+            for idx in range(start_index, end_index):
+                name = milestone_names[idx]
                 done = name in milestone_tracker.achieved
-                color = (0, 255, 0) if done else ((255, 255, 0) if idx == 0 else (100, 100, 100))
-                label = "✓" if done else ("▶" if idx == 0 else "○")
-                cv2.putText(panel, f"{label} {name}", (20, y), cv2.FONT_HERSHEY_SIMPLEX, 0.38, color, 1)
+                is_target = idx == current_target_index
+                if done:
+                    color = (0, 255, 0)
+                    label = "✓"
+                    step_text = f" @ step {milestone_tracker.achieved_steps.get(name, 0)}"
+                elif is_target:
+                    color = (0, 255, 255)
+                    label = "▶"
+                    step_text = " (current target)"
+                else:
+                    color = (110, 110, 110)
+                    label = "○"
+                    step_text = ""
+                cv2.putText(panel, f"{label} {name}{step_text}", (20, y), cv2.FONT_HERSHEY_SIMPLEX, 0.38, color, 1)
                 y += 15
             y += 8
         else:

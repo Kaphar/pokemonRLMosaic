@@ -32,6 +32,7 @@ from skill_lab.inspector import ObservationInspector
 from skill_lab.map_window import MapWindow
 from skill_lab.mosaic import Mosaic
 from skill_lab.stats_window import StatsWindow
+from skill_lab.web_dashboard import BrowserMapDashboard
 
 
 from skill_lab.env_setup import setup_envs, ensure_env_exists, get_env_config, load_profile_config, load_stage_config
@@ -490,7 +491,10 @@ def main(args: argparse.Namespace | None = None) -> None:
     inspector = ObservationInspector()
     map_window = MapWindow()
     stats_window = StatsWindow()
-    
+    dashboard = BrowserMapDashboard()
+    dashboard.start()
+    dashboard.open_browser()
+
     observation = env.reset()
     reward_modifiers = [0.0 for _ in range(env.num_envs)]
     reward_history: list[list[float]] = [[] for _ in range(env.num_envs)]
@@ -645,6 +649,8 @@ def main(args: argparse.Namespace | None = None) -> None:
                     if not map_window.render(env, mosaic.selected_index): map_window.map_visible = False
                 else: map_window.hide()
 
+                dashboard.update_state(env, env.num_envs, scores=batch_stats.env_rewards)
+
                 mosaic.pending_human_action = None
                 if not mosaic.display_paused:
                     mosaic.render(
@@ -719,6 +725,7 @@ def main(args: argparse.Namespace | None = None) -> None:
         inspector.close()
         map_window.close()
         stats_window.close()
+        dashboard.stop()
         mosaic.close()
 
 

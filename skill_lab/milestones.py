@@ -49,6 +49,7 @@ class MilestoneTracker:
         
         self.reward_per_milestone = reward_per_milestone
         self.achieved: set[str] = set()
+        self.achieved_steps: dict[str, int] = {}
 
     def reset(self, env=None) -> None:
         """Reset tracker and initialize achieved set from current memory state.
@@ -57,6 +58,7 @@ class MilestoneTracker:
         already-set events as achieved, so they don't give rewards.
         """
         self.achieved.clear()
+        self.achieved_steps.clear()
 
         if env is None:
             return
@@ -96,8 +98,10 @@ class MilestoneTracker:
 
             if (memory_value & mask) > 0:
                 self.achieved.add(name)
+                step_count = getattr(env, "unwrapped", env).step_count
+                self.achieved_steps[name] = int(step_count)
                 total_reward += self.reward_per_milestone
-                print(f"[Milestone] ACHIEVED: {name} (reward +{self.reward_per_milestone})")
+                print(f"[Milestone] ACHIEVED: {name} at step {step_count} (reward +{self.reward_per_milestone})")
 
         return total_reward
 
@@ -107,4 +111,5 @@ class MilestoneTracker:
             "total_milestones": len(self.milestones),
             "achieved": len(self.achieved),
             "achieved_names": list(self.achieved),
+            "achieved_steps": dict(self.achieved_steps),
         }
