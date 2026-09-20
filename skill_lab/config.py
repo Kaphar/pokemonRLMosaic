@@ -28,7 +28,7 @@ TILE_HEIGHT = 144         # Game Boy screen height
 
 GRID_COLS = 7
 GRID_ROWS = 6
-TOTAL_TILES = GRID_COLS * GRID_ROWS  # 42 environments in mosaic
+DEFAULT_TOTAL_ENV = 56
 
 DEFAULT_MAX_STEPS = 7200  # Max steps per episode
 DEFAULT_EMULATOR_SPEED = 0  # 0=auto/turbo, 1=normal, 2=double, etc.
@@ -94,12 +94,26 @@ def _load_settings_json() -> dict[str, Any]:
     return {}
 
 
+def _save_settings_json(settings: dict[str, Any]) -> None:
+    """Save settings to settings.json."""
+    try:
+        SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+            json.dump(settings, f, indent=2)
+    except OSError:
+        pass
+
+
 _APP_SETTINGS = _load_settings_json()
 
 # --- Save on Catch Settings ---
 SAVE_ON_CATCH = _APP_SETTINGS.get("catch", {}).get("save_on_catch", True)
 SAVE_ON_CATCH_MIN_DV = _APP_SETTINGS.get("catch", {}).get("save_on_catch_min_dv", 11)
 SAVE_ON_CATCH_ENABLED = _APP_SETTINGS.get("catch", {}).get("save_on_catch_enabled", True)
+
+# --- Episode Settings ---
+MAX_STEPS = _APP_SETTINGS.get("episode", {}).get("max_steps", 7200)
+PERFECT_SOUND = _APP_SETTINGS.get("episode", {}).get("perfect_sound", True)
 
 # --- Launcher Defaults (from settings.json) ---
 SETTINGS_LAUNCHER = _APP_SETTINGS.get("launcher", {})

@@ -173,6 +173,9 @@ class RedGymEnv(Env):
         self.wild_wins = 0
         self.in_battle = False
         self.battle_type = 0
+        self._last_enemy_hp = None
+        self._last_enemy_max_hp = None
+        self._enemy_damage_dealt = 0.0
         self.wall_collisions = 0
         self._same_dir_count = 0
         self._last_dir = None
@@ -348,6 +351,7 @@ class RedGymEnv(Env):
                 "healr": self.total_healing_rew,
                 "trainer_wins": self.trainer_wins,
                 "wild_wins": self.wild_wins,
+                "enemy_damage_dealt": self._enemy_damage_dealt,
                 "game_minutes": game_minutes,
                 "wall_collisions": self.wall_collisions,
                 "in_lava": self._in_lava_zone()[0],
@@ -659,6 +663,7 @@ class RedGymEnv(Env):
             "event": self.reward_scale * self.update_max_event_rew() * 4,
             #"level": self.reward_scale * self.get_levels_reward(),
             "heal": self.reward_scale * self.total_healing_rew * 10,
+            "enemy_damage": self._enemy_damage_dealt * 0.1,
             #"op_lvl": self.reward_scale * self.update_max_op_level() * 0.2,
             #"dead": self.reward_scale * self.died_count * -0.1,
             "badge": self.reward_scale * self.get_badges() * 10,
@@ -703,6 +708,11 @@ class RedGymEnv(Env):
         if not self.in_battle and cur_battle_type != 0:
             self.in_battle = True
             self.battle_type = cur_battle_type
+            # Initialize enemy HP tracking when entering battle
+            enemy_hp = self.read_hp(0xCFE6)
+            enemy_max_hp = self.read_hp(0xCFF4)
+            self._last_enemy_hp = enemy_hp
+            self._last_enemy_max_hp = enemy_max_hp
         elif self.in_battle and cur_battle_type == 0:
             self.in_battle = False
             if self.read_hp_fraction() > 0:
@@ -714,6 +724,15 @@ class RedGymEnv(Env):
                         self.first_trainer_win_step = self.step_count
                         print(f"[Combat] 🥊 First trainer win at step {self.step_count} — speed bonus active!")
             self.battle_type = 0
+            self._last_enemy_hp = None
+            self._last_enemy_max_hp = None
+        elif self.in_battle and cur_battle_type != 0:
+            # Track enemy HP deltas for damage dealt reward
+            current_enemy_hp = self.read_hp(0xCFE6)
+            if self._last_enemy_hp is not None and current_enemy_hp < self._last_enemy_hp:
+                hp_lost = self._last_enemy_hp - current_enemy_hp
+                self._enemy_damage_dealt += hp_lost
+            self._last_enemy_hp = current_enemy_hp
 
     def read_hp_fraction(self):
         hp_sum = sum([

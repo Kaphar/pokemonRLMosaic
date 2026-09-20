@@ -72,16 +72,30 @@ STARTER_DIRECTIVES = {
 
 STAGES: dict[str, Stage] = {
 
-    "explore": Stage(
-        name="explore",
-        description="Learn basic movement and exploration.",
+    # "explore": Stage(
+    #     name="explore",
+    #     description="Learn basic movement and exploration.",
+    #     disable_start=True,
+    #     disable_select=True,
+    #     milestone_reward=big_reward, 
+    #     # milestone_multiplier=0.5,
+    #     exploration_reward=small_reward,
+    #     combat_reward=0.0,
+    #     init_state="v2/state/init.state",
+    #     max_steps=7200,
+    # ),
+
+    "progress": Stage(
+        name="progress",
+        description="Full game progression. All milestones active.",
         disable_start=True,
         disable_select=True,
-        milestone_reward=medium_reward,
+        milestone_reward=big_reward,
+        # where do we set up the milestone_multiplier. ?
         exploration_reward=small_reward,
-        combat_reward=0.0,
+        combat_reward=medium_reward,
         init_state="v2/state/init.state",
-        max_steps=7200,
+        max_steps=14400,
     ),
 
     "starter": Stage(
@@ -89,7 +103,7 @@ STAGES: dict[str, Stage] = {
         description="Get a starter Pokemon. Short episodes for fast learning.",
         disable_start=True,
         disable_select=True,
-        milestone_reward=huge_reward, # hugh , change this next training model reset. to big_reward
+        milestone_reward=big_reward,
         exploration_reward=small_reward,
         combat_reward=0.0,
         init_state="v2/state/init.state",
@@ -107,8 +121,9 @@ STAGES: dict[str, Stage] = {
         description="Learn to fight wild Pokemon.",
         disable_start=True,
         disable_select=True,
-        milestone_reward=medium_reward,
-        exploration_reward=0.0,
+        milestone_reward=big_reward,
+        # add a milestone_reward_multiplier
+        exploration_reward=0.1,
         combat_reward=medium_reward,
         init_state="v2/state/combat_start.state",
         max_steps=3600,
@@ -119,24 +134,13 @@ STAGES: dict[str, Stage] = {
         description="Learn to navigate menus. Start/Select ENABLED.",
         disable_start=False,   # ← ENABLED for menu learning
         disable_select=False,  # ← ENABLED for menu learning
-        milestone_reward=medium_reward,
-        exploration_reward=0.0,
-        combat_reward=0.0,
+        milestone_reward=big_reward,
+        exploration_reward=0.0, # should be renamed with _multiplier.
+        combat_reward=0.0,      # should be renamed with _multiplier.
         init_state="v2/state/pokemon_center.state",
         max_steps=7200,
     ),
 
-    "progress": Stage(
-        name="progress",
-        description="Full game progression. All milestones active.",
-        disable_start=True,
-        disable_select=True,
-        milestone_reward=big_reward,
-        exploration_reward=small_reward,
-        combat_reward=small_reward,
-        init_state="v2/state/init.state",
-        max_steps=14400,
-    ),
 }
 
 
