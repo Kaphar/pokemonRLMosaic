@@ -46,6 +46,7 @@ class BrowserMapDashboard:
         self._browser_opened = False
         self.map_width, self.map_height = self._read_map_size()
         self._mosaic_frame: bytes | None = None
+        self._individual_frames: dict[int, bytes] = {}  # env_index -> jpeg bytes
         self.state: dict[str, Any] = {
             "title": "Skill Lab Dashboard",
             "envs": [],
@@ -76,6 +77,28 @@ class BrowserMapDashboard:
             print(f"[MOSAIC DEBUG] Frame stored: {len(self._mosaic_frame)} bytes", flush=True)
         except Exception as e:
             print(f"[MOSAIC DEBUG] Error encoding frame: {e}", flush=True)
+
+    def set_individual_frame(self, env_index: int, frame) -> None:
+        """Store an individual emulator frame as JPEG for dynamic mosaic streaming."""
+        if frame is None:
+            return
+        if not _HAS_CV2:
+            return
+        try:
+            ok, encoded = cv2.imencode(
+                ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 75]
+            )
+            if not ok or encoded is None:
+                return
+            with self._lock:
+                self._individual_frames[env_index] = encoded.tobytes()
+        except Exception as e:
+            print(f"[INDIVIDUAL FRAME DEBUG] Error encoding frame for env {env_index}: {e}", flush=True)
+
+    def clear_individual_frames(self) -> None:
+        """Clear all individual frames."""
+        with self._lock:
+            self._individual_frames.clear()
 
     def _save_lava_zones(self) -> None:
         """Persist lava zones to lava.json so the env can read them."""
@@ -261,6 +284,14 @@ class BrowserMapDashboard:
                 if parsed.path == "/api/mosaic":
                     self._send_mosaic_frame()
                     return
+                if parsed.path.startswith("/api/individual/"):
+                    # Extract env_index from path: /api/individual/<index>
+                    try:
+                        env_index = int(parsed.path.split("/")[-1])
+                        self._send_individual_frame(env_index)
+                    except (ValueError, IndexError):
+                        self.send_error(400, "invalid env index")
+                    return
                 self.send_error(404)
 
             def do_POST(self) -> None:
@@ -313,6 +344,20 @@ class BrowserMapDashboard:
                     self.end_headers()
                     return
                 # print(f"[MOSAIC DEBUG] Serving frame: {len(frame)} bytes", flush=True) 
+                self.send_response(200)
+                self.send_header("Content-Type", "image/jpeg")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(frame)))
+                self.end_headers()
+                self.wfile.write(frame)
+
+            def _send_individual_frame(self, env_index: int) -> None:
+                with dashboard._lock:
+                    frame = dashboard._individual_frames.get(env_index)
+                if frame is None:
+                    self.send_response(204)
+                    self.end_headers()
+                    return
                 self.send_response(200)
                 self.send_header("Content-Type", "image/jpeg")
                 self.send_header("Cache-Control", "no-store")
@@ -393,6 +438,8 @@ class BrowserMapDashboard:
    <div class="tab-bar">
      <button class="tab-btn active" data-tab="map-tab">Map</button>
      <button class="tab-btn" data-tab="mosaic-tab">Mosaic Stream</button>
+     <button class="tab-btn" data-tab="dynamic-mosaic-tab">Dynamic Mosaic</button>
+     <button class="tab-btn" data-tab="inspector-tab">Environment Inspector</button>
      <button class="tab-btn" data-tab="stats-tab">Environment Stats</button>
    </div>
   <div class="tab-content">
@@ -429,6 +476,35 @@ class BrowserMapDashboard:
          </div>
          <div class="mosaic-content">
            <img id="mosaic-image" src="" alt="Mosaic stream" />
+         </div>
+       </div>
+     </div>
+     <div id="dynamic-mosaic-tab" class="tab-pane">
+       <div class="panel mosaic-panel">
+         <div class="header">
+           <div class="title">Dynamic Mosaic - Individual Streams</div>
+           <div class="badge" id="dynamic-mosaic-status">waiting…</div>
+         </div>
+         <div class="mosaic-content" id="dynamic-mosaic-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; width: 100%;"></div>
+       </div>
+     </div>
+     <div id="inspector-tab" class="tab-pane">
+       <div class="panel stats-panel">
+         <div class="header">
+           <div class="title">Environment Inspector</div>
+           <div class="badge" id="inspector-env-select-container">
+             <select id="inspector-env-select" style="background: var(--panel); color: var(--accent); border: 1px solid rgba(255,255,255,0.15); padding: 4px 8px; border-radius: 4px;"></select>
+           </div>
+         </div>
+         <div class="stats-scroll" style="overflow: auto; padding: 12px;">
+           <div id="inspector-content" style="display: flex; gap: 16px; flex-wrap: wrap;">
+             <div style="flex: 0 0 320px;">
+               <img id="inspector-screen" src="" alt="Emulator screen" style="width: 100%; border-radius: 8px; border: 1px solid rgba(255,255,255,0.08);" />
+             </div>
+             <div style="flex: 1; min-width: 300px;">
+               <div id="inspector-details" style="color: #eef4ff; font-family: monospace; white-space: pre-wrap;"></div>
+             </div>
+           </div>
          </div>
        </div>
      </div>
@@ -470,7 +546,15 @@ class BrowserMapDashboard:
     const status = document.getElementById('status');
     const mosaicImage = document.getElementById('mosaic-image');
     const mosaicStatus = document.getElementById('mosaic-status');
+    const dynamicMosaicGrid = document.getElementById('dynamic-mosaic-grid');
+    const dynamicMosaicStatus = document.getElementById('dynamic-mosaic-status');
+    const inspectorEnvSelect = document.getElementById('inspector-env-select');
+    const inspectorScreen = document.getElementById('inspector-screen');
+    const inspectorDetails = document.getElementById('inspector-details');
     let mosaicObjectUrl = null;
+    let dynamicMosaicObjectUrls = {};
+    let inspectorObjectUrl = null;
+    let selectedInspectorEnv = 0;
     mosaicImage.addEventListener('error', function() {{
       mosaicStatus.textContent = 'offline';
     }});
@@ -581,6 +665,22 @@ class BrowserMapDashboard:
       }}).join('');
       envCount.textContent = String(envs.length);
     }}
+
+    function updateInspectorSelect(envs) {
+      const currentVal = inspectorEnvSelect.value;
+      inspectorEnvSelect.innerHTML = envs.map(function(env) {
+        return '<option value="' + env.env_index + '">Env ' + (env.env_index + 1) + ' - HP: ' + (env.hp * 100).toFixed(0) + '%</option>';
+      }).join('');
+      if (currentVal !== '' && envs.some(e => e.env_index == currentVal)) {
+        inspectorEnvSelect.value = currentVal;
+      }
+      selectedInspectorEnv = parseInt(inspectorEnvSelect.value) || 0;
+    }
+
+    inspectorEnvSelect.addEventListener('change', function() {
+      selectedInspectorEnv = parseInt(this.value) || 0;
+      updateInspectorScreen();
+    });
 
     function update() {{
       fetch('/api/state')
