@@ -14,8 +14,6 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 import webbrowser
 
-from skill_lab.config import SETTINGS_FILE, _load_settings_json, _save_settings_json
-
 INSPECTOR_WATCH_ADDRESSES = [
     0xD356,  # badges
     0xD35E,  # map
@@ -76,6 +74,7 @@ class BrowserMapDashboard:
         self._browser_opened = False
         self.map_width, self.map_height = self._read_map_size()
         self._mosaic_frame: bytes | None = None
+        
         self._fallback_ko_counts: dict[int, int] = {}
         self._item_counts: dict[int, int] = {}
         self._last_bag_signatures: dict[int, tuple[tuple[int, int], ...] | None] = {}
@@ -88,6 +87,7 @@ class BrowserMapDashboard:
         self._inspector_data: dict[str, Any] = {}
         self._config: dict[str, Any] = {}
         self._pending_saves: dict[str, Any] = {}
+
         self.state: dict[str, Any] = {
             "title": "Skill Lab Dashboard",
             "envs": [],
@@ -115,9 +115,31 @@ class BrowserMapDashboard:
                 return
             with self._lock:
                 self._mosaic_frame = encoded.tobytes()
-            # print(f"[MOSAIC DEBUG] Frame stored: {len(self._mosaic_frame)} bytes", flush=True)
+            #print(f"[MOSAIC DEBUG] Frame stored: {len(self._mosaic_frame)} bytes", flush=True)
         except Exception as e:
             print(f"[MOSAIC DEBUG] Error encoding frame: {e}", flush=True)
+
+    def set_individual_frame(self, env_index: int, frame) -> None:
+        """Store an individual emulator frame as JPEG for dynamic mosaic streaming."""
+        if frame is None:
+            return
+        if not _HAS_CV2:
+            return
+        try:
+            ok, encoded = cv2.imencode(
+                ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 75]
+            )
+            if not ok or encoded is None:
+                return
+            with self._lock:
+                self._individual_frames[env_index] = encoded.tobytes()
+        except Exception as e:
+            print(f"[INDIVIDUAL FRAME DEBUG] Error encoding frame for env {env_index}: {e}", flush=True)
+
+    def clear_individual_frames(self) -> None:
+        """Clear all individual frames."""
+        with self._lock:
+            self._individual_frames.clear()
 
     def _save_lava_zones(self) -> None:
         """Persist lava zones to lava.json so the env can read them."""
@@ -741,32 +763,6 @@ class BrowserMapDashboard:
                 if parsed.path == "/api/mosaic":
                     self._send_mosaic_frame()
                     return
-                if parsed.path == "/api/inspector":
-                    with dashboard._lock:
-                        inspector = dashboard._inspector_data
-                    data = json.dumps(dashboard._json_safe(inspector)).encode("utf-8")
-                    self.send_response(200)
-                    self.send_header("Content-Type", "application/json")
-                    self.send_header("Cache-Control", "no-store")
-                    self.send_header("Content-Length", str(len(data)))
-                    self.end_headers()
-                    self.wfile.write(data)
-                    return
-                if parsed.path == "/api/config":
-                    settings = _load_settings_json()
-                    config_data = {
-                        "max_steps": settings.get("episode", {}).get("max_steps", 7200),
-                        "perfect_sound": settings.get("episode", {}).get("perfect_sound", True),
-                        "save_on_catch": settings.get("catch", {}).get("save_on_catch", True),
-                    }
-                    data = json.dumps(config_data).encode("utf-8")
-                    self.send_response(200)
-                    self.send_header("Content-Type", "application/json")
-                    self.send_header("Cache-Control", "no-store")
-                    self.send_header("Content-Length", str(len(data)))
-                    self.end_headers()
-                    self.wfile.write(data)
-                    return
                 self.send_error(404)
 
             def do_POST(self) -> None:
@@ -782,14 +778,6 @@ class BrowserMapDashboard:
                     with dashboard._lock:
                         dashboard._config.update(payload)
                         dashboard._pending_saves["config"] = payload.copy()
-                    # Persist to settings.json
-                    settings = _load_settings_json()
-                    settings.setdefault("episode", {})
-                    settings["episode"]["max_steps"] = payload.get("max_steps", settings["episode"].get("max_steps", 7200))
-                    settings["episode"]["perfect_sound"] = payload.get("perfect_sound", settings["episode"].get("perfect_sound", True))
-                    settings.setdefault("catch", {})
-                    settings["catch"]["save_on_catch"] = payload.get("save_on_catch", settings["catch"].get("save_on_catch", True))
-                    _save_settings_json(settings)
                     self.send_response(200)
                     self.send_header("Content-Type", "application/json")
                     self.end_headers()
@@ -843,6 +831,20 @@ class BrowserMapDashboard:
                     self.end_headers()
                     return
                 # print(f"[MOSAIC DEBUG] Serving frame: {len(frame)} bytes", flush=True) 
+                self.send_response(200)
+                self.send_header("Content-Type", "image/jpeg")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(frame)))
+                self.end_headers()
+                self.wfile.write(frame)
+
+            def _send_individual_frame(self, env_index: int) -> None:
+                with dashboard._lock:
+                    frame = dashboard._individual_frames.get(env_index)
+                if frame is None:
+                    self.send_response(204)
+                    self.end_headers()
+                    return
                 self.send_response(200)
                 self.send_header("Content-Type", "image/jpeg")
                 self.send_header("Cache-Control", "no-store")
@@ -934,13 +936,10 @@ class BrowserMapDashboard:
 </head>
 <body>
    <div class="tab-bar">
-      <button class="tab-btn active" data-tab="map-tab">Map</button>
-      <button class="tab-btn" data-tab="mosaic-tab">Mosaic Stream</button>
-      <button class="tab-btn" data-tab="stats-tab">Environment Stats</button>
-      <button class="tab-btn" data-tab="config-tab">Config</button>
-      <button class="tab-btn" data-tab="memory-inspector-tab">Memory Inspector</button>
-      
-    </div>
+     <button class="tab-btn active" data-tab="map-tab">Map</button>
+     <button class="tab-btn" data-tab="mosaic-tab">Mosaic Stream</button>
+     <button class="tab-btn" data-tab="stats-tab">Environment Stats</button>
+   </div>
   <div class="tab-content">
     <div id="map-tab" class="tab-pane active">
       <div class="panel map-panel">
@@ -975,6 +974,35 @@ class BrowserMapDashboard:
          </div>
          <div class="mosaic-content">
            <img id="mosaic-image" src="" alt="Mosaic stream" />
+         </div>
+       </div>
+     </div>
+     <div id="dynamic-mosaic-tab" class="tab-pane">
+       <div class="panel mosaic-panel">
+         <div class="header">
+           <div class="title">Dynamic Mosaic - Individual Streams</div>
+           <div class="badge" id="dynamic-mosaic-status">waiting…</div>
+         </div>
+         <div class="mosaic-content" id="dynamic-mosaic-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; width: 100%;"></div>
+       </div>
+     </div>
+     <div id="inspector-tab" class="tab-pane">
+       <div class="panel stats-panel">
+         <div class="header">
+           <div class="title">Environment Inspector</div>
+           <div class="badge" id="inspector-env-select-container">
+             <select id="inspector-env-select" style="background: var(--panel); color: var(--accent); border: 1px solid rgba(255,255,255,0.15); padding: 4px 8px; border-radius: 4px;"></select>
+           </div>
+         </div>
+         <div class="stats-scroll" style="overflow: auto; padding: 12px;">
+           <div id="inspector-content" style="display: flex; gap: 16px; flex-wrap: wrap;">
+             <div style="flex: 0 0 320px;">
+               <img id="inspector-screen" src="" alt="Emulator screen" style="width: 100%; border-radius: 8px; border: 1px solid rgba(255,255,255,0.08);" />
+             </div>
+             <div style="flex: 1; min-width: 300px;">
+               <div id="inspector-details" style="color: #eef4ff; font-family: monospace; white-space: pre-wrap;"></div>
+             </div>
+           </div>
          </div>
        </div>
      </div>
@@ -1031,7 +1059,7 @@ class BrowserMapDashboard:
           </div>
         </div>
       </div>
-      <div id="memory-inspector-tab" class="tab-pane">
+      <div id="inspector-tab" class="tab-pane">
         <div class="panel inspector-panel">
           <div class="header">
             <div class="title">Observation Inspector</div>
@@ -1057,11 +1085,19 @@ class BrowserMapDashboard:
     const envCount = document.getElementById('env-count');
     const status = document.getElementById('status');
     const mosaicImage = document.getElementById('mosaic-image');
-    // const mosaicStatus = document.getElementById('mosaic-status');
+    const mosaicStatus = document.getElementById('mosaic-status');
+    const dynamicMosaicGrid = document.getElementById('dynamic-mosaic-grid');
+    const dynamicMosaicStatus = document.getElementById('dynamic-mosaic-status');
+    const inspectorEnvSelect = document.getElementById('inspector-env-select');
+    const inspectorScreen = document.getElementById('inspector-screen');
+    const inspectorDetails = document.getElementById('inspector-details');
     let mosaicObjectUrl = null;
-    // mosaicImage.addEventListener('error', function() {{
-    //   mosaicStatus.textContent = 'offline';
-    // }});
+    let dynamicMosaicObjectUrls = {};
+    let inspectorObjectUrl = null;
+    let selectedInspectorEnv = 0;
+    mosaicImage.addEventListener('error', function() {{
+      mosaicStatus.textContent = 'offline';
+    }});
     const zoomInBtn = document.getElementById('zoom-in');
     const zoomOutBtn = document.getElementById('zoom-out');
     const zoomResetBtn = document.getElementById('zoom-reset');
@@ -1070,7 +1106,6 @@ class BrowserMapDashboard:
     var maxStepsSlider = document.getElementById('max-steps');
     var maxStepsValue = document.getElementById('max-steps-value');
     var saveOnCatchCheckbox = document.getElementById('save-on-catch');
-    var perfectSoundCheckbox = document.getElementById('perfect-sound');
     var applyConfigBtn = document.getElementById('apply-config-btn');
     var configStatus = document.getElementById('config-status');
     var inspectorBody = document.getElementById('inspector-body');
@@ -1084,34 +1119,11 @@ class BrowserMapDashboard:
       }});
     }}
 
-    // Load saved config on page load
-    function loadConfig() {{
-      fetch('/api/config')
-        .then(function(r) {{ return r.json(); }})
-        .then(function(data) {{
-          if (maxStepsSlider && data.max_steps !== undefined) {{
-            maxStepsSlider.value = data.max_steps;
-            maxStepsValue.textContent = String(data.max_steps);
-          }}
-          if (saveOnCatchCheckbox && data.save_on_catch !== undefined) {{
-            saveOnCatchCheckbox.checked = data.save_on_catch;
-          }}
-          if (perfectSoundCheckbox && data.perfect_sound !== undefined) {{
-            perfectSoundCheckbox.checked = data.perfect_sound;
-          }}
-        }})
-        .catch(function() {{
-          // ignore errors, use defaults
-        }});
-    }}
-    loadConfig();
-
     if (applyConfigBtn) {{
       applyConfigBtn.addEventListener('click', function() {{
         var payload = {{
           max_steps: parseInt(maxStepsSlider.value, 10),
           save_on_catch: saveOnCatchCheckbox.checked,
-          perfect_sound: perfectSoundCheckbox.checked,
         }};
         configStatus.textContent = 'saving...';
         fetch('/api/config', {{
@@ -1154,7 +1166,7 @@ class BrowserMapDashboard:
     }}
 
     function isInspectorTabActive() {{
-      return document.getElementById('memory-inspector-tab').classList.contains('active');
+      return document.getElementById('inspector-tab').classList.contains('active');
     }}
      let zoomScale = 1;
     let panX = 0;
@@ -1256,6 +1268,22 @@ class BrowserMapDashboard:
       }}).join('');
       envCount.textContent = String(envs.length);
     }}
+
+    function updateInspectorSelect(envs) {
+      const currentVal = inspectorEnvSelect.value;
+      inspectorEnvSelect.innerHTML = envs.map(function(env) {
+        return '<option value="' + env.env_index + '">Env ' + (env.env_index + 1) + ' - HP: ' + (env.hp * 100).toFixed(0) + '%</option>';
+      }).join('');
+      if (currentVal !== '' && envs.some(e => e.env_index == currentVal)) {
+        inspectorEnvSelect.value = currentVal;
+      }
+      selectedInspectorEnv = parseInt(inspectorEnvSelect.value) || 0;
+    }
+
+    inspectorEnvSelect.addEventListener('change', function() {
+      selectedInspectorEnv = parseInt(this.value) || 0;
+      updateInspectorScreen();
+    });
 
     function update() {{
       fetch('/api/state')
@@ -1477,8 +1505,7 @@ class BrowserMapDashboard:
       fetch('/api/mosaic', {{ cache: 'no-store' }})
         .then(function(r) {{
           if (r.status === 204) {{
-            // mosaicStatus.textContent = 'no stream';
-            console.log('no stream');
+            mosaicStatus.textContent = 'no stream';
             if (mosaicObjectUrl) {{
               URL.revokeObjectURL(mosaicObjectUrl);
               mosaicObjectUrl = null;
@@ -1495,11 +1522,10 @@ class BrowserMapDashboard:
           }}
           mosaicObjectUrl = URL.createObjectURL(blob);
           mosaicImage.src = mosaicObjectUrl;
-          // mosaicStatus.textContent = 'live';
+          mosaicStatus.textContent = 'live';
         }})
         .catch(function() {{
-          // mosaicStatus.textContent = 'offline';
-          console.log('mosaic offline')
+          mosaicStatus.textContent = 'offline';
         }});
     }}
 
