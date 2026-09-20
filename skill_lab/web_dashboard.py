@@ -88,6 +88,7 @@ class BrowserMapDashboard:
         self._config: dict[str, Any] = {}
         self._pending_saves: dict[str, Any] = {}
 
+        self._individual_frames: dict[int, bytes] = {}  # env_index -> jpeg bytes
         self.state: dict[str, Any] = {
             "title": "Skill Lab Dashboard",
             "envs": [],
@@ -763,6 +764,14 @@ class BrowserMapDashboard:
                 if parsed.path == "/api/mosaic":
                     self._send_mosaic_frame()
                     return
+                if parsed.path.startswith("/api/individual/"):
+                    # Extract env_index from path: /api/individual/<index>
+                    try:
+                        env_index = int(parsed.path.split("/")[-1])
+                        self._send_individual_frame(env_index)
+                    except (ValueError, IndexError):
+                        self.send_error(400, "invalid env index")
+                    return
                 self.send_error(404)
 
             def do_POST(self) -> None:
@@ -938,6 +947,8 @@ class BrowserMapDashboard:
    <div class="tab-bar">
      <button class="tab-btn active" data-tab="map-tab">Map</button>
      <button class="tab-btn" data-tab="mosaic-tab">Mosaic Stream</button>
+     <button class="tab-btn" data-tab="dynamic-mosaic-tab">Dynamic Mosaic</button>
+     <button class="tab-btn" data-tab="inspector-tab">Environment Inspector</button>
      <button class="tab-btn" data-tab="stats-tab">Environment Stats</button>
    </div>
   <div class="tab-content">
