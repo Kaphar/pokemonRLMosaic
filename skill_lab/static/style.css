@@ -129,7 +129,7 @@ tbody tr:nth-child(odd) { background: rgba(255, 255, 255, 0.01); }
 
 #dynamic-mosaic-grid { display: grid !important; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)) !important; gap: 12px !important; width: 100% !important; height: auto !important; overflow: visible !important; align-content: start !important; }
 .dynamic-mosaic-cell { position: relative; border-radius: 8px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.08); cursor: pointer; transition: all 0.2s ease; background: rgba(0, 0, 0, 0.3); aspect-ratio: 160/144; flex-shrink: 0; }
-.dynamic-mosaic-cell img { width: 100% !important; height: 100% !important; object-fit: contain !important; display: block !important; background: #000; transition: opacity 0.3s ease; -webkit-transition: opacity 0.3s ease; }
+.dynamic-mosaic-cell img { width: 100% !important; height: 100% !important; object-fit: contain !important; display: block !important; background: #000; }
 
 .dynamic-mosaic-toolbar { display: flex; align-items: center; gap: 16px; padding: 8px 12px; background: rgba(0, 0, 0, 0.2); border-radius: 6px; margin-bottom: 8px; }
 .pager-btn { background: var(--panel); color: var(--text); border: 1px solid rgba(255, 255, 255, 0.15); padding: 4px 12px; border-radius: 4px; cursor: pointer; }
