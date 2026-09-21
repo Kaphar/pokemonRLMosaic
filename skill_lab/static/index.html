@@ -67,6 +67,11 @@
             <input type="checkbox" id="dynamic-mosaic-live-update" checked style="accent-color: var(--accent);" />
             Update Live
           </label>
+          <label style="margin-left: 20px; color: #a0aec0; font-size: 0.85rem; display: flex; align-items: center; gap: 6px;">
+            <span>Poll:</span>
+            <input type="range" id="dynamic-mosaic-poll" min="200" max="5000" step="100" value="200" style="accent-color: var(--accent);" />
+            <span id="dynamic-mosaic-poll-value" style="color: var(--accent); font-weight: 600; min-width: 4ch;">200ms</span>
+          </label>
           <button id="dynamic-mosaic-prev-btn" class="pager-btn">◀ Prev</button>
           <span id="dynamic-mosaic-page-indicator" style="color: #718096; font-size: 0.85rem;">Page 1</span>
           <button id="dynamic-mosaic-next-btn" class="pager-btn">Next ▶</button>
