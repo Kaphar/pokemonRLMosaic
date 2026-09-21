@@ -1779,7 +1779,7 @@ class BrowserMapDashboard:
       const img = document.getElementById('inspector-screen');
       if (!img) return;
       
-      const newUrl = '/api/individual/' + selectedInspectorEnv + '?t=' + Date.now();
+      const newUrl = '/api/inspector-screen?env=' + selectedInspectorEnv + '&t=' + Date.now();
       if (inspectorObjectUrl) {{
         URL.revokeObjectURL(inspectorObjectUrl);
       }}
