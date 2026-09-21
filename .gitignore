@@ -1,1 +1,43 @@
-Nothing should be ignored in this case, as only a Python source file (`skill_lab/web_dashboard.py`) was modified and there are no build artifacts, dependencies, or temporary files in the changes.
+# Python
+__pycache__/
+*/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Dependencies
+.venv/
+venv/
+env/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Coverage
+.coverage
+htmlcov/
+coverage/
+
+# OS
+.DS_Store
+Thumbs.db
+
+mosaic_sessions
+skill_lab/starter_report.html
+skill_lab/envs/*
+skill_lab/backup
+PokemonRed.gb
+PokemonBlue.gb
+PokemonBlue.gb.ram
+PokemonRed.gb.ram
