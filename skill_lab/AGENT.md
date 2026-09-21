@@ -88,7 +88,7 @@ small_reward = 0.1      # Minor progress
 medium_reward = 2.0     # Standard achievements
 big_reward = 20.0       # Significant milestones
 huge_reward = 200.0     # Major accomplishments
-PERFECT_REWARD = 10000.0  # Perfect IV starter
+# PERFECT_REWARD = 10000.0  # Perfect IV starter
 ```
 
 **Reward Flow**:

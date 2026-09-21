@@ -12,6 +12,7 @@ import gymnasium
 import numpy as np
 from pyboy.utils import WindowEvent
 
+from skill_lab.bag_reader import BAG_COUNT_ADDRESS, BAG_ITEMS_ADDRESS, PokemonData
 from skill_lab.config import (
     SAVE_ON_CATCH,
     SAVE_ON_CATCH_ENABLED,
@@ -71,6 +72,7 @@ class SkillLabWrapper(gymnasium.Wrapper):
 
         # Track party size to detect new catches
         self._previous_party_size = 0
+        self._last_bag_signature: tuple[tuple[int, int], ...] | None = None
         self._last_summary_map_id = int(getattr(self.env.unwrapped, "current_map_id", 0))
 
         # --- Detect action indices ---
@@ -471,6 +473,45 @@ class SkillLabWrapper(gymnasium.Wrapper):
                     self._save_caught_pokemon(party[slot], slot)
         self._previous_party_size = current_size
 
+    def _read_bag_signature(self) -> tuple[tuple[int, int], ...] | None:
+        """Read a snapshot of bag contents for change detection."""
+        try:
+            memory = self.env.unwrapped.pyboy.memory
+            count = min(int(memory[BAG_COUNT_ADDRESS]), 40)
+            signature: list[tuple[int, int]] = []
+            for slot in range(count):
+                address = BAG_ITEMS_ADDRESS + slot * 2
+                item_id = int(memory[address])
+                if item_id == 0:
+                    break
+                quantity = int(memory[address + 1])
+                signature.append((item_id, quantity))
+            return tuple(signature)
+        except (IndexError, ValueError, TypeError):
+            return None
+
+    def _check_for_new_items(self) -> None:
+        """Check if any new items were received and log them in yellow."""
+        current_signature = self._read_bag_signature()
+        if current_signature is None:
+            return
+        if self._last_bag_signature is None:
+            self._last_bag_signature = current_signature
+            return
+        if current_signature != self._last_bag_signature:
+            # Find newly added items (not present in previous signature)
+            prev_items: dict[int, int] = {}
+            for item_id, qty in self._last_bag_signature:
+                prev_items[item_id] = prev_items.get(item_id, 0) + qty
+            for item_id, qty in current_signature:
+                if item_id not in prev_items:
+                    name = PokemonData.get_item_name(item_id)
+                    print(
+                        f"\033[33m[{self.env_name}] ITEM received: "
+                        f"id=0x{item_id:02X} ({name})\033[0m"
+                    )
+            self._last_bag_signature = current_signature
+
     def _read_starter_dvs(self) -> tuple[int, int, int, int] | None:
         """Read the four stored DVs for the first party Pokemon."""
         party = self.party_reader.read_party({
@@ -717,6 +758,11 @@ class SkillLabWrapper(gymnasium.Wrapper):
         # Check for new Pokemon catches (after step to catch the updated party)
         self._check_for_new_catches()
 
+        # ========================================
+        # ITEM DETECTION: Check for newly received items
+        # ========================================
+        self._check_for_new_items()
+
         return observation, reward, terminated, truncated, info
 
     def reset(self, **kwargs):
@@ -735,6 +781,7 @@ class SkillLabWrapper(gymnasium.Wrapper):
         self._replay_index = 0
         self._replay_frame = 0
         self._previous_party_size = 0
+        self._last_bag_signature = None
 
         # The standalone plugin replay loads the recording's state before
         # priming. Do the same instead of relying on per-environment defaults.

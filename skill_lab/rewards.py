@@ -3,8 +3,8 @@
 small_reward = 0.1
 medium_reward = 2.0
 big_reward = 10.0
-huge_reward = 100.0
-PERFECT_REWARD = 10000.0
+huge_reward = 30.0
+PERFECT_REWARD = 100.0
 
 # Canonical baseline values used across profiles and stage definitions.
 # As multipliers, stage values can be tuned per phase; they are still expected
@@ -12,13 +12,14 @@ PERFECT_REWARD = 10000.0
 BASELINE_REWARD_VALUES = {
     "milestone": big_reward,
     "exploration": small_reward,
-    "combat": medium_reward,
-    "capture": medium_reward, # if doesn't have it yet...
-    "healing": big_reward,
+    "combat": medium_reward, # we need to diferenciate wild pkmn and trainer fight, and key fights (later)
     "wild_pokemon": medium_reward,
+    "capture": big_reward, # if doesn't have it yet...
+    "healing": big_reward,
     "trainer": big_reward,
 }
 
+# this seems not very useful, can't we just name properly in the files directly instead of using aliases ?
 REWARD_MULTIPLIER_ALIASES = {
     "milestone": ("milestone_reward_multiplier", "milestone_reward"),
     "exploration": ("exploration_reward_multiplier", "exploration_reward"),
@@ -118,8 +119,9 @@ def calculate_starter_reward(
 		+ (special_dv % 2)
 	)
 	effective_dvs = (*stored_dvs, hp_dv)
-	if all(dv == 15 for dv in effective_dvs):
-		return PERFECT_REWARD
+	# if all(dv == 15 for dv in effective_dvs):
+	# 	return PERFECT_REWARD
+    # I think having disproportionate rewards is not helpful to learning.
 
 	modifier = 1.0 + (sum(effective_dvs) / (5 * 15))
 	return big_reward * modifier

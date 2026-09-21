@@ -151,7 +151,7 @@ def find_latest_checkpoint(checkpoint_dir: Path) -> Path | None:
 
 
 def parse_args() -> argparse.Namespace:
-    from skill_lab.config import ACTION_FREQ, DEFAULT_INIT_STATE, DEFAULT_ROM, DEFAULT_MAX_STEPS, TOTAL_TILES, DEFAULT_ENV_AMOUNT
+    from skill_lab.config import ACTION_FREQ, DEFAULT_INIT_STATE, DEFAULT_ROM, DEFAULT_MAX_STEPS, DEFAULT_ENV_AMOUNT
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", help="PPO checkpoint to load (skips training)")
     parser.add_argument("--dry-run", action="store_true", help="Run random actions, no training")
