@@ -121,15 +121,14 @@ class BrowserMapDashboard:
             print(f"[MOSAIC DEBUG] Error encoding frame: {e}", flush=True)
 
     def set_individual_frame(self, env_index: int, frame) -> None:
-        """Store an individual emulator frame as JPEG for dynamic mosaic streaming."""
+        """Store an individual emulator frame as PNG for dynamic mosaic streaming (lossless quality)."""
         if frame is None:
             return
         if not _HAS_CV2:
             return
         try:
-            ok, encoded = cv2.imencode(
-                ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 75]
-            )
+            # Use PNG for lossless quality instead of JPEG compression
+            ok, encoded = cv2.imencode(".png", frame)
             if not ok or encoded is None:
                 return
             with self._lock:
@@ -855,7 +854,7 @@ class BrowserMapDashboard:
                     self.end_headers()
                     return
                 self.send_response(200)
-                self.send_header("Content-Type", "image/jpeg")
+                self.send_header("Content-Type", "image/png")
                 self.send_header("Cache-Control", "no-store")
                 self.send_header("Content-Length", str(len(frame)))
                 self.end_headers()
@@ -984,7 +983,15 @@ class BrowserMapDashboard:
            <div class="title">Dynamic Mosaic - Individual Streams</div>
            <div class="badge" id="dynamic-mosaic-status">waiting…</div>
          </div>
-         <div class="mosaic-content" id="dynamic-mosaic-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; width: 100%;"></div>
+         <div style="display: flex; align-items: center; gap: 16px; padding: 8px 12px; background: rgba(0,0,0,0.2); border-radius: 6px; margin-bottom: 8px;">
+           <label style="color: #a0aec0; font-size: 0.85rem;">Visible Environments:</label>
+           <input type="range" id="dynamic-mosaic-page-size" min="6" max="100" step="2" value="42" style="flex: 1; accent-color: var(--accent);" />
+           <span id="dynamic-mosaic-page-size-value" style="color: var(--accent); font-weight: 600; min-width: 3ch;">42</span>
+           <button id="dynamic-mosaic-prev-btn" style="background: var(--panel); color: var(--text); border: 1px solid rgba(255,255,255,0.15); padding: 4px 12px; border-radius: 4px; cursor: pointer;">◀ Prev</button>
+           <span id="dynamic-mosaic-page-indicator" style="color: #718096; font-size: 0.85rem;">Page 1</span>
+           <button id="dynamic-mosaic-next-btn" style="background: var(--panel); color: var(--text); border: 1px solid rgba(255,255,255,0.15); padding: 4px 12px; border-radius: 4px; cursor: pointer;">Next ▶</button>
+         </div>
+         <div class="mosaic-content" id="dynamic-mosaic-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; width: 100%;"></div>
        </div>
      </div>
      <div id="inspector-tab" class="tab-pane">
@@ -1089,6 +1096,11 @@ class BrowserMapDashboard:
     const mosaicStatus = document.getElementById('mosaic-status');
     const dynamicMosaicGrid = document.getElementById('dynamic-mosaic-grid');
     const dynamicMosaicStatus = document.getElementById('dynamic-mosaic-status');
+    const dynamicMosaicPageSize = document.getElementById('dynamic-mosaic-page-size');
+    const dynamicMosaicPageSizeValue = document.getElementById('dynamic-mosaic-page-size-value');
+    const dynamicMosaicPrevBtn = document.getElementById('dynamic-mosaic-prev-btn');
+    const dynamicMosaicNextBtn = document.getElementById('dynamic-mosaic-next-btn');
+    const dynamicMosaicPageIndicator = document.getElementById('dynamic-mosaic-page-indicator');
     const inspectorEnvSelect = document.getElementById('inspector-env-select');
     const inspectorScreen = document.getElementById('inspector-screen');
     const inspectorDetails = document.getElementById('inspector-details');
@@ -1096,6 +1108,8 @@ class BrowserMapDashboard:
     let dynamicMosaicObjectUrls = {{}};
     let inspectorObjectUrl = null;
     let selectedInspectorEnv = 0;
+    let dynamicMosaicCurrentPage = 0;
+    let dynamicMosaicPageSizeVal = 42;
     mosaicImage.addEventListener('error', function() {{
       mosaicStatus.textContent = 'offline';
     }});
@@ -1530,15 +1544,66 @@ class BrowserMapDashboard:
         }});
     }}
 
+    // Dynamic mosaic pagination controls
+    dynamicMosaicPageSize.addEventListener('input', function() {{
+      dynamicMosaicPageSizeVal = parseInt(this.value, 10);
+      dynamicMosaicPageSizeValue.textContent = dynamicMosaicPageSizeVal.toString();
+      dynamicMosaicCurrentPage = 0;
+      if (document.getElementById('dynamic-mosaic-tab').classList.contains('active')) {{
+        const envCount = lastState.envs ? lastState.envs.length : 0;
+        if (envCount > 0) {{
+          updateDynamicMosaic(envCount);
+        }}
+      }}
+    }});
+
+    dynamicMosaicPrevBtn.addEventListener('click', function() {{
+      if (dynamicMosaicCurrentPage > 0) {{
+        dynamicMosaicCurrentPage--;
+        if (document.getElementById('dynamic-mosaic-tab').classList.contains('active')) {{
+          const envCount = lastState.envs ? lastState.envs.length : 0;
+          if (envCount > 0) {{
+            updateDynamicMosaic(envCount);
+          }}
+        }}
+      }}
+    }});
+
+    dynamicMosaicNextBtn.addEventListener('click', function() {{
+      const envCount = lastState.envs ? lastState.envs.length : 0;
+      const maxPage = Math.max(0, Math.ceil(envCount / dynamicMosaicPageSizeVal) - 1);
+      if (dynamicMosaicCurrentPage < maxPage) {{
+        dynamicMosaicCurrentPage++;
+        if (document.getElementById('dynamic-mosaic-tab').classList.contains('active')) {{
+          const envCount = lastState.envs ? lastState.envs.length : 0;
+          if (envCount > 0) {{
+            updateDynamicMosaic(envCount);
+          }}
+        }}
+      }}
+    }});
+
     function updateDynamicMosaic(envCount) {{
       const grid = document.getElementById('dynamic-mosaic-grid');
       if (!grid) return;
+
+      // Calculate pagination
+      const maxPage = Math.max(0, Math.ceil(envCount / dynamicMosaicPageSizeVal) - 1);
+      if (dynamicMosaicCurrentPage > maxPage) {{
+        dynamicMosaicCurrentPage = maxPage;
+      }}
+      const startIndex = dynamicMosaicCurrentPage * dynamicMosaicPageSizeVal;
+      const endIndex = Math.min(startIndex + dynamicMosaicPageSizeVal, envCount);
+      const visibleCount = endIndex - startIndex;
       
-      // Clear existing cells if count changed
+      // Update page indicator
+      dynamicMosaicPageIndicator.textContent = 'Page ' + (dynamicMosaicCurrentPage + 1) + ' of ' + (maxPage + 1);
+
+      // Clear existing cells if count changed or we're on a different page
       const currentCells = grid.querySelectorAll('.dynamic-mosaic-cell');
-      if (currentCells.length !== envCount) {{
+      if (currentCells.length !== visibleCount) {{
         grid.innerHTML = '';
-        for (let i = 0; i < envCount; i++) {{
+        for (let i = startIndex; i < endIndex; i++) {{
           const cell = document.createElement('div');
           cell.className = 'dynamic-mosaic-cell';
           cell.onclick = (function(idx) {{
@@ -1546,33 +1611,33 @@ class BrowserMapDashboard:
               selectInspectorEnv(idx);
             }};
           }})(i);
-          
+
           const img = document.createElement('img');
           img.id = 'dynamic-frame-' + i;
           img.alt = 'Env ' + (i + 1);
           img.addEventListener('error', function() {{
             this.style.opacity = '0.3';
           }});
-          
+
           const label = document.createElement('div');
           label.style.cssText = 'position: absolute; top: 4px; left: 4px; background: rgba(15, 22, 34, 0.85); padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; color: var(--accent); font-weight: 600;';
           label.textContent = 'E' + (i + 1);
-          
+
           cell.appendChild(img);
           cell.appendChild(label);
           grid.appendChild(cell);
         }}
       }}
-      
-      // Update each frame
-      for (let i = 0; i < envCount; i++) {{
+
+      // Update each visible frame
+      for (let i = startIndex; i < endIndex; i++) {{
         const img = document.getElementById('dynamic-frame-' + i);
         if (img) {{
           const newUrl = '/api/individual/' + i + '?t=' + Date.now();
           img.src = newUrl;
         }}
       }}
-      dynamicMosaicStatus.textContent = 'live (' + envCount + ' streams)';
+      dynamicMosaicStatus.textContent = 'live (' + envCount + ' streams, showing ' + visibleCount + ')';
     }}
 
     function selectInspectorEnv(envIndex) {{
