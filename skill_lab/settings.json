@@ -8,5 +8,9 @@
     "save_on_catch": true,
     "save_on_catch_enabled": true,
     "save_on_catch_min_dv": 11
+  },
+  "episode": {
+    "max_steps": 2880,
+    "perfect_sound": true
   }
 }
