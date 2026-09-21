@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="svg-dims" content="__SVG_W__,__SVG_H__" />
+  <title>Skill Lab Dashboard</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+   <div class="tab-bar">
+     <button class="tab-btn active" data-tab="map-tab">Map</button>
+     <button class="tab-btn" data-tab="mosaic-tab">Mosaic Stream</button>
+     <button class="tab-btn" data-tab="dynamic-mosaic-tab">Dynamic Mosaic</button>
+     <button class="tab-btn" data-tab="inspector-tab">Environment Inspector</button>
+     <button class="tab-btn" data-tab="stats-tab">Environment Stats</button>
+     <button class="tab-btn" data-tab="config-tab">Environment Config</button>
+   </div>
+  <div class="tab-content">
+    <div id="map-tab" class="tab-pane active">
+      <div class="panel map-panel">
+        <div class="map-wrap">
+          <svg id="map" viewBox="0 0 __SVG_W__ __SVG_H__" preserveAspectRatio="xMidYMid meet">
+            <g id="map-zoom-group">
+              <image id="map-image" href="/map.png" x="0" y="0" width="__SVG_W__" height="__SVG_H__" preserveAspectRatio="none" />
+              <g id="lava-layer"></g>
+              <g id="env-layer"></g>
+              <g id="highlight-layer"></g>
+            </g>
+          </svg>
+          <div class="map-controls">
+            <div class="zoom-h">
+              <button id="zoom-in" title="Zoom in (+)">+</button>
+              <button id="zoom-reset" title="Reset zoom">R</button>
+              <button id="zoom-out" title="Zoom out (-)">-</button>
+            </div>
+            <button id="toggle-lava" title="Toggle lava placement mode (L)" class="toggle-active">🔥</button>
+          </div>
+          <div class="status-overlay" id="status">waiting…</div>
+          <div class="status-overlay" id="lava-mode-status"></div>
+        </div>
+        <div class="meta">Scroll to zoom, drag to pan. Click map in lava placement mode to add/remove 16x16 tile zones. 🔥 toggles placement mode.</div>
+      </div>
+    </div>
+    <div id="mosaic-tab" class="tab-pane">
+      <div class="panel mosaic-panel">
+        <div class="header">
+          <div class="title">Mosaic Stream</div>
+          <div class="badge" id="mosaic-status">waiting…</div>
+        </div>
+        <div class="mosaic-content">
+          <img id="mosaic-image" src="" alt="Mosaic stream" />
+        </div>
+      </div>
+    </div>
+    <div id="dynamic-mosaic-tab" class="tab-pane">
+      <div class="panel mosaic-panel">
+        <div class="header">
+          <div class="title">Dynamic Mosaic - Individual Streams</div>
+          <div class="badge" id="dynamic-mosaic-status">waiting…</div>
+        </div>
+        <div class="dynamic-mosaic-toolbar">
+          <label style="color: #a0aec0; font-size: 0.85rem;">Visible Environments:</label>
+          <input type="range" id="dynamic-mosaic-page-size" min="6" max="100" step="2" value="42" style="flex: 1; accent-color: var(--accent);" />
+          <span id="dynamic-mosaic-page-size-value" style="color: var(--accent); font-weight: 600; min-width: 3ch;">42</span>
+          <label style="margin-left: 20px; color: #a0aec0; font-size: 0.85rem; display: flex; align-items: center; gap: 6px; cursor: pointer;">
+            <input type="checkbox" id="dynamic-mosaic-live-update" checked style="accent-color: var(--accent);" />
+            Update Live
+          </label>
+          <button id="dynamic-mosaic-prev-btn" class="pager-btn">◀ Prev</button>
+          <span id="dynamic-mosaic-page-indicator" style="color: #718096; font-size: 0.85rem;">Page 1</span>
+          <button id="dynamic-mosaic-next-btn" class="pager-btn">Next ▶</button>
+          <span id="dynamic-mosaic-bandwidth" style="margin-left: auto; color: #718096; font-size: 0.85rem;">Bandwidth: --</span>
+        </div>
+        <div class="mosaic-content" id="dynamic-mosaic-grid"></div>
+      </div>
+    </div>
+    <div id="inspector-tab" class="tab-pane">
+      <div class="panel stats-panel">
+        <div class="header">
+          <div class="title">Environment Inspector</div>
+          <div class="badge" id="inspector-env-select-container">
+            <select id="inspector-env-select"></select>
+          </div>
+        </div>
+        <div class="stats-scroll" id="inspector-scroll">
+          <div id="inspector-content">
+            <div class="inspector-screen-wrapper">
+              <img id="inspector-screen" src="" alt="Emulator screen" />
+            </div>
+            <div id="inspector-details"></div>
+          </div>
+          <div class="panel memory-watch-panel">
+            <div class="header">
+              <div class="title">Observation Inspector</div>
+              <div class="badge" id="inspector-status">idle</div>
+            </div>
+            <div class="memory-watch-scroll">
+              <table>
+                <thead>
+                  <tr><th>Address</th><th>Value</th><th>Description</th></tr>
+                </thead>
+                <tbody id="inspector-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="stats-tab" class="tab-pane">
+      <div class="panel stats-panel">
+        <div class="header">
+          <div class="title">Live environment stats</div>
+          <div class="badge"><span id="env-count">0</span> envs</div>
+        </div>
+        <div class="stats-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Env</th>
+                <th>HP</th>
+                <th>Pokémon</th>
+                <th>Trainer Wins</th>
+                <th>Wild Wins</th>
+                <th>Deaths/KO</th>
+                <th>Items Won</th>
+                <th>Walls</th>
+                <th>Steps</th>
+                <th>Map</th>
+                <th>Game XY</th>
+                <th>Score</th>
+              </tr>
+            </thead>
+            <tbody id="stats-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div id="config-tab" class="tab-pane">
+      <div class="panel config-panel">
+        <div class="header">
+          <div class="title">Environment Config</div>
+          <div class="badge" id="config-status">idle</div>
+        </div>
+        <div class="config-form">
+          <label>
+            <span>Max Steps</span>
+            <input type="range" id="max-steps" min="600" max="12000" step="120" value="2880" />
+            <span id="max-steps-value">2880</span>
+          </label>
+          <label>
+            <input type="checkbox" id="save-on-catch" checked />
+            Enable Save on Catch
+          </label>
+          <label>
+            <input type="checkbox" id="perfect-sound" checked />
+            Perfect DV Sound Effect
+          </label>
+          <button id="apply-config-btn">Apply Config</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script>window.DASHBOARD_SVG_W = __SVG_W__; window.DASHBOARD_SVG_H = __SVG_H__;</script>
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>

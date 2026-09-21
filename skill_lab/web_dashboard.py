@@ -747,8 +747,11 @@ class BrowserMapDashboard:
                 if parsed.path == "/":
                     self._send_html()
                     return
-                if parsed.path == "/app.js":
-                    self._send_app_js()
+                if parsed.path == "/style.css":
+                    self._send_css()
+                    return
+                if parsed.path.startswith("/js/"):
+                    self._send_js_module(parsed.path)
                     return
                 if parsed.path == "/api/state":
                     with dashboard._lock:
@@ -850,19 +853,6 @@ class BrowserMapDashboard:
                 self.end_headers()
                 self.wfile.write(content)
 
-            def _send_app_js(self) -> None:
-                js_path = PROJECT_ROOT / "skill_lab" / "static" / "app.js"
-                if not js_path.exists():
-                    self.send_error(404, "app.js not found")
-                    return
-                content = js_path.read_bytes()
-                self.send_response(200)
-                self.send_header("Content-Type", "application/javascript")
-                self.send_header("Cache-Control", "no-store")
-                self.send_header("Content-Length", str(len(content)))
-                self.end_headers()
-                self.wfile.write(content)
-
             def _send_mosaic_frame(self) -> None:
                 with dashboard._lock:
                     frame = dashboard._mosaic_frame
@@ -940,249 +930,51 @@ class BrowserMapDashboard:
 
             def _send_html(self) -> None:
                 svg_w, svg_h = dashboard.map_width, dashboard.map_height
-                html = """
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Skill Lab Dashboard</title>
-  <style>
-    :root {{
-      --bg: #0c1220;
-      --panel: #141d2e;
-      --muted: #8aa0c7;
-      --accent: #6ee7ff;
-      --good: #67f39b;
-      --warning: #ffd166;
-      --danger: #ff6b6b;
-    }}
-    * {{ box-sizing: border-box; }}
-    body {{
-      margin: 0; font-family: system-ui, sans-serif; background: var(--bg); color: #eef4ff;
-      min-height: 100vh;
-    }}
-    .tab-bar {{
-      display: flex; gap: 4px; padding: 4px 16px; background: rgba(15, 22, 34, 0.96); border-bottom: 1px solid rgba(255,255,255,0.08);
-    }}
-    .tab-bar .tab-btn {{
-      padding: 10px 20px; border-radius: 8px 8px 0 0; border: 1px solid rgba(255,255,255,0.1);
-      background: rgba(255,255,255,0.04); color: var(--muted); font-size: 0.9rem; font-weight: 600;
-      cursor: pointer; transition: all 0.15s ease;
-    }}
-    .tab-bar .tab-btn:hover {{ background: rgba(255,255,255,0.08); }}
-    .tab-bar .tab-btn.active {{ background: var(--panel); color: var(--accent); border-bottom: 2px solid var(--accent); }}
-    .tab-content {{ padding: 18px; height: calc(100vh - 60px); }}
-    .tab-pane {{ display: none; height: 100%; }}
-    .tab-pane.active {{ display: block; }}
-    .panel {{ background: rgba(20, 29, 46, 0.9); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; overflow: hidden; }}
-    .map-panel {{ position: relative; display: flex; flex-direction: column; height: 100%; }}
-    .map-wrap {{ flex: 1; padding: 12px; position: relative; border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; }}
-    .map-wrap svg {{ width: 100%; height: 100%; background: linear-gradient(180deg, #0d1728, #111c2e); border-radius: 10px; cursor: grab; touch-action: none; }}
-    .map-wrap svg.grabbing {{ cursor: grabbing; }}
-    .map-controls {{ position: absolute; right: 14px; top: 12px; display: flex; flex-direction: column; gap: 6px; z-index: 10; }}
-    .map-controls button {{ width: 36px; height: 36px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.15); background: rgba(15, 22, 34, 0.85); color: #eef4ff; font-size: 1.1rem; font-weight: 700; cursor: pointer; transition: all 0.15s ease; }}
-    .map-controls button:hover {{ background: var(--accent); color: var(--bg); border-color: var(--accent); }}
-    .map-controls button.toggle-active {{ background: var(--accent); color: var(--bg); }}
-    .map-controls .zoom-h {{ display: flex; gap: 6px; }}
-    .status-overlay {{ position: absolute; bottom: 12px; left: 14px; background: rgba(15, 22, 34, 0.85); border-radius: 8px; padding: 4px 10px; font-size: 0.78rem; z-index: 10; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
-    .status-overlay#status {{ right: 14px; left: auto; overflow-x: auto; }}
-    .status-overlay#lava-mode-status {{ bottom: 44px; left: 14px; background: rgba(255, 107, 107, 0.85); }}
-    .meta {{ color: var(--muted); font-size: 0.75rem; padding: 8px 12px; border-top: 1px solid rgba(255,255,255,0.08); }}
-    .stats-panel {{ display: flex; flex-direction: column; height: 100%; }}
-    .stats-panel .header {{ padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,0.08); display: flex; justify-content: space-between; align-items: center; }}
-    .stats-panel .title {{ font-size: 1.05rem; font-weight: 700; }}
-    .stats-panel .badge {{ color: var(--accent); font-size: 0.8rem; font-weight: 600; }}
-    .stats-scroll {{ flex: 1; overflow: auto; }}
-    table {{ width: 100%; border-collapse: collapse; }}
-    th, td {{ padding: 7px 8px; border-bottom: 1px solid rgba(255,255,255,0.06); text-align: left; font-size: 0.85rem; }}
-    th {{ position: sticky; top: 0; background: rgba(15, 22, 34, 0.98); color: var(--accent); }}
-    tbody tr:nth-child(odd) {{ background: rgba(255,255,255,0.01); }}
-    .chip {{ display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.72rem; font-weight: 700; }}
-    .chip.good {{ background: rgba(103, 243, 155, 0.2); color: var(--good); }}
-    .chip.warn {{ background: rgba(255, 209, 102, 0.2); color: var(--warning); }}
-    .chip.bad {{ background: rgba(255, 107, 107, 0.2); color: var(--danger); }}
-    .mosaic-panel {{ display: flex; flex-direction: column; height: 100%; }}
-    .mosaic-content {{ flex: 1; display: flex; align-items: center; justify-content: center; overflow: auto; padding: 12px; }}
-    .mosaic-content img {{ max-width: 100%; max-height: 100%; border-radius: 10px; border: 1px solid rgba(255,255,255,0.08); }}
-    #dynamic-mosaic-grid {{ display: grid !important; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)) !important; gap: 12px !important; width: 100% !important; height: auto !important; overflow: visible !important; align-content: start !important; }}
-    .dynamic-mosaic-cell {{ position: relative; border-radius: 8px; overflow: hidden; border: 1px solid rgba(255,255,255,0.08); cursor: pointer; transition: all 0.2s ease; background: rgba(0,0,0,0.3); aspect-ratio: 160/144; flex-shrink: 0; }}
-    .dynamic-mosaic-cell img {{ width: 100% !important; height: 100% !important; object-fit: contain !important; display: block !important; background: #000; }}
-    .inspector-section {{ margin-bottom: 20px; }}
-    .inspector-section h3 {{ color: var(--accent); font-size: 0.85rem; font-weight: 600; margin: 0 0 8px 0; padding-bottom: 4px; border-bottom: 1px solid rgba(255,255,255,0.08); }}
-    .inspector-table {{ width: 100%; border-collapse: collapse; font-size: 0.85rem; }}
-    .inspector-table td {{ padding: 4px 8px; border-bottom: 1px solid rgba(255,255,255,0.04); }}
-    .inspector-table td.inspect-label {{ color: var(--muted); font-weight: 600; }}
-    .party-table th {{ text-align: left; color: var(--accent); font-size: 0.78rem; padding: 4px 8px; border-bottom: 1px solid rgba(255,255,255,0.08); }}
-    .party-table td {{ padding: 4px 8px; border-bottom: 1px solid rgba(255,255,255,0.04); }}
-    .inspector-content table {{ width: 100%; }}
-  </style>
-</head>
-<body>
-   <div class="tab-bar">
-     <button class="tab-btn active" data-tab="map-tab">Map</button>
-     <button class="tab-btn" data-tab="mosaic-tab">Mosaic Stream</button>
-     <button class="tab-btn" data-tab="dynamic-mosaic-tab">Dynamic Mosaic</button>
-      <button class="tab-btn" data-tab="inspector-tab">Environment Inspector</button>
-      <button class="tab-btn" data-tab="stats-tab">Environment Stats</button>
-      <button class="tab-btn" data-tab="config-tab">Environment Config</button>
-   </div>
-  <div class="tab-content">
-    <div id="map-tab" class="tab-pane active">
-      <div class="panel map-panel">
-        <div class="map-wrap">
-          <svg id="map" viewBox="0 0 {svg_w} {svg_h}" preserveAspectRatio="xMidYMid meet">
-            <g id="map-zoom-group">
-              <image href="/map.png" x="0" y="0" width="{svg_w}" height="{svg_h}" preserveAspectRatio="none" />
-               <g id="lava-layer"></g>
-               <g id="env-layer"></g>
-               <g id="highlight-layer"></g>
-            </g>
-          </svg>
-           <div class="map-controls">
-             <div class="zoom-h">
-               <button id="zoom-in" title="Zoom in (+)">+</button>
-               <button id="zoom-reset" title="Reset zoom">R</button>
-               <button id="zoom-out" title="Zoom out (-)">-</button>
-             </div>
-             <button id="toggle-lava" title="Toggle lava placement mode (L)" class="toggle-active">🔥</button>
-           </div>
-            <div class="status-overlay" id="status">waiting…</div>
-            <div class="status-overlay" id="lava-mode-status"></div>
-        </div>
-        <div class="meta">Scroll to zoom, drag to pan. Click map in lava placement mode to add/remove 16x16 tile zones. 🔥 toggles placement mode.</div>
-      </div>
-     </div>
-     <div id="mosaic-tab" class="tab-pane">
-       <div class="panel mosaic-panel">
-         <div class="header">
-           <div class="title">Mosaic Stream</div>
-           <div class="badge" id="mosaic-status">waiting…</div>
-         </div>
-         <div class="mosaic-content">
-           <img id="mosaic-image" src="" alt="Mosaic stream" />
-         </div>
-       </div>
-     </div>
-     <div id="dynamic-mosaic-tab" class="tab-pane">
-       <div class="panel mosaic-panel">
-         <div class="header">
-           <div class="title">Dynamic Mosaic - Individual Streams</div>
-           <div class="badge" id="dynamic-mosaic-status">waiting…</div>
-         </div>
-         <div style="display: flex; align-items: center; gap: 16px; padding: 8px 12px; background: rgba(0,0,0,0.2); border-radius: 6px; margin-bottom: 8px;">
-           <label style="color: #a0aec0; font-size: 0.85rem;">Visible Environments:</label>
-           <input type="range" id="dynamic-mosaic-page-size" min="6" max="100" step="2" value="42" style="flex: 1; accent-color: var(--accent);" />
-           <span id="dynamic-mosaic-page-size-value" style="color: var(--accent); font-weight: 600; min-width: 3ch;">42</span>
-           <label style="margin-left: 20px; color: #a0aec0; font-size: 0.85rem; display: flex; align-items: center; gap: 6px; cursor: pointer;">
-             <input type="checkbox" id="dynamic-mosaic-live-update" checked style="accent-color: var(--accent);" />
-             Update Live
-           </label>
-           <button id="dynamic-mosaic-prev-btn" style="background: var(--panel); color: var(--text); border: 1px solid rgba(255,255,255,0.15); padding: 4px 12px; border-radius: 4px; cursor: pointer; margin-left: 20px;">◀ Prev</button>
-           <span id="dynamic-mosaic-page-indicator" style="color: #718096; font-size: 0.85rem;">Page 1</span>
-           <button id="dynamic-mosaic-next-btn" style="background: var(--panel); color: var(--text); border: 1px solid rgba(255,255,255,0.15); padding: 4px 12px; border-radius: 4px; cursor: pointer;">Next ▶</button>
-           <span id="dynamic-mosaic-bandwidth" style="margin-left: auto; color: #718096; font-size: 0.85rem;">Bandwidth: --</span>
-         </div>
-         <div class="mosaic-content" id="dynamic-mosaic-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; width: 100%;"></div>
-       </div>
-     </div>
-      <div id="inspector-tab" class="tab-pane">
-        <div class="panel stats-panel">
-          <div class="header">
-            <div class="title">Environment Inspector</div>
-            <div class="badge" id="inspector-env-select-container">
-              <select id="inspector-env-select" style="background: var(--panel); color: var(--accent); border: 1px solid rgba(255,255,255,0.15); padding: 4px 8px; border-radius: 4px;"></select>
-            </div>
-          </div>
-          <div class="stats-scroll" style="overflow: auto; padding: 12px;">
-            <div id="inspector-content" style="display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 16px;">
-              <div style="flex: 0 0 320px;">
-                <img id="inspector-screen" src="" alt="Emulator screen" style="width: 100%; border-radius: 8px; border: 1px solid rgba(255,255,255,0.08);" />
-              </div>
-              <div id="inspector-details" style="flex: 1; min-width: 300px;"></div>
-            </div>
-            <div class="panel" style="margin-top: 16px;">
-              <div class="header">
-                <div class="title">Observation Inspector</div>
-                <div class="badge" id="inspector-status">idle</div>
-              </div>
-              <div style="overflow: auto;">
-                <table>
-                  <thead>
-                     <tr><th>Address</th><th>Value</th><th>Description</th></tr>
-                  </thead>
-                  <tbody id="inspector-body"></tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div id="stats-tab" class="tab-pane">
-        <div class="panel stats-panel">
-          <div class="header">
-            <div class="title">Live environment stats</div>
-            <div class="badge"><span id="env-count">0</span> envs</div>
-          </div>
-          <div class="stats-scroll">
-            <table>
-              <thead>
-                 <tr>
-                   <th>Env</th>
-                   <th>HP</th>
-                   <th>Pokémon</th>
-                   <th>Trainer Wins</th>
-                   <th>Wild Wins</th>
-                   <th>Deaths/KO</th>
-                   <th>Items Won</th>
-                   <th>Walls</th>
-                   <th>Steps</th>
-                   <th>Map</th>
-                   <th>Game XY</th>
-                   <th>Score</th>
-                 </tr>
-              </thead>
-              <tbody id="stats-body"></tbody>
-            </table>
-           </div>
-         </div>
-       </div>
-      <div id="config-tab" class="tab-pane">
-        <div class="panel config-panel">
-          <div class="header">
-            <div class="title">Environment Config</div>
-            <div class="badge" id="config-status">idle</div>
-          </div>
-          <div class="config-form">
-            <label>
-              <span>Max Steps</span>
-              <input type="range" id="max-steps" min="600" max="12000" step="120" value="2880" />
-              <span id="max-steps-value">2880</span>
-            </label>
-            <label>
-              <input type="checkbox" id="save-on-catch" checked />
-              Enable Save on Catch
-            </label>
-            <label>
-              <input type="checkbox" id="perfect-sound" checked />
-              Perfect DV Sound Effect
-            </label>
-            <button id="apply-config-btn">Apply Config</button>
-          </div>
-        </div>
-      </div>
-
-  <script>window.DASHBOARD_SVG_W={svg_w};window.DASHBOARD_SVG_H={svg_h};</script>
-  <script src="/app.js"></script>
-</body>
-</html>
-""".format(svg_w=svg_w, svg_h=svg_h)
+                html_path = (
+                    PROJECT_ROOT / "skill_lab" / "static" / "index.html"
+                )
+                html = html_path.read_text(encoding="utf-8")
+                html = html.replace("__SVG_W__", str(svg_w))
+                html = html.replace("__SVG_H__", str(svg_h))
                 encoded = html.encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(encoded)))
                 self.end_headers()
                 self.wfile.write(encoded)
+
+            def _send_css(self) -> None:
+                css_path = PROJECT_ROOT / "skill_lab" / "static" / "style.css"
+                if not css_path.exists():
+                    self.send_error(404, "style.css not found")
+                    return
+                content = css_path.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/css")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(content)))
+                self.end_headers()
+                self.wfile.write(content)
+
+            def _send_js_module(self, path: str) -> None:
+                js_dir = PROJECT_ROOT / "skill_lab" / "static" / "js"
+                relative = path[len("/js/"):]
+                module_path = (js_dir / relative).resolve()
+                try:
+                    module_path.relative_to(js_dir.resolve())
+                except ValueError:
+                    self.send_error(403)
+                    return
+                if not module_path.exists():
+                    self.send_error(404, f"module {relative} not found")
+                    return
+                content = module_path.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/javascript")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(content)))
+                self.end_headers()
+                self.wfile.write(content)
 
             def log_message(self, format: str, *args: Any) -> None:
                 return
