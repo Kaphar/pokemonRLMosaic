@@ -552,7 +552,7 @@ class BrowserMapDashboard:
     const inspectorScreen = document.getElementById('inspector-screen');
     const inspectorDetails = document.getElementById('inspector-details');
     let mosaicObjectUrl = null;
-    let dynamicMosaicObjectUrls = {};
+    let dynamicMosaicObjectUrls = {{}};
     let inspectorObjectUrl = null;
     let selectedInspectorEnv = 0;
     mosaicImage.addEventListener('error', function() {{
@@ -666,21 +666,21 @@ class BrowserMapDashboard:
       envCount.textContent = String(envs.length);
     }}
 
-    function updateInspectorSelect(envs) {
+    function updateInspectorSelect(envs) {{
       const currentVal = inspectorEnvSelect.value;
-      inspectorEnvSelect.innerHTML = envs.map(function(env) {
+      inspectorEnvSelect.innerHTML = envs.map(function(env) {{
         return '<option value="' + env.env_index + '">Env ' + (env.env_index + 1) + ' - HP: ' + (env.hp * 100).toFixed(0) + '%</option>';
-      }).join('');
-      if (currentVal !== '' && envs.some(e => e.env_index == currentVal)) {
+      }}).join('');
+      if (currentVal !== '' && envs.some(e => e.env_index == currentVal)) {{
         inspectorEnvSelect.value = currentVal;
-      }
+      }}
       selectedInspectorEnv = parseInt(inspectorEnvSelect.value) || 0;
-    }
+    }}
 
-    inspectorEnvSelect.addEventListener('change', function() {
+    inspectorEnvSelect.addEventListener('change', function() {{
       selectedInspectorEnv = parseInt(this.value) || 0;
       updateInspectorScreen();
-    });
+    }});
 
     function update() {{
       fetch('/api/state')
@@ -916,8 +916,166 @@ class BrowserMapDashboard:
         }});
     }}
 
+    function updateDynamicMosaic(envCount) {{
+      const grid = document.getElementById('dynamic-mosaic-grid');
+      if (!grid) return;
+      
+      // Clear existing cells if count changed
+      const currentCells = grid.querySelectorAll('.dynamic-mosaic-cell');
+      if (currentCells.length !== envCount) {{
+        grid.innerHTML = '';
+        for (let i = 0; i < envCount; i++) {{
+          const cell = document.createElement('div');
+          cell.className = 'dynamic-mosaic-cell';
+          cell.style.cssText = 'position: relative; border-radius: 8px; overflow: hidden; border: 1px solid rgba(255,255,255,0.08); cursor: pointer; transition: all 0.2s ease;';
+          cell.onclick = (function(idx) {{
+            return function() {{
+              selectInspectorEnv(idx);
+            }};
+          }})(i);
+          
+          const img = document.createElement('img');
+          img.id = 'dynamic-frame-' + i;
+          img.alt = 'Env ' + (i + 1);
+          img.style.cssText = 'width: 100%; height: auto; display: block;';
+          img.addEventListener('error', function() {{
+            this.style.opacity = '0.3';
+          }});
+          
+          const label = document.createElement('div');
+          label.style.cssText = 'position: absolute; top: 4px; left: 4px; background: rgba(15, 22, 34, 0.85); padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; color: var(--accent); font-weight: 600;';
+          label.textContent = 'E' + (i + 1);
+          
+          cell.appendChild(img);
+          cell.appendChild(label);
+          grid.appendChild(cell);
+        }}
+      }}
+      
+      // Update each frame
+      for (let i = 0; i < envCount; i++) {{
+        const img = document.getElementById('dynamic-frame-' + i);
+        if (img) {{
+          const oldUrl = img.dataset.currentUrl || '';
+          const newUrl = '/api/individual/' + i + '?t=' + Date.now();
+          if (oldUrl !== newUrl) {{
+            img.dataset.currentUrl = newUrl;
+            img.src = newUrl;
+          }}
+        }}
+      }}
+      dynamicMosaicStatus.textContent = 'live (' + envCount + ' streams)';
+    }}
+
+    function selectInspectorEnv(envIndex) {{
+      selectedInspectorEnv = envIndex;
+      inspectorEnvSelect.value = envIndex.toString();
+      updateInspectorScreen();
+      updateSelectionHighlight();
+    }}
+
+    function updateSelectionHighlight() {{
+      // Highlight selected cell in dynamic mosaic
+      document.querySelectorAll('.dynamic-mosaic-cell').forEach(function(cell, idx) {{
+        if (idx === selectedInspectorEnv) {{
+          cell.style.borderColor = 'var(--accent)';
+          cell.style.boxShadow = '0 0 12px rgba(110, 231, 255, 0.4)';
+        }} else {{
+          cell.style.borderColor = 'rgba(255,255,255,0.08)';
+          cell.style.boxShadow = 'none';
+        }}
+      }});
+      
+      // Update selection rect on map
+      const envs = lastState.envs || [];
+      const selectedEnv = envs.find(e => e.env_index === selectedInspectorEnv);
+      if (selectedEnv && selectedEnv.x !== undefined) {{
+        selectRect.setAttribute('x', selectedEnv.x - 8);
+        selectRect.setAttribute('y', selectedEnv.y - 8);
+        selectRect.setAttribute('width', 16);
+        selectRect.setAttribute('height', 16);
+        selectRect.style.display = 'block';
+      }} else {{
+        selectRect.style.display = 'none';
+      }}
+    }}
+
+    function updateInspectorScreen() {{
+      const img = document.getElementById('inspector-screen');
+      if (!img) return;
+      
+      const newUrl = '/api/individual/' + selectedInspectorEnv + '?t=' + Date.now();
+      if (inspectorObjectUrl) {{
+        URL.revokeObjectURL(inspectorObjectUrl);
+      }}
+      
+      // Fetch the frame as blob
+      fetch(newUrl, {{ cache: 'no-store' }})
+        .then(function(r) {{
+          if (r.status === 204) {{
+            img.removeAttribute('src');
+            return null;
+          }}
+          return r.blob();
+        }})
+        .then(function(blob) {{
+          if (!blob) return;
+          inspectorObjectUrl = URL.createObjectURL(blob);
+          img.src = inspectorObjectUrl;
+        }})
+        .catch(function() {{}});
+      
+      updateInspectorDetails();
+    }}
+
+    function updateInspectorDetails() {{
+      const envs = lastState.envs || [];
+      const env = envs.find(e => e.env_index === selectedInspectorEnv);
+      if (!env) {{
+        inspectorDetails.textContent = 'No data available';
+        return;
+      }}
+      
+      let details = 'Environment #' + (env.env_index + 1) + '\\n';
+      details += '='.repeat(30) + '\\n\\n';
+      details += 'HP: ' + (env.hp * 100).toFixed(1) + '%\\n';
+      details += 'Pokemon Count: ' + env.pkmn + '\\n';
+      details += 'Trainer Wins: ' + env.trainer_wins + '\\n';
+      details += 'Wild Wins: ' + env.wild_wins + '\\n';
+      details += 'Wall Collisions: ' + env.walls + '\\n';
+      details += 'Steps: ' + env.steps + '\\n';
+      details += 'Map ID: 0x' + env.map_id.toString(16).toUpperCase().padStart(2, '0') + '\\n';
+      details += 'Game Position: (' + env.raw_x + ', ' + env.raw_y + ')\\n';
+      details += 'Global Position: (' + env.x + ', ' + env.y + ')\\n';
+      details += 'Score: ' + (env.score >= 0 ? '+' : '') + env.score.toFixed(1) + '\\n';
+      
+      if (env.position_error) {{
+        details += '\\n[ERROR] ' + env.position_error + '\\n';
+      }}
+      
+      inspectorDetails.textContent = details;
+    }}
+
     update();
     setInterval(update, 500);
+    
+    // Update dynamic mosaic at higher frequency for smoother streaming
+    setInterval(function() {{
+      if (document.getElementById('dynamic-mosaic-tab').classList.contains('active')) {{
+        const envCount = lastState.envs ? lastState.envs.length : 0;
+        if (envCount > 0) {{
+          updateDynamicMosaic(envCount);
+        }}
+      }}
+    }}, 200);
+    
+    // Update inspector when its tab is active
+    setInterval(function() {{
+      if (document.getElementById('inspector-tab').classList.contains('active')) {{
+        updateInspectorScreen();
+        updateSelectionHighlight();
+      }}
+    }}, 300);
   </script>
 </body>
 </html>
