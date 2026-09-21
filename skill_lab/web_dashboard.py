@@ -747,6 +747,9 @@ class BrowserMapDashboard:
                 if parsed.path == "/":
                     self._send_html()
                     return
+                if parsed.path == "/app.js":
+                    self._send_app_js()
+                    return
                 if parsed.path == "/api/state":
                     with dashboard._lock:
                         data = json.dumps(dashboard.state).encode("utf-8")
@@ -843,6 +846,19 @@ class BrowserMapDashboard:
                 content = MAP_IMAGE_PATH.read_bytes()
                 self.send_response(200)
                 self.send_header("Content-Type", "image/png")
+                self.send_header("Content-Length", str(len(content)))
+                self.end_headers()
+                self.wfile.write(content)
+
+            def _send_app_js(self) -> None:
+                js_path = PROJECT_ROOT / "skill_lab" / "static" / "app.js"
+                if not js_path.exists():
+                    self.send_error(404, "app.js not found")
+                    return
+                content = js_path.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/javascript")
+                self.send_header("Cache-Control", "no-store")
                 self.send_header("Content-Length", str(len(content)))
                 self.end_headers()
                 self.wfile.write(content)
@@ -992,6 +1008,14 @@ class BrowserMapDashboard:
     #dynamic-mosaic-grid {{ display: grid !important; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)) !important; gap: 12px !important; width: 100% !important; height: auto !important; overflow: visible !important; align-content: start !important; }}
     .dynamic-mosaic-cell {{ position: relative; border-radius: 8px; overflow: hidden; border: 1px solid rgba(255,255,255,0.08); cursor: pointer; transition: all 0.2s ease; background: rgba(0,0,0,0.3); aspect-ratio: 160/144; flex-shrink: 0; }}
     .dynamic-mosaic-cell img {{ width: 100% !important; height: 100% !important; object-fit: contain !important; display: block !important; background: #000; }}
+    .inspector-section {{ margin-bottom: 20px; }}
+    .inspector-section h3 {{ color: var(--accent); font-size: 0.85rem; font-weight: 600; margin: 0 0 8px 0; padding-bottom: 4px; border-bottom: 1px solid rgba(255,255,255,0.08); }}
+    .inspector-table {{ width: 100%; border-collapse: collapse; font-size: 0.85rem; }}
+    .inspector-table td {{ padding: 4px 8px; border-bottom: 1px solid rgba(255,255,255,0.04); }}
+    .inspector-table td.inspect-label {{ color: var(--muted); font-weight: 600; }}
+    .party-table th {{ text-align: left; color: var(--accent); font-size: 0.78rem; padding: 4px 8px; border-bottom: 1px solid rgba(255,255,255,0.08); }}
+    .party-table td {{ padding: 4px 8px; border-bottom: 1px solid rgba(255,255,255,0.04); }}
+    .inspector-content table {{ width: 100%; }}
   </style>
 </head>
 <body>
@@ -999,8 +1023,9 @@ class BrowserMapDashboard:
      <button class="tab-btn active" data-tab="map-tab">Map</button>
      <button class="tab-btn" data-tab="mosaic-tab">Mosaic Stream</button>
      <button class="tab-btn" data-tab="dynamic-mosaic-tab">Dynamic Mosaic</button>
-     <button class="tab-btn" data-tab="inspector-tab">Environment Inspector</button>
-     <button class="tab-btn" data-tab="stats-tab">Environment Stats</button>
+      <button class="tab-btn" data-tab="inspector-tab">Environment Inspector</button>
+      <button class="tab-btn" data-tab="stats-tab">Environment Stats</button>
+      <button class="tab-btn" data-tab="config-tab">Environment Config</button>
    </div>
   <div class="tab-content">
     <div id="map-tab" class="tab-pane active">
@@ -1061,55 +1086,67 @@ class BrowserMapDashboard:
          <div class="mosaic-content" id="dynamic-mosaic-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; width: 100%;"></div>
        </div>
      </div>
-     <div id="inspector-tab" class="tab-pane">
-       <div class="panel stats-panel">
-         <div class="header">
-           <div class="title">Environment Inspector</div>
-           <div class="badge" id="inspector-env-select-container">
-             <select id="inspector-env-select" style="background: var(--panel); color: var(--accent); border: 1px solid rgba(255,255,255,0.15); padding: 4px 8px; border-radius: 4px;"></select>
-           </div>
-         </div>
-         <div class="stats-scroll" style="overflow: auto; padding: 12px;">
-           <div id="inspector-content" style="display: flex; gap: 16px; flex-wrap: wrap;">
-             <div style="flex: 0 0 320px;">
-               <img id="inspector-screen" src="" alt="Emulator screen" style="width: 100%; border-radius: 8px; border: 1px solid rgba(255,255,255,0.08);" />
-             </div>
-             <div style="flex: 1; min-width: 300px;">
-               <div id="inspector-details" style="color: #eef4ff; font-family: monospace; white-space: pre-wrap;"></div>
-             </div>
-           </div>
-         </div>
-       </div>
-     </div>
-     <div id="stats-tab" class="tab-pane">
-       <div class="panel stats-panel">
-         <div class="header">
-           <div class="title">Live environment stats</div>
-           <div class="badge"><span id="env-count">0</span> envs</div>
-         </div>
-         <div class="stats-scroll">
-           <table>
-             <thead>
-                <tr>
-                  <th>Env</th>
-                  <th>HP</th>
-                  <th>Pokémon</th>
-                  <th>Trainer Wins</th>
-                  <th>Wild Wins</th>
-                  <th>Deaths/KO</th>
-                  <th>Items Won</th>
-                  <th>Walls</th>
-                  <th>Steps</th>
-                  <th>Map</th>
-                  <th>Game XY</th>
-                  <th>Score</th>
-                </tr>
-             </thead>
-             <tbody id="stats-body"></tbody>
-           </table>
+      <div id="inspector-tab" class="tab-pane">
+        <div class="panel stats-panel">
+          <div class="header">
+            <div class="title">Environment Inspector</div>
+            <div class="badge" id="inspector-env-select-container">
+              <select id="inspector-env-select" style="background: var(--panel); color: var(--accent); border: 1px solid rgba(255,255,255,0.15); padding: 4px 8px; border-radius: 4px;"></select>
+            </div>
+          </div>
+          <div class="stats-scroll" style="overflow: auto; padding: 12px;">
+            <div id="inspector-content" style="display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 16px;">
+              <div style="flex: 0 0 320px;">
+                <img id="inspector-screen" src="" alt="Emulator screen" style="width: 100%; border-radius: 8px; border: 1px solid rgba(255,255,255,0.08);" />
+              </div>
+              <div id="inspector-details" style="flex: 1; min-width: 300px;"></div>
+            </div>
+            <div class="panel" style="margin-top: 16px;">
+              <div class="header">
+                <div class="title">Observation Inspector</div>
+                <div class="badge" id="inspector-status">idle</div>
+              </div>
+              <div style="overflow: auto;">
+                <table>
+                  <thead>
+                     <tr><th>Address</th><th>Value</th><th>Description</th></tr>
+                  </thead>
+                  <tbody id="inspector-body"></tbody>
+                </table>
+              </div>
+            </div>
           </div>
         </div>
       </div>
+      <div id="stats-tab" class="tab-pane">
+        <div class="panel stats-panel">
+          <div class="header">
+            <div class="title">Live environment stats</div>
+            <div class="badge"><span id="env-count">0</span> envs</div>
+          </div>
+          <div class="stats-scroll">
+            <table>
+              <thead>
+                 <tr>
+                   <th>Env</th>
+                   <th>HP</th>
+                   <th>Pokémon</th>
+                   <th>Trainer Wins</th>
+                   <th>Wild Wins</th>
+                   <th>Deaths/KO</th>
+                   <th>Items Won</th>
+                   <th>Walls</th>
+                   <th>Steps</th>
+                   <th>Map</th>
+                   <th>Game XY</th>
+                   <th>Score</th>
+                 </tr>
+              </thead>
+              <tbody id="stats-body"></tbody>
+            </table>
+           </div>
+         </div>
+       </div>
       <div id="config-tab" class="tab-pane">
         <div class="panel config-panel">
           <div class="header">
@@ -1134,728 +1171,9 @@ class BrowserMapDashboard:
           </div>
         </div>
       </div>
-      <div id="inspector-tab" class="tab-pane">
-        <div class="panel inspector-panel">
-          <div class="header">
-            <div class="title">Observation Inspector</div>
-            <div class="badge" id="inspector-status">idle</div>
-          </div>
-          <div class="inspector-content">
-            <table>
-              <thead>
-                <tr><th>Address</th><th>Value</th><th>Description</th></tr>
-              </thead>
-              <tbody id="inspector-body"></tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    </div>
 
-  <script>
-    const mapSvg = document.getElementById('map');
-    const envLayer = document.getElementById('env-layer');
-    const lavaLayer = document.getElementById('lava-layer');
-    const statsBody = document.getElementById('stats-body');
-    const envCount = document.getElementById('env-count');
-    const status = document.getElementById('status');
-    const mosaicImage = document.getElementById('mosaic-image');
-    const mosaicStatus = document.getElementById('mosaic-status');
-    const dynamicMosaicGrid = document.getElementById('dynamic-mosaic-grid');
-    const dynamicMosaicStatus = document.getElementById('dynamic-mosaic-status');
-    const dynamicMosaicPageSize = document.getElementById('dynamic-mosaic-page-size');
-    const dynamicMosaicPageSizeValue = document.getElementById('dynamic-mosaic-page-size-value');
-    const dynamicMosaicPrevBtn = document.getElementById('dynamic-mosaic-prev-btn');
-    const dynamicMosaicNextBtn = document.getElementById('dynamic-mosaic-next-btn');
-    const dynamicMosaicPageIndicator = document.getElementById('dynamic-mosaic-page-indicator');
-    const inspectorEnvSelect = document.getElementById('inspector-env-select');
-    const inspectorScreen = document.getElementById('inspector-screen');
-    const inspectorDetails = document.getElementById('inspector-details');
-    let mosaicObjectUrl = null;
-    let dynamicMosaicObjectUrls = {{}};
-    let inspectorObjectUrl = null;
-    let selectedInspectorEnv = 0;
-    let dynamicMosaicCurrentPage = 0;
-    let dynamicMosaicPageSizeVal = 42;
-    mosaicImage.addEventListener('error', function() {{
-      mosaicStatus.textContent = 'offline';
-    }});
-    const zoomInBtn = document.getElementById('zoom-in');
-    const zoomOutBtn = document.getElementById('zoom-out');
-    const zoomResetBtn = document.getElementById('zoom-reset');
-    const toggleLavaBtn = document.getElementById('toggle-lava');
-    const lavaModeStatus = document.getElementById('lava-mode-status');
-    var maxStepsSlider = document.getElementById('max-steps');
-    var maxStepsValue = document.getElementById('max-steps-value');
-    var saveOnCatchCheckbox = document.getElementById('save-on-catch');
-    var applyConfigBtn = document.getElementById('apply-config-btn');
-    var configStatus = document.getElementById('config-status');
-    var inspectorBody = document.getElementById('inspector-body');
-    var inspectorStatus = document.getElementById('inspector-status');
-    const tabBtns = document.querySelectorAll('.tab-bar .tab-btn');
-    const tabPanes = document.querySelectorAll('.tab-pane');
-
-    if (maxStepsSlider) {{
-      maxStepsSlider.addEventListener('input', function() {{
-        maxStepsValue.textContent = String(maxStepsSlider.value);
-      }});
-    }}
-
-    if (applyConfigBtn) {{
-      applyConfigBtn.addEventListener('click', function() {{
-        var payload = {{
-          max_steps: parseInt(maxStepsSlider.value, 10),
-          save_on_catch: saveOnCatchCheckbox.checked,
-        }};
-        configStatus.textContent = 'saving...';
-        fetch('/api/config', {{
-          method: 'POST',
-          headers: {{ 'Content-Type': 'application/json' }},
-          body: JSON.stringify(payload)
-        }})
-          .then(function(r) {{ return r.json(); }})
-          .then(function(data) {{
-            configStatus.textContent = data.status || 'saved';
-          }})
-          .catch(function() {{
-            configStatus.textContent = 'error';
-          }});
-      }});
-    }}
-
-    function renderInspector(data) {{
-      inspectorBody.innerHTML = '';
-      if (!data || !data.inspector || Array.isArray(data.inspector)) {{
-        if (Array.isArray(data.inspector)) {{
-          data.inspector.forEach(function(entry) {{
-            var cls = entry.changed ? ' changed' : '';
-            var row = '<tr class="' + cls + '">' +
-              '<td>0x' + entry.address.toString(16).toUpperCase().padStart(4, '0') + '</td>' +
-              '<td>' + entry.value + '</td>' +
-              '<td>' + entry.description + '</td>' +
-              '</tr>';
-            inspectorBody.insertAdjacentHTML('beforeend', row);
-          }});
-        }}
-        inspectorStatus.textContent = 'live';
-      }} else {{
-        inspectorStatus.textContent = 'offline';
-      }}
-    }}
-
-    function isConfigTabActive() {{
-      return document.getElementById('config-tab').classList.contains('active');
-    }}
-
-    function isInspectorTabActive() {{
-      return document.getElementById('inspector-tab').classList.contains('active');
-    }}
-     let zoomScale = 1;
-    let panX = 0;
-    let panY = 0;
-    let isPanning = false;
-    let lavaPlacementMode = true;
-    let clickStart = null;
-    let dragStart = null;
-    let panStart = {{ x: 0, y: 0 }};
-    let lastState = {{ envs: [], lava_zones: [] }};
-    const mapGroup = document.getElementById('map-zoom-group');
-    const highlightLayer = document.getElementById('highlight-layer');
-    const lavaHighlight = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    lavaHighlight.setAttribute('width', 16);
-    lavaHighlight.setAttribute('height', 16);
-    lavaHighlight.setAttribute('fill', '#ff6b6b');
-    lavaHighlight.setAttribute('opacity', '0.3');
-    lavaHighlight.setAttribute('stroke', '#ff6b6b');
-    lavaHighlight.setAttribute('stroke-width', '1');
-    lavaHighlight.setAttribute('pointer-events', 'none');
-    highlightLayer.appendChild(lavaHighlight);
-    lavaHighlight.style.display = 'none';
-    const selectRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    selectRect.setAttribute('fill', '#ff6b6b');
-    selectRect.setAttribute('opacity', '0.15');
-    selectRect.setAttribute('stroke', '#ff6b6b');
-    selectRect.setAttribute('stroke-width', '1');
-    selectRect.setAttribute('stroke-dasharray', '4,2');
-    selectRect.setAttribute('pointer-events', 'none');
-    highlightLayer.appendChild(selectRect);
-    selectRect.style.display = 'none';
-
-    function applyTransform() {{
-      mapGroup.setAttribute('transform', 'translate(' + panX + ',' + panY + ') scale(' + zoomScale + ')');
-    }}
-
-    function setZoom(delta) {{
-      const newScale = zoomScale * delta;
-      if (newScale < 0.4 || newScale > 8) return;
-      zoomScale = newScale;
-      applyTransform();
-    }}
-
-    function resetZoom() {{
-      zoomScale = 1;
-      panX = 0;
-      panY = 0;
-      applyTransform();
-    }}
-
-    function hpChip(value) {{
-      const label = (value * 100).toFixed(0) + '%';
-      if (value >= 0.6) return '<span class="chip good">' + label + '</span>';
-      if (value >= 0.25) return '<span class="chip warn">' + label + '</span>';
-      return '<span class="chip bad">' + label + '</span>';
-    }}
-
-     function renderMap(data) {{
-      lastState = data;
-      envLayer.innerHTML = '';
-      lavaLayer.innerHTML = '';
-      const lavaZones = data.lava_zones || [];
-      for (const zone of lavaZones) {{
-        const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-        rect.setAttribute('x', zone[0]);
-        rect.setAttribute('y', zone[1]);
-        rect.setAttribute('width', 16);
-        rect.setAttribute('height', 16);
-        rect.setAttribute('fill', '#ff6b6b');
-        rect.setAttribute('opacity', '0.5');
-        lavaLayer.appendChild(rect);
-      }}
-
-      for (const env of data.envs || []) {{
-        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        circle.setAttribute('cx', env.x);
-        circle.setAttribute('cy', env.y);
-        circle.setAttribute('r', 6);
-        circle.setAttribute('fill', '#67f39b');
-        circle.setAttribute('stroke', '#ffffff');
-        circle.setAttribute('stroke-width', 1.2);
-        const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-        label.setAttribute('x', env.x + 10);
-        label.setAttribute('y', env.y - 8);
-        label.setAttribute('fill', '#eaf2ff');
-        label.setAttribute('font-size', '12');
-        label.textContent = 'E' + (env.env_index + 1);
-        envLayer.appendChild(circle);
-        envLayer.appendChild(label);
-      }}
-    }}
-
-    function renderStats(data) {{
-      const envs = data.envs || [];
-      statsBody.innerHTML = envs.map(function(env) {{
-        var hpHtml = hpChip(env.hp);
-        var scoreText = (env.score >= 0 ? '+' : '') + env.score.toFixed(1);
-        return '<tr><td>Env ' + (env.env_index + 1) + '</td><td>' + hpHtml + '</td><td>' + env.pkmn + '</td><td>' + env.trainer_wins + '</td><td>' + env.wild_wins + '</td><td>' + env.deaths + '</td><td>' + env.item_won_count + '</td><td>' + env.walls + '</td><td>' + env.steps + '</td><td>' + env.map_id.toString(16).toUpperCase().padStart(2, '0') + '</td><td>' + (env.raw_x ?? 0) + ',' + (env.raw_y ?? 0) + '</td><td>' + scoreText + '</td></tr>';
-      }}).join('');
-      envCount.textContent = String(envs.length);
-    }}
-
-    function updateInspectorSelect(envs) {{
-      const currentVal = inspectorEnvSelect.value;
-      inspectorEnvSelect.innerHTML = envs.map(function(env) {{
-        return '<option value="' + env.env_index + '">Env ' + (env.env_index + 1) + ' - HP: ' + (env.hp * 100).toFixed(0) + '%</option>';
-      }}).join('');
-      if (currentVal !== '' && envs.some(e => e.env_index == currentVal)) {{
-        inspectorEnvSelect.value = currentVal;
-      }}
-      selectedInspectorEnv = parseInt(inspectorEnvSelect.value) || 0;
-    }}
-
-    inspectorEnvSelect.addEventListener('change', function() {{
-      selectedInspectorEnv = parseInt(this.value) || 0;
-      updateInspectorScreen();
-    }});
-
-    function update() {{
-      fetch('/api/state')
-        .then(function(r) {{ return r.json(); }})
-        .then(function(data) {{
-          if (!data || !Array.isArray(data.envs)) return;
-          status.textContent = 'live';
-          renderMap(data);
-          renderStats(data);
-        }})
-        .catch(function() {{
-          status.textContent = 'offline';
-        }});
-      if (document.getElementById('mosaic-tab').classList.contains('active')) {{
-        updateMosaic();
-      }}
-      if (isInspectorTabActive()) {{
-        fetch('/api/inspector')
-          .then(function(r) {{ return r.json(); }})
-          .then(function(data) {{
-            renderInspector(data);
-          }})
-          .catch(function() {{
-            inspectorStatus.textContent = 'offline';
-          }});
-      }}
-    }}
-
-    mapSvg.addEventListener('wheel', function(event) {{
-      event.preventDefault();
-      event.stopPropagation();
-      const delta = event.deltaY < 0 ? 1.15 : 0.85;
-      setZoom(delta);
-    }}, {{ passive: false }});
-
-     mapSvg.addEventListener('mousedown', function(event) {{
-       if (event.button !== 0) return;
-       if (lavaPlacementMode) {{
-         dragStart = {{ x: event.clientX, y: event.clientY }};
-         clickStart = null;
-         isPanning = false;
-         return;
-       }}
-       clickStart = {{ x: event.clientX, y: event.clientY }};
-       isPanning = true;
-       panStart = {{ x: event.clientX, y: event.clientY }};
-       mapSvg.classList.add('grabbing');
-     }});
-
-     document.addEventListener('mousemove', function(event) {{
-       if (lavaPlacementMode && dragStart) {{
-         const rect = mapSvg.getBoundingClientRect();
-         const svgX = ((event.clientX - rect.left) / rect.width) * {svg_w};
-         const svgY = ((event.clientY - rect.top) / rect.height) * {svg_h};
-         const invScale = 1 / zoomScale;
-         const viewBoxX = (svgX - panX) * invScale;
-         const viewBoxY = (svgY - panY) * invScale;
-         const startRect = mapSvg.getBoundingClientRect();
-         const startSvgX = ((dragStart.x - startRect.left) / startRect.width) * {svg_w};
-         const startSvgY = ((dragStart.y - startRect.top) / startRect.height) * {svg_h};
-         const startViewX = (startSvgX - panX) * invScale;
-         const startViewY = (startSvgY - panY) * invScale;
-         const startX = Math.min(startViewX, viewBoxX);
-         const startY = Math.min(startViewY, viewBoxY);
-         const endX = Math.max(startViewX, viewBoxX);
-         const endY = Math.max(startViewY, viewBoxY);
-         selectRect.setAttribute('x', startX);
-         selectRect.setAttribute('y', startY);
-         selectRect.setAttribute('width', endX - startX);
-         selectRect.setAttribute('height', endY - startY);
-          selectRect.style.display = 'block';
-          lavaHighlight.style.display = 'none';
-          return;
-        }}
-        if (!isPanning && !lavaPlacementMode) return;
-       if (isPanning) {{
-         const dx = event.clientX - panStart.x;
-         const dy = event.clientY - panStart.y;
-         panX += dx;
-         panY += dy;
-         panStart = {{ x: event.clientX, y: event.clientY }};
-         applyTransform();
-       }}
-       if (lavaPlacementMode) {{
-         const rect = mapSvg.getBoundingClientRect();
-         const svgX = ((event.clientX - rect.left) / rect.width) * {svg_w};
-         const svgY = ((event.clientY - rect.top) / rect.height) * {svg_h};
-         const invScale = 1 / zoomScale;
-         const viewBoxX = (svgX - panX) * invScale;
-         const viewBoxY = (svgY - panY) * invScale;
-         const tileX = Math.round(viewBoxX / 16) * 16;
-         const tileY = Math.round(viewBoxY / 16) * 16;
-         lavaHighlight.setAttribute('x', tileX);
-         lavaHighlight.setAttribute('y', tileY);
-         lavaHighlight.style.display = 'block';
-       }}
-     }});
-
-      document.addEventListener('mouseup', function(event) {{
-        if (lavaPlacementMode && dragStart) {{
-          if (selectRect.style.display !== 'none') {{
-            const rect = mapSvg.getBoundingClientRect();
-            const invScale = 1 / zoomScale;
-            const startSvgX = ((dragStart.x - rect.left) / rect.width) * {svg_w};
-            const startSvgY = ((dragStart.y - rect.top) / rect.height) * {svg_h};
-            const startViewX = (startSvgX - panX) * invScale;
-            const startViewY = (startSvgY - panY) * invScale;
-            const endSvgX = ((event.clientX - rect.left) / rect.width) * {svg_w};
-            const endSvgY = ((event.clientY - rect.top) / rect.height) * {svg_h};
-            const endViewX = (endSvgX - panX) * invScale;
-            const endViewY = (endSvgY - panY) * invScale;
-            const startX = Math.min(startViewX, endViewX);
-            const startY = Math.min(startViewY, endViewY);
-            const endX = Math.max(startViewX, endViewX);
-            const endY = Math.max(startViewY, endViewY);
-            const zones = [];
-            for (let tx = Math.floor(startX / 16); tx <= Math.floor(endX / 16); tx++) {{
-              for (let ty = Math.floor(startY / 16); ty <= Math.floor(endY / 16); ty++) {{
-                zones.push({{ x: tx * 16, y: ty * 16 }});
-              }}
-            }}
-            console.log('[LAVA DEBUG] Drag select zones:', zones.length, 'tiles, first:', zones[0]);
-            fetch('/api/lava', {{
-              method: 'POST',
-              headers: {{ 'Content-Type': 'application/json' }},
-              body: JSON.stringify({{ zones: zones }})
-            }}).then(function(r) {{ return r.json(); }}).then(function(data) {{
-              console.log('[LAVA DEBUG] Lava zones after drag:', data.lava_zones);
-            }}).catch(function() {{}});
-          }} else {{
-            const rect = mapSvg.getBoundingClientRect();
-            const svgX = ((event.clientX - rect.left) / rect.width) * {svg_w};
-            const svgY = ((event.clientY - rect.top) / rect.height) * {svg_h};
-            const invScale = 1 / zoomScale;
-            const viewBoxX = (svgX - panX) * invScale;
-            const viewBoxY = (svgY - panY) * invScale;
-            const tileX = Math.round(viewBoxX / 16) * 16;
-            const tileY = Math.round(viewBoxY / 16) * 16;
-            console.log('[LAVA DEBUG] Single click tile:', tileX, tileY);
-            fetch('/api/lava', {{
-              method: 'POST',
-              headers: {{ 'Content-Type': 'application/json' }},
-              body: JSON.stringify({{ x: tileX, y: tileY }})
-            }}).then(function(r) {{ return r.json(); }}).then(function(data) {{
-              console.log('[LAVA DEBUG] Lava zones after click:', data.lava_zones);
-            }}).catch(function() {{}});
-          }}
-          dragStart = null;
-          selectRect.style.display = 'none';
-          return;
-        }}
-        if (!isPanning) return;
-        isPanning = false;
-        clickStart = null;
-        mapSvg.classList.remove('grabbing');
-      }});
-
-    function isMapTabActive() {{
-      return document.getElementById('map-tab').classList.contains('active');
-    }}
-
-    document.addEventListener('keydown', function(event) {{
-      if (event.key === 'l' && (event.ctrlKey || event.metaKey)) {{
-        event.preventDefault();
-        updateLavaToggle();
-      }}
-      if (isMapTabActive() && (event.key === '+' || event.key === '-' || event.key === '=')) {{
-        event.preventDefault();
-        if (event.key === '+' || event.key === '=') {{
-          setZoom(1.15);
-        }} else {{
-          setZoom(0.85);
-        }}
-      }}
-      if (isMapTabActive() && event.key === 'r' && (event.ctrlKey || event.metaKey)) {{
-        event.preventDefault();
-        resetZoom();
-      }}
-    }});
-
-    zoomInBtn.addEventListener('click', function() {{ setZoom(1.15); }});
-    zoomOutBtn.addEventListener('click', function() {{ setZoom(0.85); }});
-    zoomResetBtn.addEventListener('click', function() {{ resetZoom(); }});
-
-    function updateLavaToggle() {{
-      lavaPlacementMode = !lavaPlacementMode;
-      toggleLavaBtn.classList.toggle('toggle-active', lavaPlacementMode);
-      if (lavaPlacementMode) {{
-        lavaModeStatus.textContent = 'LAVA PLACEMENT MODE - click to place/remove zones';
-        mapSvg.style.cursor = 'crosshair';
-      }} else {{
-        lavaModeStatus.textContent = '';
-        mapSvg.style.cursor = '';
-        lavaHighlight.style.display = 'none';
-      }}
-    }}
-
-     toggleLavaBtn.addEventListener('click', updateLavaToggle);
-
-    if (lavaPlacementMode) {{
-      lavaModeStatus.textContent = 'LAVA PLACEMENT MODE - click to place/remove zones';
-      mapSvg.style.cursor = 'crosshair';
-    }}
-
-     tabBtns.forEach(function(btn) {{
-       btn.addEventListener('click', function() {{
-         tabBtns.forEach(function(b) {{ b.classList.remove('active'); }});
-         tabPanes.forEach(function(p) {{ p.classList.remove('active'); }});
-         btn.classList.add('active');
-         const target = btn.getAttribute('data-tab');
-         document.getElementById(target).classList.add('active');
-         if (target === 'mosaic-tab') {{
-           updateMosaic();
-         }}
-       }});
-     }});
-
-    function updateMosaic() {{
-      fetch('/api/mosaic', {{ cache: 'no-store' }})
-        .then(function(r) {{
-          if (r.status === 204) {{
-            mosaicStatus.textContent = 'no stream';
-            if (mosaicObjectUrl) {{
-              URL.revokeObjectURL(mosaicObjectUrl);
-              mosaicObjectUrl = null;
-            }}
-            mosaicImage.removeAttribute('src');
-            return null;
-          }}
-          return r.blob();
-        }})
-        .then(function(blob) {{
-          if (!blob) return;
-          if (mosaicObjectUrl) {{
-            URL.revokeObjectURL(mosaicObjectUrl);
-          }}
-          mosaicObjectUrl = URL.createObjectURL(blob);
-          mosaicImage.src = mosaicObjectUrl;
-          mosaicStatus.textContent = 'live';
-        }})
-        .catch(function() {{
-          mosaicStatus.textContent = 'offline';
-        }});
-    }}
-
-    // Dynamic mosaic pagination controls
-    const dynamicMosaicLiveUpdate = document.getElementById('dynamic-mosaic-live-update');
-    const dynamicMosaicBandwidth = document.getElementById('dynamic-mosaic-bandwidth');
-    let bandwidthHistory = [];
-    let lastBytesSent = 0;
-    let lastBandwidthTime = Date.now();
-    
-    dynamicMosaicPageSize.addEventListener('input', function() {{
-      dynamicMosaicPageSizeVal = parseInt(this.value, 10);
-      dynamicMosaicPageSizeValue.textContent = dynamicMosaicPageSizeVal.toString();
-      dynamicMosaicCurrentPage = 0;
-      if (document.getElementById('dynamic-mosaic-tab').classList.contains('active')) {{
-        const envCount = lastState.envs ? lastState.envs.length : 0;
-        if (envCount > 0) {{
-          updateDynamicMosaic(envCount);
-        }}
-      }}
-    }});
-
-    dynamicMosaicPrevBtn.addEventListener('click', function() {{
-      if (dynamicMosaicCurrentPage > 0) {{
-        dynamicMosaicCurrentPage--;
-        if (document.getElementById('dynamic-mosaic-tab').classList.contains('active')) {{
-          const envCount = lastState.envs ? lastState.envs.length : 0;
-          if (envCount > 0) {{
-            updateDynamicMosaic(envCount);
-          }}
-        }}
-      }}
-    }});
-
-    dynamicMosaicNextBtn.addEventListener('click', function() {{
-      const envCount = lastState.envs ? lastState.envs.length : 0;
-      const maxPage = Math.max(0, Math.ceil(envCount / dynamicMosaicPageSizeVal) - 1);
-      if (dynamicMosaicCurrentPage < maxPage) {{
-        dynamicMosaicCurrentPage++;
-        if (document.getElementById('dynamic-mosaic-tab').classList.contains('active')) {{
-          const envCount = lastState.envs ? lastState.envs.length : 0;
-          if (envCount > 0) {{
-            updateDynamicMosaic(envCount);
-          }}
-        }}
-      }}
-    }});
-
-    function updateDynamicMosaic(envCount) {{
-      const grid = document.getElementById('dynamic-mosaic-grid');
-      if (!grid) return;
-
-      // Calculate pagination
-      const maxPage = Math.max(0, Math.ceil(envCount / dynamicMosaicPageSizeVal) - 1);
-      if (dynamicMosaicCurrentPage > maxPage) {{
-        dynamicMosaicCurrentPage = maxPage;
-      }}
-      const startIndex = dynamicMosaicCurrentPage * dynamicMosaicPageSizeVal;
-      const endIndex = Math.min(startIndex + dynamicMosaicPageSizeVal, envCount);
-      const visibleCount = endIndex - startIndex;
-      
-      // Update page indicator
-      dynamicMosaicPageIndicator.textContent = 'Page ' + (dynamicMosaicCurrentPage + 1) + ' of ' + (maxPage + 1);
-
-      // Clear existing cells if count changed or we're on a different page
-      const currentCells = grid.querySelectorAll('.dynamic-mosaic-cell');
-      if (currentCells.length !== visibleCount) {{
-        grid.innerHTML = '';
-        for (let i = startIndex; i < endIndex; i++) {{
-          const cell = document.createElement('div');
-          cell.className = 'dynamic-mosaic-cell';
-          cell.onclick = (function(idx) {{
-            return function() {{
-              selectInspectorEnv(idx);
-            }};
-          }})(i);
-
-          const img = document.createElement('img');
-          img.id = 'dynamic-frame-' + i;
-          img.alt = 'Env ' + (i + 1);
-          img.addEventListener('error', function() {{
-            this.style.opacity = '0.3';
-          }});
-
-          const label = document.createElement('div');
-          label.style.cssText = 'position: absolute; top: 4px; left: 4px; background: rgba(15, 22, 34, 0.85); padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; color: var(--accent); font-weight: 600;';
-          label.textContent = 'E' + (i + 1);
-
-          cell.appendChild(img);
-          cell.appendChild(label);
-          grid.appendChild(cell);
-        }}
-      }}
-
-      // Update each visible frame
-      for (let i = startIndex; i < endIndex; i++) {{
-        const img = document.getElementById('dynamic-frame-' + i);
-        if (img) {{
-          const newUrl = '/api/individual/' + i + '?t=' + Date.now();
-          img.src = newUrl;
-        }}
-      }}
-      dynamicMosaicStatus.textContent = 'live (' + envCount + ' streams, showing ' + visibleCount + ')';
-    }}
-
-    function calculateBandwidth() {{
-      const now = Date.now();
-      const timeDiff = (now - lastBandwidthTime) / 1000;
-      if (timeDiff < 1) return;
-      
-      // Estimate based on image size (PNG ~10KB per 160x144 frame) and update rate
-      const visibleEnvs = parseInt(document.getElementById('dynamic-mosaic-page-size').value, 10);
-      const isLive = document.getElementById('dynamic-mosaic-live-update').checked;
-      if (!isLive) {{
-        dynamicMosaicBandwidth.textContent = 'Bandwidth: Paused';
-        return;
-      }}
-      
-      // Each PNG frame is roughly 8-15KB, updating at 5Hz (200ms)
-      const estimatedBytesPerFrame = 12000;
-      const framesPerSecond = 5;
-      const totalBytesPerSecond = visibleEnvs * estimatedBytesPerFrame * framesPerSecond;
-      
-      let bandwidthStr;
-      if (totalBytesPerSecond > 1000000) {{
-        bandwidthStr = (totalBytesPerSecond / 1000000).toFixed(2) + ' MB/s';
-      }} else if (totalBytesPerSecond > 1000) {{
-        bandwidthStr = (totalBytesPerSecond / 1000).toFixed(2) + ' KB/s';
-      }} else {{
-        bandwidthStr = totalBytesPerSecond.toFixed(0) + ' B/s';
-      }}
-      dynamicMosaicBandwidth.textContent = 'Bandwidth: ~' + bandwidthStr;
-    }}
-
-    function selectInspectorEnv(envIndex) {{
-      selectedInspectorEnv = envIndex;
-      inspectorEnvSelect.value = envIndex.toString();
-      updateInspectorScreen();
-      updateSelectionHighlight();
-    }}
-
-    function updateSelectionHighlight() {{
-      // Highlight selected cell in dynamic mosaic
-      document.querySelectorAll('.dynamic-mosaic-cell').forEach(function(cell, idx) {{
-        if (idx === selectedInspectorEnv) {{
-          cell.style.borderColor = 'var(--accent)';
-          cell.style.boxShadow = '0 0 12px rgba(110, 231, 255, 0.4)';
-        }} else {{
-          cell.style.borderColor = 'rgba(255,255,255,0.08)';
-          cell.style.boxShadow = 'none';
-        }}
-      }});
-      
-      // Update selection rect on map
-      const envs = lastState.envs || [];
-      const selectedEnv = envs.find(e => e.env_index === selectedInspectorEnv);
-      if (selectedEnv && selectedEnv.x !== undefined) {{
-        selectRect.setAttribute('x', selectedEnv.x - 8);
-        selectRect.setAttribute('y', selectedEnv.y - 8);
-        selectRect.setAttribute('width', 16);
-        selectRect.setAttribute('height', 16);
-        selectRect.style.display = 'block';
-      }} else {{
-        selectRect.style.display = 'none';
-      }}
-    }}
-
-    function updateInspectorScreen() {{
-      const img = document.getElementById('inspector-screen');
-      if (!img) return;
-      
-      const newUrl = '/api/inspector-screen?env=' + selectedInspectorEnv + '&t=' + Date.now();
-      if (inspectorObjectUrl) {{
-        URL.revokeObjectURL(inspectorObjectUrl);
-      }}
-      
-      // Fetch the frame as blob
-      fetch(newUrl, {{ cache: 'no-store' }})
-        .then(function(r) {{
-          if (r.status === 204) {{
-            img.removeAttribute('src');
-            return null;
-          }}
-          return r.blob();
-        }})
-        .then(function(blob) {{
-          if (!blob) return;
-          inspectorObjectUrl = URL.createObjectURL(blob);
-          img.src = inspectorObjectUrl;
-        }})
-        .catch(function() {{}});
-      
-      updateInspectorDetails();
-    }}
-
-    function updateInspectorDetails() {{
-      const envs = lastState.envs || [];
-      const env = envs.find(e => e.env_index === selectedInspectorEnv);
-      if (!env) {{
-        inspectorDetails.textContent = 'No data available';
-        return;
-      }}
-      
-      let details = 'Environment #' + (env.env_index + 1) + '\\n';
-      details += '='.repeat(30) + '\\n\\n';
-      details += 'HP: ' + (env.hp * 100).toFixed(1) + '%\\n';
-      details += 'Pokemon Count: ' + env.pkmn + '\\n';
-      details += 'Trainer Wins: ' + env.trainer_wins + '\\n';
-      details += 'Wild Wins: ' + env.wild_wins + '\\n';
-      details += 'Wall Collisions: ' + env.walls + '\\n';
-      details += 'Steps: ' + env.steps + '\\n';
-      details += 'Map ID: 0x' + env.map_id.toString(16).toUpperCase().padStart(2, '0') + '\\n';
-      details += 'Game Position: (' + env.raw_x + ', ' + env.raw_y + ')\\n';
-      details += 'Global Position: (' + env.x + ', ' + env.y + ')\\n';
-      details += 'Score: ' + (env.score >= 0 ? '+' : '') + env.score.toFixed(1) + '\\n';
-      
-      if (env.position_error) {{
-        details += '\\n[ERROR] ' + env.position_error + '\\n';
-      }}
-      
-      inspectorDetails.textContent = details;
-    }}
-
-    update();
-    setInterval(update, 500);
-    
-    // Update dynamic mosaic at higher frequency for smoother streaming
-    setInterval(function() {{
-      if (document.getElementById('dynamic-mosaic-tab').classList.contains('active')) {{
-        const isLive = document.getElementById('dynamic-mosaic-live-update').checked;
-        if (isLive) {{
-          const envCount = lastState.envs ? lastState.envs.length : 0;
-          if (envCount > 0) {{
-            updateDynamicMosaic(envCount);
-          }}
-        }}
-      }}
-      calculateBandwidth();
-    }}, 200);
-    
-    // Update inspector when its tab is active
-    setInterval(function() {{
-      if (document.getElementById('inspector-tab').classList.contains('active')) {{
-        updateInspectorScreen();
-        updateSelectionHighlight();
-      }}
-    }}, 300);
-  </script>
+  <script>window.DASHBOARD_SVG_W={svg_w};window.DASHBOARD_SVG_H={svg_h};</script>
+  <script src="/app.js"></script>
 </body>
 </html>
 """.format(svg_w=svg_w, svg_h=svg_h)
