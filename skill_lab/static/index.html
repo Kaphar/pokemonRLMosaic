@@ -55,18 +55,15 @@
     </div>
     <div id="dynamic-mosaic-tab" class="tab-pane">
       <div class="panel mosaic-panel">
-        <div class="header" style="float: right;">
-          <div class="title">Dynamic Mosaic - Individual Streams</div>
-          <div class="badge" id="dynamic-mosaic-status">waiting…</div>
-        </div>
         <div class="dynamic-mosaic-toolbar">
           <label style="color: #a0aec0; font-size: 0.85rem;">Visible Environments:</label>
           <input type="range" id="dynamic-mosaic-page-size" min="6" max="100" step="2" value="42" style="flex: 1; accent-color: var(--accent);" />
           <span id="dynamic-mosaic-page-size-value" style="color: var(--accent); font-weight: 600; min-width: 3ch;">42</span>
-          <label style="margin-left: 20px; color: #a0aec0; font-size: 0.85rem; display: flex; align-items: center; gap: 6px; cursor: pointer;">
-            <input type="checkbox" id="dynamic-mosaic-live-update" checked style="accent-color: var(--accent);" />
+          <label style="margin-left: 20px; color: var(--good); font-size: 0.85rem; display: flex; align-items: center; gap: 6px; cursor: pointer;">
+            <input type="checkbox" id="dynamic-mosaic-live-update" checked style="accent-color: var(--good);" />
             Update Live
           </label>
+          <span id="dynamic-mosaic-status" style="margin-left: 12px; color: var(--good); font-size: 0.85rem; font-weight: 600;">waiting…</span>
           <label style="margin-left: 20px; color: #a0aec0; font-size: 0.85rem; display: flex; align-items: center; gap: 6px;">
             <span>Poll:</span>
             <input type="range" id="dynamic-mosaic-poll" min="200" max="5000" step="100" value="200" style="accent-color: var(--accent);" />
