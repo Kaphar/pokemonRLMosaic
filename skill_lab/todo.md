@@ -1,5 +1,15 @@
+* Fix the weights and their declaration.
+we need a bigger baseline for progress, milestones should be 5 base points + bonus speed. I saw they were at 2 points.
 
-# TODO
+THE MILESTONES SYSTEM WE HAVE is actually very very poor. it does detect the speak to Oak script, so it has functionalities we want to keep, but the "list" is not really a chronological order and many things are missing, I thought I would use this a sole "breadcrumb" but it is not going to cut it, we need a better breadcrumb system. We need to get to the shop, where we will receive the parcel,
+we need a milstone system for Map, coordinate based, more or less like the milestones system, but with more "hoops"(breakcrumbs) but it must also handle some key fights (Like Peter, our first big objective)
+
+
+Also our Config Tab has gone, we need to remake it.
+
+
+
+# TODO Fix the weights and their declaration.
 in effort for normalization we are going to continue unifying the rewards, so that every stage has the baselines rewards, the stage have multipliers, which need to appear more clearly in the variables' names so if a stage does need the baseline rewards (specific training, avoid 'noise' ) it could put a multiplier of 0 to ignore some aspects.
 
 We need to see how is handled the rewards, in our function in the gym, because we are going to give a baseline rewards for killing a wild pokemon, trainers. and we need to tackle/verify what we do to incentivise meaningful healing (healing pokemons after making some progress, either on the map, either by catching/tr)
