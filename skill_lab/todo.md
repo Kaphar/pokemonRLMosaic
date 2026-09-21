@@ -4,7 +4,12 @@ in effort for normalization we are going to continue unifying the rewards, so th
 
 We need to see how is handled the rewards, in our function in the gym, because we are going to give a baseline rewards for killing a wild pokemon, trainers. and we need to tackle/verify what we do to incentivise meaningful healing (healing pokemons after making some progress, either on the map, either by catching/tr)
 the flow is always : we have our settings file for our profiles (i as see it, the profile are also multiplier of rewards)
-seeing how 'far' the training has come we need to verify the rewards from the gym v2 for healing the pokemons, a good point would be to have the model training a grinding loop (defeat pokemon, progress, heal repeat), especially for our "trainer" profile. our progressers/speedrunner profile should be more breadcrumb milestone driven and more incline to push through the screens.
+seeing how 'far' the training has come we need to verify the rewards from the gym v2 for healing the pokemons, a good point would be to have the model training a grinding loop (defeat pokemon, progress, heal repeat), especially for our "trainer" profile.
+
+
+*  our progressers/speedrunner profile should be more breadcrumb milestone driven and more incline to push through the screens. check the breadcrumb I don't see any breadcrumb won after the first one.
+
+
 
 We need a check function that verify that we have the baselines rewards, they should be the same values and included in every "final config" we need a good detailed log in the terminal that sums up nicely the rewards settings, from profiles, stages,
 
@@ -31,6 +36,9 @@ but it would be better for those stats to be accessible on a browser, rather tha
 
 
 ================
+
+
+and check how the "logic" of our milestone system to know that the rewards to get down to proffessor oak are "unlocked" or said differently i would like that we confirm the flow (and leave a note about it)
 
 # when we have the abitility to catch pokemon :
 verify the weigh and behaviour of different profile to see if we are giving proper rewards for best incentives.

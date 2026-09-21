@@ -1103,7 +1103,7 @@ class BrowserMapDashboard:
     const inspectorScreen = document.getElementById('inspector-screen');
     const inspectorDetails = document.getElementById('inspector-details');
     let mosaicObjectUrl = null;
-    let dynamicMosaicObjectUrls = {};
+    let dynamicMosaicObjectUrls = {{}};
     let inspectorObjectUrl = null;
     let selectedInspectorEnv = 0;
     mosaicImage.addEventListener('error', function() {{
@@ -1280,21 +1280,21 @@ class BrowserMapDashboard:
       envCount.textContent = String(envs.length);
     }}
 
-    function updateInspectorSelect(envs) {
+    function updateInspectorSelect(envs) {{
       const currentVal = inspectorEnvSelect.value;
-      inspectorEnvSelect.innerHTML = envs.map(function(env) {
+      inspectorEnvSelect.innerHTML = envs.map(function(env) {{
         return '<option value="' + env.env_index + '">Env ' + (env.env_index + 1) + ' - HP: ' + (env.hp * 100).toFixed(0) + '%</option>';
-      }).join('');
-      if (currentVal !== '' && envs.some(e => e.env_index == currentVal)) {
+      }}).join('');
+      if (currentVal !== '' && envs.some(e => e.env_index == currentVal)) {{
         inspectorEnvSelect.value = currentVal;
-      }
+      }}
       selectedInspectorEnv = parseInt(inspectorEnvSelect.value) || 0;
-    }
+    }}
 
-    inspectorEnvSelect.addEventListener('change', function() {
+    inspectorEnvSelect.addEventListener('change', function() {{
       selectedInspectorEnv = parseInt(this.value) || 0;
       updateInspectorScreen();
-    });
+    }});
 
     function update() {{
       fetch('/api/state')
