@@ -927,8 +927,8 @@ class BrowserMapDashboard:
     .mosaic-panel {{ display: flex; flex-direction: column; height: 100%; }}
     .mosaic-content {{ flex: 1; display: flex; align-items: center; justify-content: center; overflow: auto; padding: 12px; }}
     .mosaic-content img {{ max-width: 100%; max-height: 100%; border-radius: 10px; border: 1px solid rgba(255,255,255,0.08); }}
-    #dynamic-mosaic-grid {{ display: grid !important; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)) !important; gap: 12px !important; width: 100% !important; height: 100% !important; overflow: auto !important; align-content: start !important; }}
-    .dynamic-mosaic-cell {{ position: relative; border-radius: 8px; overflow: hidden; border: 1px solid rgba(255,255,255,0.08); cursor: pointer; transition: all 0.2s ease; background: rgba(0,0,0,0.3); aspect-ratio: 160/144; }}
+    #dynamic-mosaic-grid {{ display: grid !important; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)) !important; gap: 12px !important; width: 100% !important; height: auto !important; overflow: visible !important; align-content: start !important; }}
+    .dynamic-mosaic-cell {{ position: relative; border-radius: 8px; overflow: hidden; border: 1px solid rgba(255,255,255,0.08); cursor: pointer; transition: all 0.2s ease; background: rgba(0,0,0,0.3); aspect-ratio: 160/144; flex-shrink: 0; }}
     .dynamic-mosaic-cell img {{ width: 100% !important; height: 100% !important; object-fit: contain !important; display: block !important; background: #000; }}
   </style>
 </head>
@@ -987,9 +987,14 @@ class BrowserMapDashboard:
            <label style="color: #a0aec0; font-size: 0.85rem;">Visible Environments:</label>
            <input type="range" id="dynamic-mosaic-page-size" min="6" max="100" step="2" value="42" style="flex: 1; accent-color: var(--accent);" />
            <span id="dynamic-mosaic-page-size-value" style="color: var(--accent); font-weight: 600; min-width: 3ch;">42</span>
-           <button id="dynamic-mosaic-prev-btn" style="background: var(--panel); color: var(--text); border: 1px solid rgba(255,255,255,0.15); padding: 4px 12px; border-radius: 4px; cursor: pointer;">◀ Prev</button>
+           <label style="margin-left: 20px; color: #a0aec0; font-size: 0.85rem; display: flex; align-items: center; gap: 6px; cursor: pointer;">
+             <input type="checkbox" id="dynamic-mosaic-live-update" checked style="accent-color: var(--accent);" />
+             Update Live
+           </label>
+           <button id="dynamic-mosaic-prev-btn" style="background: var(--panel); color: var(--text); border: 1px solid rgba(255,255,255,0.15); padding: 4px 12px; border-radius: 4px; cursor: pointer; margin-left: 20px;">◀ Prev</button>
            <span id="dynamic-mosaic-page-indicator" style="color: #718096; font-size: 0.85rem;">Page 1</span>
            <button id="dynamic-mosaic-next-btn" style="background: var(--panel); color: var(--text); border: 1px solid rgba(255,255,255,0.15); padding: 4px 12px; border-radius: 4px; cursor: pointer;">Next ▶</button>
+           <span id="dynamic-mosaic-bandwidth" style="margin-left: auto; color: #718096; font-size: 0.85rem;">Bandwidth: --</span>
          </div>
          <div class="mosaic-content" id="dynamic-mosaic-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; width: 100%;"></div>
        </div>
@@ -1545,6 +1550,12 @@ class BrowserMapDashboard:
     }}
 
     // Dynamic mosaic pagination controls
+    const dynamicMosaicLiveUpdate = document.getElementById('dynamic-mosaic-live-update');
+    const dynamicMosaicBandwidth = document.getElementById('dynamic-mosaic-bandwidth');
+    let bandwidthHistory = [];
+    let lastBytesSent = 0;
+    let lastBandwidthTime = Date.now();
+    
     dynamicMosaicPageSize.addEventListener('input', function() {{
       dynamicMosaicPageSizeVal = parseInt(this.value, 10);
       dynamicMosaicPageSizeValue.textContent = dynamicMosaicPageSizeVal.toString();
@@ -1638,6 +1649,35 @@ class BrowserMapDashboard:
         }}
       }}
       dynamicMosaicStatus.textContent = 'live (' + envCount + ' streams, showing ' + visibleCount + ')';
+    }}
+
+    function calculateBandwidth() {{
+      const now = Date.now();
+      const timeDiff = (now - lastBandwidthTime) / 1000;
+      if (timeDiff < 1) return;
+      
+      // Estimate based on image size (PNG ~10KB per 160x144 frame) and update rate
+      const visibleEnvs = parseInt(document.getElementById('dynamic-mosaic-page-size').value, 10);
+      const isLive = document.getElementById('dynamic-mosaic-live-update').checked;
+      if (!isLive) {{
+        dynamicMosaicBandwidth.textContent = 'Bandwidth: Paused';
+        return;
+      }}
+      
+      // Each PNG frame is roughly 8-15KB, updating at 5Hz (200ms)
+      const estimatedBytesPerFrame = 12000;
+      const framesPerSecond = 5;
+      const totalBytesPerSecond = visibleEnvs * estimatedBytesPerFrame * framesPerSecond;
+      
+      let bandwidthStr;
+      if (totalBytesPerSecond > 1000000) {{
+        bandwidthStr = (totalBytesPerSecond / 1000000).toFixed(2) + ' MB/s';
+      }} else if (totalBytesPerSecond > 1000) {{
+        bandwidthStr = (totalBytesPerSecond / 1000).toFixed(2) + ' KB/s';
+      }} else {{
+        bandwidthStr = totalBytesPerSecond.toFixed(0) + ' B/s';
+      }}
+      dynamicMosaicBandwidth.textContent = 'Bandwidth: ~' + bandwidthStr;
     }}
 
     function selectInspectorEnv(envIndex) {{
@@ -1735,11 +1775,15 @@ class BrowserMapDashboard:
     // Update dynamic mosaic at higher frequency for smoother streaming
     setInterval(function() {{
       if (document.getElementById('dynamic-mosaic-tab').classList.contains('active')) {{
-        const envCount = lastState.envs ? lastState.envs.length : 0;
-        if (envCount > 0) {{
-          updateDynamicMosaic(envCount);
+        const isLive = document.getElementById('dynamic-mosaic-live-update').checked;
+        if (isLive) {{
+          const envCount = lastState.envs ? lastState.envs.length : 0;
+          if (envCount > 0) {{
+            updateDynamicMosaic(envCount);
+          }}
         }}
       }}
+      calculateBandwidth();
     }}, 200);
     
     // Update inspector when its tab is active
