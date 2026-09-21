@@ -659,6 +659,11 @@ def main(args: argparse.Namespace | None = None) -> None:
                         model_name=model_path, tile_indices=visible_indices,
                     )
                     dashboard.set_mosaic_frame(mosaic._last_frame)
+                    
+                    # Set individual frames for dynamic mosaic
+                    for idx in range(min(env.num_envs, len(all_tiles))):
+                        if idx < len(all_tiles):
+                            dashboard.set_individual_frame(idx, all_tiles[idx])
 
                 if step_count % max(1, args.num_envs * 100) == 0: print(f"Progress: {step_count} steps")
                 # Save recordings periodically

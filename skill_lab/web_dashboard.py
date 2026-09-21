@@ -432,6 +432,9 @@ class BrowserMapDashboard:
     .mosaic-panel {{ display: flex; flex-direction: column; height: 100%; }}
     .mosaic-content {{ flex: 1; display: flex; align-items: center; justify-content: center; overflow: auto; padding: 12px; }}
     .mosaic-content img {{ max-width: 100%; max-height: 100%; border-radius: 10px; border: 1px solid rgba(255,255,255,0.08); }}
+    #dynamic-mosaic-grid {{ display: grid !important; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)) !important; gap: 12px !important; width: 100% !important; height: 100% !important; overflow: auto !important; align-content: start !important; }}
+    .dynamic-mosaic-cell {{ position: relative; border-radius: 8px; overflow: hidden; border: 1px solid rgba(255,255,255,0.08); cursor: pointer; transition: all 0.2s ease; background: rgba(0,0,0,0.3); aspect-ratio: 160/144; }}
+    .dynamic-mosaic-cell img {{ width: 100% !important; height: 100% !important; object-fit: contain !important; display: block !important; background: #000; }}
   </style>
 </head>
 <body>
@@ -927,7 +930,6 @@ class BrowserMapDashboard:
         for (let i = 0; i < envCount; i++) {{
           const cell = document.createElement('div');
           cell.className = 'dynamic-mosaic-cell';
-          cell.style.cssText = 'position: relative; border-radius: 8px; overflow: hidden; border: 1px solid rgba(255,255,255,0.08); cursor: pointer; transition: all 0.2s ease;';
           cell.onclick = (function(idx) {{
             return function() {{
               selectInspectorEnv(idx);
@@ -937,7 +939,6 @@ class BrowserMapDashboard:
           const img = document.createElement('img');
           img.id = 'dynamic-frame-' + i;
           img.alt = 'Env ' + (i + 1);
-          img.style.cssText = 'width: 100%; height: auto; display: block;';
           img.addEventListener('error', function() {{
             this.style.opacity = '0.3';
           }});
@@ -956,12 +957,8 @@ class BrowserMapDashboard:
       for (let i = 0; i < envCount; i++) {{
         const img = document.getElementById('dynamic-frame-' + i);
         if (img) {{
-          const oldUrl = img.dataset.currentUrl || '';
           const newUrl = '/api/individual/' + i + '?t=' + Date.now();
-          if (oldUrl !== newUrl) {{
-            img.dataset.currentUrl = newUrl;
-            img.src = newUrl;
-          }}
+          img.src = newUrl;
         }}
       }}
       dynamicMosaicStatus.textContent = 'live (' + envCount + ' streams)';
