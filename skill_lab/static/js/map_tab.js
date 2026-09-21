@@ -19,6 +19,110 @@ function resetZoom() {
   applyTransform();
 }
 
+function clientToMapCoordinates(clientX, clientY) {
+  const svgRect = el.mapSvg.getBoundingClientRect();
+  const relX = clientX - svgRect.left;
+  const relY = clientY - svgRect.top;
+  const fractionX = relX / svgRect.width;
+  const fractionY = relY / svgRect.height;
+  const svgX = fractionX * svg_w;
+  const svgY = fractionY * svg_h;
+  const invScale = 1 / state.zoomScale;
+  const mapX = (svgX - state.panX) * invScale;
+  const mapY = (svgY - state.panY) * invScale;
+  return { mapX: mapX, mapY: mapY };
+}
+
+function requestGameCoordinates(mapX, mapY) {
+  const url = '/api/map-coords?x=' + Math.round(mapX) + '&y=' + Math.round(mapY);
+  return fetch(url, { cache: 'no-store' })
+    .then(function(r) { return r.json(); })
+    .catch(function() { return null; });
+}
+
+function logToTerminal(message) {
+  const payload = JSON.stringify({ message: message });
+  fetch('/api/log', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: payload,
+  }).catch(function() {});
+}
+
+function showCoordPopover(clientX, clientY, coords) {
+  if (!state.coordPopover) return;
+  const tileX = Math.round(coords.mapX / 16) * 16;
+  const tileY = Math.round(coords.mapY / 16) * 16;
+  requestGameCoordinates(coords.mapX, coords.mapY).then(function(data) {
+    if (!data) {
+      state.coordPopover.textContent =
+        'Map XY: ' + tileX + ', ' + tileY + ' — (server unreachable)';
+    } else {
+      const mapIdHex = data.map_id.toString(16).toUpperCase().padStart(2, '0');
+      state.coordPopover.textContent =
+        'Map XY: ' + tileX + ', ' + tileY +
+        ' | Game: map=0x' + mapIdHex + ' (' + data.map_name +
+        '), x=' + data.x + ', y=' + data.y;
+    }
+    state.coordPopover.style.left = (clientX + 12) + 'px';
+    state.coordPopover.style.top = (clientY + 12) + 'px';
+    state.coordPopover.style.display = 'block';
+  });
+}
+
+function handleMapDblClick(event) {
+  if (!isMapTabActive()) return;
+  const coords = clientToMapCoordinates(event.clientX, event.clientY);
+  const tileX = Math.round(coords.mapX / 16) * 16;
+  const tileY = Math.round(coords.mapY / 16) * 16;
+  requestGameCoordinates(coords.mapX, coords.mapY).then(function(data) {
+    const tileText = 'Map XY: ' + tileX + ', ' + tileY;
+    if (!data) {
+      logToTerminal(tileText + ' — (server unreachable)');
+    } else {
+      const mapIdHex = data.map_id.toString(16).toUpperCase().padStart(2, '0');
+      logToTerminal(
+        tileText +
+        ' | Game: map=0x' + mapIdHex + ' (' + data.map_name +
+        '), x=' + data.x + ', y=' + data.y
+      );
+    }
+    showCoordPopover(event.clientX, event.clientY, coords);
+  });
+}
+
+function startHoverCheck(event) {
+  if (!isMapTabActive()) return;
+  if (state.isPanning || state.lavaPlacementMode) return;
+  if (state.hoverTimer !== null) clearTimeout(state.hoverTimer);
+  const movementThreshold = 4;
+  if (state.lastHoverPos) {
+    const dx = event.clientX - state.lastHoverPos.x;
+    const dy = event.clientY - state.lastHoverPos.y;
+    if (Math.sqrt(dx * dx + dy * dy) > movementThreshold) {
+      state.lastHoverPos = { x: event.clientX, y: event.clientY };
+      return;
+    }
+  }
+  state.lastHoverPos = { x: event.clientX, y: event.clientY };
+  state.hoverTimer = setTimeout(function() {
+    const coords = clientToMapCoordinates(event.clientX, event.clientY);
+    showCoordPopover(event.clientX, event.clientY, coords);
+    state.hoverTimer = null;
+  }, 700);
+}
+
+function hideCoordPopover() {
+  if (state.lastHoverPos) state.lastHoverPos = null;
+  if (state.hoverTimer !== null) {
+    clearTimeout(state.hoverTimer);
+    state.hoverTimer = null;
+  }
+  if (state.coordPopover) {
+    state.coordPopover.style.display = 'none';
+  }
+}
+
 function renderMap(data) {
   state.lastState = data;
   el.envLayer.innerHTML = '';
@@ -254,10 +358,34 @@ function initMap() {
   el.zoomResetBtn.addEventListener('click', function() { resetZoom(); });
   el.toggleLavaBtn.addEventListener('click', updateLavaToggle);
 
+  const popover = document.createElement('div');
+  popover.className = 'coord-popover';
+  popover.style.position = 'fixed';
+  popover.style.pointerEvents = 'none';
+  popover.style.display = 'none';
+  popover.style.padding = '4px 8px';
+  popover.style.background = 'rgba(15, 20, 26, 0.9)';
+  popover.style.border = '1px solid #4a5a75';
+  popover.style.borderRadius = '4px';
+  popover.style.color = '#eaf2ff';
+  popover.style.fontSize = '12px';
+  popover.style.fontFamily = 'monospace';
+  popover.style.zIndex = '1000';
+  popover.style.whiteSpace = 'nowrap';
+  document.body.appendChild(popover);
+  state.coordPopover = popover;
+
+  el.mapSvg.addEventListener('mousemove', startHoverCheck);
+  el.mapSvg.addEventListener('mouseleave', hideCoordPopover);
+  el.mapSvg.addEventListener('dblclick', handleMapDblClick);
+  el.mapSvg.addEventListener('mousedown', function() {
+    hideCoordPopover();
+  });
+
   if (state.lavaPlacementMode) {
     el.lavaModeStatus.textContent = 'LAVA PLACEMENT MODE - click to place/remove zones';
     el.mapSvg.style.cursor = 'crosshair';
   }
 }
 
-export { renderMap, renderStats, initMap, updateLavaToggle, applyTransform, setZoom, resetZoom };
+export { renderMap, renderStats, initMap, updateLavaToggle, applyTransform, setZoom, resetZoom, clientToMapCoordinates, requestGameCoordinates, handleMapDblClick };

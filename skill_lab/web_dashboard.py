@@ -60,6 +60,15 @@ try:
 except Exception:
     GLOBAL_MAP_SHAPE = (464, 436)
 
+try:
+    from v2.map_projection import (
+        project_position as _project_position_impl,
+        unproject_position as _unproject_position_impl,
+    )
+except Exception:
+    _project_position_impl = None
+    _unproject_position_impl = None
+
 
 class BrowserMapDashboard:
     """Simple browser dashboard served locally with a live map and table."""
@@ -711,10 +720,17 @@ class BrowserMapDashboard:
 
     @staticmethod
     def _project_position(x_pos: int, y_pos: int, map_n: int) -> tuple[int, int]:
-        """Convert game coordinates to the stitched map's pixel coordinates."""
-        # These offsets match the original BetterMapVis calibration: each game
-        # tile is 16 pixels and the map image's origin is at (864, 331).
-        map_offsets = {
+        """Convert game coordinates to the stitched map's pixel coordinates.
+
+        Delegates to the single source of truth in
+        :mod:`v2.map_projection` so that the env and the dashboard always
+        agree on where each map offset lands in the 4000 × 4000 image.
+        """
+        if _project_position_impl is not None:
+            result = _project_position_impl(x_pos, y_pos, map_n)
+            return (result.pixel_x, result.pixel_y)
+        # Fallback — should not happen in normal operation.
+        offset_x, offset_y = {
             0: (0, 0), 1: (-10, 72), 2: (-10, 180),
             12: (0, 36), 13: (0, 144), 14: (30, 172),
             15: (80, 190), 33: (-50, 64), 37: (-9, 2),
@@ -726,11 +742,33 @@ class BrowserMapDashboard:
             56: (-30, 163), 57: (-19, 177), 58: (-25, 154),
             59: (83, 227), 60: (123, 227), 61: (152, 227),
             68: (65, 190),
-        }
-        offset_x, offset_y = map_offsets.get(map_n, (0, 0))
+        }.get(map_n, (0, 0))
         pixel_x = 864 + 16 * (offset_x + x_pos)
         pixel_y = 4000 - (331 + 16 * (offset_y - y_pos))
         return int(pixel_x), int(pixel_y)
+
+    def unproject_position(self, pixel_x: int, pixel_y: int) -> dict[str, Any]:
+        """Convert stitched-map PNG pixel coordinates back to in-game coordinates.
+
+        Returns a dict with ``map_id``, ``map_name``, ``x``, ``y`` and an
+        ``in_bounds`` flag.  Delegates to :func:`v2.map_projection.unproject_position`.
+        """
+        if _unproject_position_impl is not None:
+            result = _unproject_position_impl(pixel_x, pixel_y)
+            return {
+                "map_id": result.map_id,
+                "map_name": result.map_name,
+                "x": result.x,
+                "y": result.y,
+                "in_bounds": result.in_bounds,
+            }
+        return {
+            "map_id": 0,
+            "map_name": "Unknown",
+            "x": 0,
+            "y": 0,
+            "in_bounds": False,
+        }
 
     def add_lava_zone(self, x: int, y: int) -> None:
         with self._lock:
@@ -811,6 +849,23 @@ class BrowserMapDashboard:
                     self.end_headers()
                     self.wfile.write(data)
                     return
+                if parsed.path == "/api/map-coords":
+                    query = parse_qs(parsed.query)
+                    try:
+                        px = int(query.get("x", [0])[0])
+                        py = int(query.get("y", [0])[0])
+                    except (ValueError, IndexError):
+                        self.send_error(400, "x and y query parameters must be integers")
+                        return
+                    result = dashboard.unproject_position(px, py)
+                    data = json.dumps(result).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("Content-Length", str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+                    return
                 self.send_error(404)
 
             def do_POST(self) -> None:
@@ -844,6 +899,21 @@ class BrowserMapDashboard:
                             dashboard._mosaic_stream_active = bool(payload["mosaic"])
                         if "individual_frames" in payload:
                             dashboard._individual_frames_active = bool(payload["individual_frames"])
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"ok": True}).encode("utf-8"))
+                    return
+                if parsed.path == "/api/log":
+                    content_length = int(self.headers.get("Content-Length", "0"))
+                    body = self.rfile.read(content_length)
+                    try:
+                        payload = json.loads(body.decode("utf-8"))
+                    except json.JSONDecodeError:
+                        self.send_error(400, "invalid json")
+                        return
+                    message = payload.get("message", "")
+                    print(f"[MAP COORD] {message}", flush=True)
                     self.send_response(200)
                     self.send_header("Content-Type", "application/json")
                     self.end_headers()

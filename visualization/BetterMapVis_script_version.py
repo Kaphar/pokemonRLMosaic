@@ -11,6 +11,8 @@ from tqdm import tqdm
 import mediapy as media
 import numpy as np
 
+from v2.map_projection import project_position as _project_position
+
 
 def make_all_coords_arrays(filtered_dfs):
     return np.array([tdf[['x', 'y', 'map']].to_numpy().astype(np.uint8) for tdf in filtered_dfs]).transpose(1,0,2)
@@ -26,53 +28,17 @@ def get_sprite_by_coords(img, x, y):
     sprite = img[sy:sy+16, sx:sx+16]
     return np.where((sprite == alpha_v).all(axis=2).reshape(16,16,1), np.array([[[0,0,0,0]]]), sprite).astype(np.uint8)
 
-def game_coord_to_pixel_coord(
-    x, y, map_idx, base_y):
-    
-    global_offset = np.array([1056-16*12, 331]) #np.array([790, -29])
-    map_offsets = {
-        # https://bulbapedia.bulbagarden.net/wiki/List_of_locations_by_index_number_(Generation_I)
-        0: np.array([0,0]), # pallet town
-        1: np.array([-10, 72]), # viridian
-        2: np.array([-10, 180]), # pewter
-        12: np.array([0, 36]), # route 1
-        13: np.array([0, 144]), # route 2
-        14: np.array([30, 172]), # Route 3
-        15: np.array([80, 190]), #Route 4
-        33: np.array([-50, 64]), # route 22
-        37: np.array([-9, 2]), # red house first
-        38: np.array([-9, 25-32]), # red house second
-        39: np.array([9+12, 2]), # blues house
-        40: np.array([25-4, -6]), # oaks lab
-        41: np.array([30, 47]), # Pokémon Center (Viridian City)
-        42: np.array([30, 55]), # Poké Mart (Viridian City)
-        43: np.array([30, 72]), # School (Viridian City)
-        44: np.array([30, 64]), # House 1 (Viridian City)
-        47: np.array([21,136]), # Gate (Viridian City/Pewter City) (Route 2)
-        49: np.array([21,108]), # Gate (Route 2)
-        50: np.array([21,108]), # Gate (Route 2/Viridian Forest) (Route 2)
-        51: np.array([-35, 137]), # viridian forest
-        52: np.array([-10, 189]), # Pewter Museum (floor 1)
-        53: np.array([-10, 198]), # Pewter Museum (floor 2)
-        54: np.array([-21, 169]), #Pokémon Gym (Pewter City)
-        55: np.array([-19, 177]), #House with disobedient Nidoran♂ (Pewter City)
-        56: np.array([-30, 163]), #Poké Mart (Pewter City)
-        57: np.array([-19, 177]), #House with two Trainers (Pewter City)
-        58: np.array([-25, 154]), # Pokémon Center (Pewter City)
-        59: np.array([83, 227]), # Mt. Moon (Route 3 entrance)
-        60: np.array([123, 227]), # Mt. Moon
-        61: np.array([152, 227]), # Mt. Moon
-        68: np.array([65, 190]), # Pokémon Center (Route 4)
-        193: None # Badges check gate (Route 22)
-    }
-    if map_idx in map_offsets.keys():
-        offset = map_offsets[map_idx]
-    else:
-        offset = np.array([0,0])
-        x, y = 0, 0
-    coord = global_offset + 16*(offset + np.array([x,y]))
-    coord[1] = base_y - coord[1]
-    return coord
+def game_coord_to_pixel_coord(x, y, map_idx, base_y):
+    """Convert in-game tile coordinates to stitched-map PNG pixel coordinates.
+
+    Delegates to :func:`v2.map_projection.project_position` so that the
+    offset table and projection formula stay in sync with the env and the
+    web dashboard.
+
+    ``base_y`` is the stitched image height (normally 4000).
+    """
+    result = _project_position(x, y, map_idx, base_y=base_y)
+    return np.array([result.pixel_x, result.pixel_y])
 
 def add_sprite(overlay_map, sprite, coord):
     raw_base = (overlay_map[coord[1]:coord[1]+16, coord[0]:coord[0]+16, :])
@@ -146,10 +112,10 @@ def render_video(fname, all_coords, walks, bg, inter_steps=4, add_start=True):
                             state[run]['dir'] = 0
 
                     p_coord = game_coord_to_pixel_coord(
-                        cx, -cy, state[run]['map'], over.shape[0]
+                        cx, cy, state[run]['map'], over.shape[0]
                     )
                     prev_p_coord = game_coord_to_pixel_coord(
-                        px, -py, prev[2], over.shape[0]
+                        px, py, prev[2], over.shape[0]
                     )
                     diff = p_coord - prev_p_coord
                     interp_coord = prev_p_coord + (fract*(diff.astype(np.float32))).astype(np.int32)

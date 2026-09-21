@@ -2,6 +2,20 @@ import { el, state } from './state.js';
 import { isDynamicMosaicTabActive } from './util.js';
 import { selectInspectorEnv } from './inspector_tab.js';
 
+function fetchIndividualFrame(envIndex) {
+  const url = '/api/individual/' + envIndex + '?t=' + Date.now();
+  return fetch(url, { cache: 'no-store' })
+    .then(function(resp) {
+      if (resp.status === 204 || !resp.ok) {
+        return null;
+      }
+      return resp.blob();
+    })
+    .catch(function() {
+      return null;
+    });
+}
+
 function updateDynamicMosaic(envCount) {
   const grid = el.dynamicMosaicGrid;
   if (!grid) return;
@@ -31,9 +45,10 @@ function updateDynamicMosaic(envCount) {
       const img = document.createElement('img');
       img.id = 'dynamic-frame-' + i;
       img.alt = 'Env ' + (i + 1);
-      img.addEventListener('error', function() {
-        this.style.opacity = '0.3';
-      });
+      img.style.opacity = '0.3';
+      img.onload = function() {
+        this.style.opacity = '1';
+      };
 
       const label = document.createElement('div');
       label.style.cssText = 'position: absolute; top: 4px; left: 4px; background: rgba(15, 22, 34, 0.85); padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; color: var(--accent); font-weight: 600;';
@@ -48,8 +63,17 @@ function updateDynamicMosaic(envCount) {
   for (let i = startIndex; i < endIndex; i++) {
     const img = document.getElementById('dynamic-frame-' + i);
     if (img) {
-      const newUrl = '/api/individual/' + i + '?t=' + Date.now();
-      img.src = newUrl;
+      fetchIndividualFrame(i).then(function(blob) {
+        if (blob === null) {
+          return;
+        }
+        const newUrl = URL.createObjectURL(blob);
+        if (img._blobUrl) {
+          URL.revokeObjectURL(img._blobUrl);
+        }
+        img._blobUrl = newUrl;
+        img.src = newUrl;
+      });
     }
   }
   el.dynamicMosaicStatus.textContent = 'live (' + envCount + ' streams, showing ' + visibleCount + ')';

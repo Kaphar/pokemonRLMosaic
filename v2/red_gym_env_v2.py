@@ -14,6 +14,7 @@ from gymnasium import Env, spaces
 from pyboy.utils import WindowEvent
 
 from global_map import local_to_global, GLOBAL_MAP_SHAPE
+from map_projection import project_position as _project_position_impl
 
 _V2_DIR = Path(__file__).resolve().parent
 LAVA_JSON_PATH = _V2_DIR.parent / "skill_lab" / "lava.json"
@@ -414,24 +415,12 @@ class RedGymEnv(Env):
 
         Matches the web dashboard's projection so lava zones drawn on the
         browser map align with the agent's in-game position.
+
+        Delegates to :func:`map_projection.project_position` — the single
+        source of truth for the offset table and projection formula.
         """
-        map_offsets = {
-            0: (0, 0), 1: (-10, 72), 2: (-10, 180),
-            12: (0, 36), 13: (0, 144), 14: (30, 172),
-            15: (80, 190), 33: (-50, 64), 37: (-9, 2),
-            38: (-9, -7), 39: (21, 2), 40: (21, -6),
-            41: (30, 47), 42: (30, 55), 43: (30, 72),
-            44: (30, 64), 47: (21, 136), 49: (21, 108),
-            50: (21, 108), 51: (-35, 137), 52: (-10, 189),
-            53: (-10, 198), 54: (-21, 169), 55: (-19, 177),
-            56: (-30, 163), 57: (-19, 177), 58: (-25, 154),
-            59: (83, 227), 60: (123, 227), 61: (152, 227),
-            68: (65, 190),
-        }
-        offset_x, offset_y = map_offsets.get(map_n, (0, 0))
-        pixel_x = 864 + 16 * (offset_x + x_pos)
-        pixel_y = 4000 - (331 + 16 * (offset_y - y_pos))
-        return int(pixel_x), int(pixel_y)
+        result = _project_position_impl(x_pos, y_pos, map_n)
+        return (result.pixel_x, result.pixel_y)
 
     @staticmethod
     def _load_lava_zones() -> list[tuple[int, int]]:
