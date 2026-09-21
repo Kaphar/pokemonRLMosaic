@@ -42,14 +42,17 @@ body {
 .tab-bar .tab-btn:hover { background: rgba(255, 255, 255, 0.08); }
 .tab-bar .tab-btn.active { background: var(--panel); color: var(--accent); border-bottom: 2px solid var(--accent); }
 
-.tab-content { padding: 18px; height: calc(100vh - 60px); }
+.tab-content {
+  /* padding: 18px; */
+  height: calc(100vh - 60px);
+}
 .tab-pane { display: none; height: 100%; }
 .tab-pane.active { display: block; }
 
 .panel {
   background: rgba(20, 29, 46, 0.9);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
+  /* border-radius: 12px; */
   overflow: hidden;
 }
 

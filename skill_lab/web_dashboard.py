@@ -88,7 +88,9 @@ class BrowserMapDashboard:
         self._config: dict[str, Any] = {}
         self._pending_saves: dict[str, Any] = {}
 
-        self._individual_frames: dict[int, bytes] = {}  # env_index -> jpeg bytes
+        self._individual_frames: dict[int, bytes] = {}  # env_index -> png bytes
+        self._mosaic_stream_active = False
+        self._individual_frames_active = False
         self.state: dict[str, Any] = {
             "title": "Skill Lab Dashboard",
             "envs": [],
@@ -101,6 +103,8 @@ class BrowserMapDashboard:
 
     def set_mosaic_frame(self, frame) -> None:
         """Store a mosaic frame (numpy array) as JPEG for browser streaming."""
+        if not self._mosaic_stream_active:
+            return
         if frame is None:
             print("[MOSAIC DEBUG] No frame to store", flush=True)
             return
@@ -122,6 +126,8 @@ class BrowserMapDashboard:
 
     def set_individual_frame(self, env_index: int, frame) -> None:
         """Store an individual emulator frame as PNG for dynamic mosaic streaming (lossless quality)."""
+        if not self._individual_frames_active:
+            return
         if frame is None:
             return
         if not _HAS_CV2:
@@ -528,8 +534,14 @@ class BrowserMapDashboard:
             action_names[action] if isinstance(action, int) and 0 <= action < len(action_names) else f"#{action}"
             for action in recent_actions
         ]
-        milestones = self._inspector_milestones(env_obj)
-        memory_watch = self._inspector_memory_watch(memory)
+        milestones = self._safe_call(
+            lambda: self._inspector_milestones(env_obj),
+            {"available": False},
+        )
+        memory_watch = self._safe_call(
+            lambda: self._inspector_memory_watch(memory),
+            [],
+        )
         screen_shape = self._safe_call(
             lambda: [int(value) for value in pyboy.screen.ndarray.shape],
             [],
@@ -596,16 +608,22 @@ class BrowserMapDashboard:
         if tracker is None:
             return {"available": False}
         milestones = list(getattr(tracker, "milestones", []) or [])
-        achieved = set(getattr(tracker, "achieved", set()) or set())
+        achieved_raw = getattr(tracker, "achieved", set()) or set()
+        try:
+            achieved = set(achieved_raw)
+        except TypeError:
+            achieved = set()
         achieved_steps = dict(getattr(tracker, "achieved_steps", {}) or {})
-        current_target = next(
-            (name for name in milestones if name not in achieved),
-            milestones[-1] if milestones else None,
-        )
+        def _find_current():
+            for name in milestones:
+                if name not in achieved:
+                    return name
+            return milestones[-1] if milestones else None
+        current_target = self._safe_call(_find_current, None)
         return {
             "available": True,
             "milestones": milestones,
-            "achieved": sorted(achieved),
+            "achieved": self._safe_call(lambda: sorted(achieved), list(achieved_raw)),
             "achieved_steps": achieved_steps,
             "current_target": current_target,
         }
@@ -813,6 +831,24 @@ class BrowserMapDashboard:
                     self.end_headers()
                     self.wfile.write(json.dumps({"ok": True, "status": "saved"}).encode("utf-8"))
                     return
+                if parsed.path == "/api/streaming":
+                    content_length = int(self.headers.get("Content-Length", "0"))
+                    body = self.rfile.read(content_length)
+                    try:
+                        payload = json.loads(body.decode("utf-8"))
+                    except json.JSONDecodeError:
+                        self.send_error(400, "invalid json")
+                        return
+                    with dashboard._lock:
+                        if "mosaic" in payload:
+                            dashboard._mosaic_stream_active = bool(payload["mosaic"])
+                        if "individual_frames" in payload:
+                            dashboard._individual_frames_active = bool(payload["individual_frames"])
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"ok": True}).encode("utf-8"))
+                    return
                 if parsed.path != "/api/lava":
                     self.send_error(404)
                     return
@@ -866,7 +902,8 @@ class BrowserMapDashboard:
                 self.send_header("Cache-Control", "no-store")
                 self.send_header("Content-Length", str(len(frame)))
                 self.end_headers()
-                self.wfile.write(frame)
+                with suppress(ConnectionAbortedError, BrokenPipeError):
+                    self.wfile.write(frame)
 
             def _send_individual_frame(self, env_index: int) -> None:
                 with dashboard._lock:
@@ -880,7 +917,8 @@ class BrowserMapDashboard:
                 self.send_header("Cache-Control", "no-store")
                 self.send_header("Content-Length", str(len(frame)))
                 self.end_headers()
-                self.wfile.write(frame)
+                with suppress(ConnectionAbortedError, BrokenPipeError):
+                    self.wfile.write(frame)
 
             def _send_inspector_screen(self, env_index: int) -> None:
                 """Send the high-quality 320x288 screen image for the Environment Inspector."""
@@ -922,7 +960,8 @@ class BrowserMapDashboard:
                     self.send_header("Cache-Control", "no-store")
                     self.send_header("Content-Length", str(len(encoded.tobytes())))
                     self.end_headers()
-                    self.wfile.write(encoded.tobytes())
+                    with suppress(ConnectionAbortedError, BrokenPipeError):
+                        self.wfile.write(encoded.tobytes())
                 except Exception as e:
                     print(f"[INSPECTOR SCREEN DEBUG] Error: {e}", flush=True)
                     self.send_response(204)

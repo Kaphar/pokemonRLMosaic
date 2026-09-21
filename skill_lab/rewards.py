@@ -97,6 +97,7 @@ def check_baseline_rewards(
     }
 
 
+# this function will still be useful for the perfect pokemon training.
 def calculate_starter_reward(
 	attack_dv: int,
 	defense_dv: int,

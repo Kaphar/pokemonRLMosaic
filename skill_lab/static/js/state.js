@@ -27,6 +27,8 @@ const el = {
   dynamicMosaicNextBtn: document.getElementById('dynamic-mosaic-next-btn'),
   dynamicMosaicPageIndicator: document.getElementById('dynamic-mosaic-page-indicator'),
   dynamicMosaicLiveUpdate: document.getElementById('dynamic-mosaic-live-update'),
+  dynamicMosaicPoll: document.getElementById('dynamic-mosaic-poll'),
+  dynamicMosaicPollValue: document.getElementById('dynamic-mosaic-poll-value'),
   dynamicMosaicBandwidth: document.getElementById('dynamic-mosaic-bandwidth'),
   inspectorEnvSelect: document.getElementById('inspector-env-select'),
   inspectorScreen: document.getElementById('inspector-screen'),
