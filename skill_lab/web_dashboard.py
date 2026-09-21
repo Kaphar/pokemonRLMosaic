@@ -927,20 +927,10 @@ class BrowserMapDashboard:
     .chip.bad {{ background: rgba(255, 107, 107, 0.2); color: var(--danger); }}
     .mosaic-panel {{ display: flex; flex-direction: column; height: 100%; }}
     .mosaic-content {{ flex: 1; display: flex; align-items: center; justify-content: center; overflow: auto; padding: 12px; }}
-    .mosaic-content img {{ width: 100%; height: 100%; object-fit: contain; border-radius: 10px; border: 1px solid rgba(255,255,255,0.08); }}
-    .stats-scroll {{ overflow: auto; max-height: calc(100vh - 130px); }}
-    table {{ border-collapse: collapse; width: 100%; font-size: 13px; }}
-    th {{ text-align: left; padding: 4px 8px; border-bottom: 1px solid rgba(255,255,255,0.1); }}
-    td {{ padding: 4px 8px; border-bottom: 1px solid rgba(255,255,255,0.05); }}
-    .config-panel .config-form {{ padding: 16px; display: flex; flex-direction: column; gap: 12px; }}
-    .config-form label {{ display: flex; align-items: center; gap: 8px; }}
-    .config-form input[type="range"] {{ flex: 1; }}
-    .config-form input[type="checkbox"] {{ margin-right: 4px; }}
-    #apply-config-btn {{ padding: 8px 16px; background: var(--accent); color: var(--bg); border: none; border-radius: 6px; cursor: pointer; }}
-    .inspector-content {{ padding: 12px; overflow: auto; max-height: calc(100vh - 130px); }}
-    .inspector-content table {{ font-size: 12px; }}
-    .inspector-content th {{ text-align: left; }}
-    tr.changed td {{ background: rgba(103, 243, 155, 0.1); }}
+    .mosaic-content img {{ max-width: 100%; max-height: 100%; border-radius: 10px; border: 1px solid rgba(255,255,255,0.08); }}
+    #dynamic-mosaic-grid {{ display: grid !important; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)) !important; gap: 12px !important; width: 100% !important; height: 100% !important; overflow: auto !important; align-content: start !important; }}
+    .dynamic-mosaic-cell {{ position: relative; border-radius: 8px; overflow: hidden; border: 1px solid rgba(255,255,255,0.08); cursor: pointer; transition: all 0.2s ease; background: rgba(0,0,0,0.3); aspect-ratio: 160/144; }}
+    .dynamic-mosaic-cell img {{ width: 100% !important; height: 100% !important; object-fit: contain !important; display: block !important; background: #000; }}
   </style>
 </head>
 <body>
@@ -1551,7 +1541,6 @@ class BrowserMapDashboard:
         for (let i = 0; i < envCount; i++) {{
           const cell = document.createElement('div');
           cell.className = 'dynamic-mosaic-cell';
-          cell.style.cssText = 'position: relative; border-radius: 8px; overflow: hidden; border: 1px solid rgba(255,255,255,0.08); cursor: pointer; transition: all 0.2s ease;';
           cell.onclick = (function(idx) {{
             return function() {{
               selectInspectorEnv(idx);
@@ -1561,7 +1550,6 @@ class BrowserMapDashboard:
           const img = document.createElement('img');
           img.id = 'dynamic-frame-' + i;
           img.alt = 'Env ' + (i + 1);
-          img.style.cssText = 'width: 100%; height: auto; display: block;';
           img.addEventListener('error', function() {{
             this.style.opacity = '0.3';
           }});
@@ -1580,12 +1568,8 @@ class BrowserMapDashboard:
       for (let i = 0; i < envCount; i++) {{
         const img = document.getElementById('dynamic-frame-' + i);
         if (img) {{
-          const oldUrl = img.dataset.currentUrl || '';
           const newUrl = '/api/individual/' + i + '?t=' + Date.now();
-          if (oldUrl !== newUrl) {{
-            img.dataset.currentUrl = newUrl;
-            img.src = newUrl;
-          }}
+          img.src = newUrl;
         }}
       }}
       dynamicMosaicStatus.textContent = 'live (' + envCount + ' streams)';
