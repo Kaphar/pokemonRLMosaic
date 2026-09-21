@@ -771,6 +771,22 @@ class BrowserMapDashboard:
                     except (ValueError, IndexError):
                         self.send_error(400, "invalid env index")
                     return
+                if parsed.path == "/api/inspector-screen":
+                    query = parse_qs(parsed.query)
+                    env_index = int(query.get("env", [0])[0])
+                    self._send_inspector_screen(env_index)
+                    return
+                if parsed.path == "/api/inspector":
+                    query = parse_qs(parsed.query)
+                    env_index = int(query.get("env", [0])[0])
+                    data = json.dumps(dashboard.get_inspector_data(env_index)).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("Content-Length", str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+                    return
                 self.send_error(404)
 
             def do_POST(self) -> None:
@@ -859,6 +875,52 @@ class BrowserMapDashboard:
                 self.send_header("Content-Length", str(len(frame)))
                 self.end_headers()
                 self.wfile.write(frame)
+
+            def _send_inspector_screen(self, env_index: int) -> None:
+                """Send the high-quality 320x288 screen image for the Environment Inspector."""
+                env = dashboard._current_env()
+                if env is None:
+                    self.send_response(204)
+                    self.end_headers()
+                    return
+                try:
+                    env_obj = dashboard._env_object(env, env_index)
+                    if env_obj is None:
+                        self.send_response(204)
+                        self.end_headers()
+                        return
+                    base_env = getattr(env_obj, "env", env_obj)
+                    unwrapped = getattr(base_env, "unwrapped", base_env)
+                    pyboy = getattr(unwrapped, "pyboy", getattr(env_obj, "pyboy", None))
+                    if pyboy is None:
+                        self.send_response(204)
+                        self.end_headers()
+                        return
+                    screen = pyboy.screen.ndarray
+                    if screen is None:
+                        self.send_response(204)
+                        self.end_headers()
+                        return
+                    if screen.shape[-1] == 4:
+                        screen = screen[:, :, :3]
+                    # Resize to 320x288 (2x Game Boy resolution) like ObservationInspector
+                    screen = cv2.resize(screen, (320, 288), interpolation=cv2.INTER_NEAREST)
+                    # Encode as PNG for lossless quality
+                    ok, encoded = cv2.imencode(".png", screen)
+                    if not ok or encoded is None:
+                        self.send_response(204)
+                        self.end_headers()
+                        return
+                    self.send_response(200)
+                    self.send_header("Content-Type", "image/png")
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("Content-Length", str(len(encoded.tobytes())))
+                    self.end_headers()
+                    self.wfile.write(encoded.tobytes())
+                except Exception as e:
+                    print(f"[INSPECTOR SCREEN DEBUG] Error: {e}", flush=True)
+                    self.send_response(204)
+                    self.end_headers()
 
             def _send_html(self) -> None:
                 svg_w, svg_h = dashboard.map_width, dashboard.map_height
