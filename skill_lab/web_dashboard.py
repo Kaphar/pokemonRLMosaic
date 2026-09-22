@@ -721,7 +721,7 @@ class BrowserMapDashboard:
         return values
 
     def _inspector_milestones(self, env_obj: Any) -> dict[str, Any]:
-        tracker = getattr(env_obj, "milestone_tracker", None)
+        tracker = getattr(env_obj, "event_tracker", None)
         if tracker is None:
             return {"available": False}
         event_names = getattr(tracker, "event_names", {}) or {}

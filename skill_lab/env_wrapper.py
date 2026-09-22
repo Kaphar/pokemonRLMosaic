@@ -19,11 +19,11 @@ from skill_lab.config import (
     SAVE_ON_CATCH_ENABLED,
     SAVE_ON_CATCH_MIN_DV,
 )
-from skill_lab.milestones import MilestoneTracker
+from skill_lab.events import EventTracker
 from skill_lab.party_reader import Gen1PartyReader, PyBoyMemoryReader
 from skill_lab.rewards import calculate_starter_reward, wrong_choice_penalty
 from skill_lab.breadcrumb import BreadcrumbTracker
-from skill_lab.checkpoints import CheckpointTracker
+from milestonetracker import MilestoneTracker
 from skill_lab.ram_map import GameState
 
 
@@ -113,7 +113,7 @@ class SkillLabWrapper(gymnasium.Wrapper):
         self.game_state = GameState(self.env.unwrapped.pyboy)
 
         # --- Checkpoint Tracker (curated story milestones for UI) ---
-        self.checkpoint_tracker = CheckpointTracker.from_stage_config(
+        self.checkpoint_tracker = MilestoneTracker.from_stage_config(
             config.get("stage_config", {}), self.effective_rewards
         )
 
@@ -168,11 +168,11 @@ class SkillLabWrapper(gymnasium.Wrapper):
         if self.train_directive:
             print(f"[{self.env_name}] Train directive: {self.train_directive}")
 
-        # --- Milestone Tracker (event-flag scanner) ---
+        # --- Event  Tracker (event-flag scanner) ---
         # Reads events.json directly; awards effective_rewards["event"] per flag.
-        self.milestone_tracker: MilestoneTracker | None = None
+        self.event_tracker: EventTracker | None = None
         if self.events_path or self.effective_rewards:
-            self.milestone_tracker = MilestoneTracker(
+            self.event_tracker = EventTracker(
                 effective_rewards=self.effective_rewards,
             )
 
@@ -744,8 +744,8 @@ class SkillLabWrapper(gymnasium.Wrapper):
 
         # --- Event flag scanner (broad, for event reward) ---
         event_reward = 0.0
-        if self.milestone_tracker is not None:
-            event_reward = self.milestone_tracker.check_and_reward(self.env, self._colored_env_label())
+        if self.event_tracker is not None:
+            event_reward = self.event_tracker.check_and_reward(self.env, self._colored_env_label())
             if event_reward > 0:
                 reward += event_reward
                 info["event_reward"] = event_reward
@@ -881,8 +881,8 @@ class SkillLabWrapper(gymnasium.Wrapper):
         """Reset environment and milestone tracker."""
         observation, info = self.env.reset(**kwargs)
 
-        if self.milestone_tracker is not None:
-            self.milestone_tracker.reset(self.game_state, self._colored_env_label())
+        if self.event_tracker is not None:
+            self.event_tracker.reset(self.game_state, self._colored_env_label())
 
         self.masked_action_count = 0
         self.total_milestone_reward = 0.0

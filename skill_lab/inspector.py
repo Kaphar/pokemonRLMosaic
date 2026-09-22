@@ -19,7 +19,7 @@ from skill_lab.panel_data import (
     draw_world_info,
     read_panel_data,
 )
-from skill_lab.checkpoints import CheckpointTracker
+from milestonetracker import MilestoneTracker
 from skill_lab.party_reader import Gen1PartyReader, PyBoyMemoryReader
 from skill_lab.ram_map import GameState
 
@@ -181,13 +181,13 @@ class ObservationInspector:
                         cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 180, 180), 1)
         y += 24
 
-        milestone_tracker = getattr(env.envs[env_index], "milestone_tracker", None)
-        if milestone_tracker is not None:
+        event_tracker = getattr(env.envs[env_index], "event_tracker", None)
+        if event_tracker is not None:
             cv2.putText(panel, "Milestones:", (15, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
             y += 18
-            event_names = getattr(milestone_tracker, "event_names", {}) or {}
+            event_names = getattr(event_tracker, "event_names", {}) or {}
             milestone_items = list(event_names.items()) if isinstance(event_names, dict) else []
-            achieved = getattr(milestone_tracker, "achieved", set()) or set()
+            achieved = getattr(event_tracker, "achieved", set()) or set()
             current_target_index = None
             for idx, (key, name) in enumerate(milestone_items):
                 if key not in achieved:
@@ -204,7 +204,7 @@ class ObservationInspector:
                 if done:
                     color = (0, 255, 0)
                     label = "✓"
-                    step_text = f" @ step {getattr(milestone_tracker, 'achieved_steps', {}).get(key, 0)}"
+                    step_text = f" @ step {getattr(event_tracker, 'achieved_steps', {}).get(key, 0)}"
                 elif is_target:
                     color = (0, 255, 255)
                     label = "▶"
