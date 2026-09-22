@@ -1,6 +1,205 @@
 import { el, state } from './state.js';
 import { isInspectorTabActive } from './util.js';
 
+const ACTION_NAMES = ['Down', 'Left', 'Right', 'Up', 'A', 'B', 'Start', 'Select'];
+
+const SDL_TO_CODE_MAP = {
+  'down': 'ArrowDown',
+  'up': 'ArrowUp',
+  'left': 'ArrowLeft',
+  'right': 'ArrowRight',
+  'return': 'Enter',
+  'tab': 'Tab',
+  'pageup': 'PageUp',
+  'pagedown': 'PageDown',
+  'escape': 'Escape',
+  ' ': 'Space',
+  'p': 'KeyP',
+  'z': 'KeyZ',
+  'x': 'KeyX',
+};
+
+function resolveGamepadToken(token) {
+  if (!token) return null;
+  const m = token.match(/^(?:controller|button):(\d+)$/);
+  if (m) return { type: 'button', index: parseInt(m[1]) };
+  const ax = token.match(/^axis:(\d+):(positive|negative)$/);
+  if (ax) return { type: 'axis', index: parseInt(ax[1]), direction: ax[2] };
+  return null;
+}
+
+function resolveKeyToken(token) {
+  if (!token) return null;
+  if (SDL_TO_CODE_MAP[token]) return SDL_TO_CODE_MAP[token];
+  if (token.length === 1 && token >= 'a' && token <= 'z') return 'Key' + token.toUpperCase();
+  if (token.length === 1 && token >= '0' && token <= '9') return 'Digit' + token;
+  return token.replace(/^key/, 'Key').replace(/^arrow/, 'Arrow');
+}
+
+function initInspector() {
+  el.inspectorEnvSelect.addEventListener('change', function() {
+    state.selectedInspectorEnv = parseInt(this.value) || 0;
+    updateInspectorScreen();
+    fetchInspectorData();
+    if (state.controlActive) {
+      fetchControlToggle();
+    }
+  });
+
+  if (el.inspectorControlBtn) {
+    el.inspectorControlBtn.addEventListener('click', toggleInspectorControl);
+  }
+
+  if (el.inspectorStatus) el.inspectorStatus.textContent = 'idle';
+}
+
+function fetchControlState() {
+  fetch('/api/control', { cache: 'no-store' })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      state.gamepadBindings = data.gamepad_bindings || {};
+      state.keyBindings = data.key_bindings || {};
+      state.controlActive = data.control_active || false;
+      state.controlEnvIndex = data.env_index || 0;
+      updateControlButton(data.control_active || false);
+      if (data.control_active) {
+        startGamepadPolling();
+        startKeyboardListening();
+      }
+    })
+    .catch(function() {
+      updateControlButton(false);
+    });
+}
+
+function fetchControlToggle() {
+  const payload = {
+    toggle: state.controlActive,
+    env: state.selectedInspectorEnv,
+  };
+  fetch('/api/control', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  }).catch(function() {});
+}
+
+function toggleInspectorControl() {
+  state.controlActive = !state.controlActive;
+  updateControlButton(state.controlActive);
+  fetchControlToggle();
+  if (state.controlActive) {
+    startGamepadPolling();
+    startKeyboardListening();
+  } else {
+    stopGamepadPolling();
+    stopKeyboardListening();
+    state.gamepadButtonStates = {};
+  }
+}
+
+function updateControlButton(active) {
+  if (el.inspectorControlBtn) {
+    el.inspectorControlBtn.textContent = active ? 'Release Control' : 'Take Control';
+    el.inspectorControlBtn.classList.toggle('control-active', active);
+  }
+}
+
+function startGamepadPolling() {
+  if (state.gamepadPollId !== null) return;
+  state.gamepadPollId = setInterval(pollGamepad, 16);
+}
+
+function stopGamepadPolling() {
+  if (state.gamepadPollId !== null) {
+    clearInterval(state.gamepadPollId);
+    state.gamepadPollId = null;
+  }
+}
+
+function pollGamepad() {
+  if (!state.controlActive) return;
+  const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
+  const pad = gamepads[0];
+  if (!pad) return;
+  for (const action of ACTION_NAMES) {
+    const token = state.gamepadBindings[action];
+    if (!token) continue;
+    const resolved = resolveGamepadToken(token);
+    if (!resolved) continue;
+    let pressed = false;
+    if (resolved.type === 'button') {
+      if (resolved.index < pad.buttons.length) {
+        pressed = !!pad.buttons[resolved.index].pressed;
+      }
+    } else if (resolved.type === 'axis') {
+      if (resolved.index < pad.axes.length) {
+        const val = pad.axes[resolved.index];
+        pressed = resolved.direction === 'positive' ? val > 0.5 : val < -0.5;
+      }
+    }
+    const prevPressed = state.gamepadButtonStates[token] || false;
+    if (pressed !== prevPressed) {
+      state.gamepadButtonStates[token] = pressed;
+      sendInput(action, pressed);
+    }
+  }
+}
+
+function onKeyDown(e) {
+  if (!state.controlActive) return;
+  if (e.repeat) return;
+  for (const action of ACTION_NAMES) {
+    const token = state.keyBindings[action];
+    if (!token) continue;
+    const code = resolveKeyToken(token);
+    if (!code) continue;
+    if (e.code === code && !state.keyStates[code]) {
+      state.keyStates[code] = true;
+      e.preventDefault();
+      sendInput(action, true);
+    }
+  }
+}
+
+function onKeyUp(e) {
+  if (!state.controlActive) return;
+  for (const action of ACTION_NAMES) {
+    const token = state.keyBindings[action];
+    if (!token) continue;
+    const code = resolveKeyToken(token);
+    if (!code) continue;
+    if (e.code === code && state.keyStates[code]) {
+      state.keyStates[code] = false;
+      e.preventDefault();
+      sendInput(action, false);
+    }
+  }
+}
+
+function startKeyboardListening() {
+  document.addEventListener('keydown', onKeyDown, true);
+  document.addEventListener('keyup', onKeyUp, true);
+}
+
+function stopKeyboardListening() {
+  document.removeEventListener('keydown', onKeyDown, true);
+  document.removeEventListener('keyup', onKeyUp, true);
+  state.keyStates = {};
+}
+
+function sendInput(action, pressed) {
+  fetch('/api/control', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: action,
+      pressed: pressed,
+      env: state.selectedInspectorEnv,
+    }),
+  }).catch(function() {});
+}
+
 function renderInspectorDetails(data) {
   if (!el.inspectorDetails) return;
 
@@ -253,17 +452,7 @@ function updateInspectorSelect(envs) {
     el.inspectorEnvSelect.value = currentVal;
   }
   state.selectedInspectorEnv = parseInt(el.inspectorEnvSelect.value) || 0;
-}
-
-function initInspector() {
-  el.inspectorEnvSelect.addEventListener('change', function() {
-    state.selectedInspectorEnv = parseInt(this.value) || 0;
-    updateInspectorScreen();
-    fetchInspectorData();
-  });
-
-  if (el.inspectorStatus) el.inspectorStatus.textContent = 'idle';
-}
+ }
 
 export {
   initInspector,
@@ -275,4 +464,7 @@ export {
   renderInspectorDetails,
   renderInspectorMemoryWatch,
   updateSelectionHighlight,
+  fetchControlState,
+  toggleInspectorControl,
+  sendInput,
 };

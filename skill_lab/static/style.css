@@ -159,3 +159,18 @@ tbody tr:nth-child(odd) { background: rgba(255, 255, 255, 0.01); }
 .config-form input[type="range"] { width: 200px; vertical-align: middle; }
 .config-form input[type="checkbox"] { margin-right: 8px; }
 .config-form button { padding: 6px 16px; border-radius: 4px; border: 1px solid rgba(255, 255, 255, 0.15); background: var(--panel); color: var(--text); cursor: pointer; }
+.config-form button:hover { background: var(--accent); color: var(--bg); }
+
+.control-btn { padding: 4px 12px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.15); background: var(--panel); color: var(--muted); font-size: 0.8rem; font-weight: 600; cursor: pointer; transition: all 0.15s ease; }
+.control-btn:hover { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+.control-btn.control-active { background: var(--good); color: var(--bg); border-color: var(--good); }
+
+.binding-sections { margin-top: 16px; }
+.binding-section { margin-bottom: 20px; }
+.binding-section h4 { color: var(--muted); font-size: 0.8rem; font-weight: 600; margin: 0 0 8px 0; }
+.binding-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.binding-table td { padding: 6px 8px; border-bottom: 1px solid rgba(255, 255, 255, 0.04); }
+.binding-action { color: var(--muted); font-weight: 600; width: 80px; }
+.binding-value { color: var(--text); font-family: monospace; font-size: 0.8rem; }
+.binding-set-btn { padding: 4px 10px; border-radius: 4px; border: 1px solid rgba(255, 255, 255, 0.15); background: var(--panel); color: var(--text); cursor: pointer; font-size: 0.78rem; }
+.binding-set-btn:hover { background: var(--accent); color: var(--bg); }

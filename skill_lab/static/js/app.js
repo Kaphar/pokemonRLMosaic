@@ -9,8 +9,9 @@ import {
   fetchInspectorData,
   updateInspectorScreen,
   selectInspectorEnv,
+  fetchControlState,
 } from './inspector_tab.js';
-import { initConfig } from './config_tab.js';
+import { initConfig, initControlBindings } from './config_tab.js';
 
 function setStreaming(payload) {
   fetch('/api/streaming', {
@@ -74,6 +75,7 @@ function initTabs() {
       if (target === 'inspector-tab') {
         updateInspectorScreen();
         fetchInspectorData();
+        fetchControlState();
       }
     });
   });
@@ -120,6 +122,7 @@ function initDynamicMosaicControls() {
 initMap();
 initMosaic();
 initConfig();
+initControlBindings();
 initDynamicMosaic();
 initInspector();
 initTabs();
@@ -132,6 +135,8 @@ setInterval(update, 500);
 // Start self-rescheduling dynamic mosaic poller
 scheduleDynamicMosaic();
 
+// Fetch inspector control state on startup and when switching to the inspector tab
+fetchControlState();
 setInterval(function() {
   if (isInspectorTabActive()) {
     updateInspectorScreen();

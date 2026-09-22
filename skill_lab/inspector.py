@@ -185,24 +185,26 @@ class ObservationInspector:
         if milestone_tracker is not None:
             cv2.putText(panel, "Milestones:", (15, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
             y += 18
-            milestone_names = [m.get("name", f"m{i}") for i, m in enumerate(milestone_tracker.milestones)]
+            event_names = getattr(milestone_tracker, "event_names", {}) or {}
+            milestone_items = list(event_names.items()) if isinstance(event_names, dict) else []
+            achieved = getattr(milestone_tracker, "achieved", set()) or set()
             current_target_index = None
-            for idx, name in enumerate(milestone_names):
-                if name not in milestone_tracker.achieved:
+            for idx, (key, name) in enumerate(milestone_items):
+                if key not in achieved:
                     current_target_index = idx
                     break
             if current_target_index is None:
-                current_target_index = len(milestone_names) - 1
+                current_target_index = len(milestone_items) - 1
             start_index = max(0, current_target_index - 2)
-            end_index = min(len(milestone_names), current_target_index + 4)
+            end_index = min(len(milestone_items), current_target_index + 4)
             for idx in range(start_index, end_index):
-                name = milestone_names[idx]
-                done = name in milestone_tracker.achieved
+                key, name = milestone_items[idx]
+                done = key in achieved
                 is_target = idx == current_target_index
                 if done:
                     color = (0, 255, 0)
                     label = "✓"
-                    step_text = f" @ step {milestone_tracker.achieved_steps.get(name, 0)}"
+                    step_text = f" @ step {getattr(milestone_tracker, 'achieved_steps', {}).get(key, 0)}"
                 elif is_target:
                     color = (0, 255, 255)
                     label = "▶"

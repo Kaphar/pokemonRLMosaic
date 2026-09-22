@@ -46,6 +46,12 @@ try:
 except ImportError:
     _HAS_CV2 = False
 
+try:
+    from pyboy.utils import WindowEvent
+    _HAS_PYBOY = True
+except ImportError:
+    _HAS_PYBOY = False
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MAP_IMAGE_PATH = (
     PROJECT_ROOT
@@ -54,6 +60,18 @@ MAP_IMAGE_PATH = (
     / "pokemap_full_calibrated_CROPPED_1.png"
 )
 LAVA_JSON_PATH = PROJECT_ROOT / "skill_lab" / "lava.json"
+CONTROLS_PATH = PROJECT_ROOT / "skill_lab" / "controls.json"
+
+ACTION_BUTTON_EVENTS: dict[str, tuple[Any, Any]] = {
+    "Down": (WindowEvent.PRESS_ARROW_DOWN, WindowEvent.RELEASE_ARROW_DOWN) if _HAS_PYBOY else (None, None),
+    "Left": (WindowEvent.PRESS_ARROW_LEFT, WindowEvent.RELEASE_ARROW_LEFT) if _HAS_PYBOY else (None, None),
+    "Right": (WindowEvent.PRESS_ARROW_RIGHT, WindowEvent.RELEASE_ARROW_RIGHT) if _HAS_PYBOY else (None, None),
+    "Up": (WindowEvent.PRESS_ARROW_UP, WindowEvent.RELEASE_ARROW_UP) if _HAS_PYBOY else (None, None),
+    "A": (WindowEvent.PRESS_BUTTON_A, WindowEvent.RELEASE_BUTTON_A) if _HAS_PYBOY else (None, None),
+    "B": (WindowEvent.PRESS_BUTTON_B, WindowEvent.RELEASE_BUTTON_B) if _HAS_PYBOY else (None, None),
+    "Start": (WindowEvent.PRESS_BUTTON_START, WindowEvent.RELEASE_BUTTON_START) if _HAS_PYBOY else (None, None),
+    "Select": (WindowEvent.PRESS_BUTTON_SELECT, WindowEvent.RELEASE_BUTTON_SELECT) if _HAS_PYBOY else (None, None),
+}
 
 try:
     from v2.global_map import GLOBAL_MAP_SHAPE
@@ -96,6 +114,11 @@ class BrowserMapDashboard:
         self._inspector_data: dict[str, Any] = {}
         self._config: dict[str, Any] = {}
         self._pending_saves: dict[str, Any] = {}
+        self._control_active: bool = False
+        self._control_env_index: int = 0
+        self._gamepad_bindings: dict[str, str] = {}
+        self._key_bindings: dict[str, str] = {}
+        self._load_default_controls()
 
         self._individual_frames: dict[int, bytes] = {}  # env_index -> png bytes
         self._mosaic_stream_active = False
@@ -355,6 +378,87 @@ class BrowserMapDashboard:
                 if provided is not None:
                     return provided
         return env
+
+    def _load_default_controls(self) -> None:
+        """Load default gamepad/keyboard bindings from controls.json."""
+        with suppress(Exception):
+            if CONTROLS_PATH.exists():
+                saved = json.loads(CONTROLS_PATH.read_text(encoding="utf-8"))
+                for action, token in saved.get("gamepad", {}).items():
+                    if action in ACTION_BUTTON_EVENTS:
+                        self._gamepad_bindings[action] = token
+                for action, token in saved.get("keyboard", {}).items():
+                    if action in ACTION_BUTTON_EVENTS:
+                        self._key_bindings[action] = token
+
+    def send_inspector_input(self, action: str, pressed: bool, env_index: int) -> bool:
+        """Send a press/release input event to the emulator for the given env."""
+        if not _HAS_PYBOY or action not in ACTION_BUTTON_EVENTS:
+            return False
+        env = self._current_env()
+        if env is None:
+            return False
+        env_obj = self._env_object(env, env_index)
+        if env_obj is None:
+            return False
+        base_env = getattr(env_obj, "env", env_obj)
+        unwrapped = getattr(base_env, "unwrapped", base_env)
+        pyboy = getattr(unwrapped, "pyboy", getattr(env_obj, "pyboy", None))
+        if pyboy is None:
+            return False
+        press_event, release_event = ACTION_BUTTON_EVENTS[action]
+        if press_event is None or release_event is None:
+            return False
+        event = press_event if pressed else release_event
+        try:
+            pyboy.send_input(event)
+            return True
+        except Exception:
+            return False
+
+    def get_control_state(self) -> dict[str, Any]:
+        """Return current control state and bindings."""
+        with self._lock:
+            return {
+                "control_active": self._control_active,
+                "env_index": self._control_env_index,
+                "gamepad_bindings": dict(self._gamepad_bindings),
+                "key_bindings": dict(self._key_bindings),
+            }
+
+    def handle_control_request(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Handle control toggle, input events, and binding updates."""
+        with self._lock:
+            if "toggle" in payload:
+                self._control_active = bool(payload["toggle"])
+                if "env" in payload:
+                    self._control_env_index = int(payload["env"])
+            if "bindings" in payload:
+                bindings = payload["bindings"]
+                if "gamepad" in bindings:
+                    self._gamepad_bindings.update(bindings["gamepad"])
+                if "keyboard" in bindings:
+                    self._key_bindings.update(bindings["keyboard"])
+            control_active = self._control_active
+            env_index = self._control_env_index
+            gamepad_bindings = dict(self._gamepad_bindings)
+            key_bindings = dict(self._key_bindings)
+        input_ok = None
+        if "action" in payload and "pressed" in payload:
+            action = payload["action"]
+            pressed = bool(payload["pressed"])
+            target_env = int(payload.get("env", env_index))
+            input_ok = self.send_inspector_input(action, pressed, target_env)
+        result: dict[str, Any] = {
+            "ok": True,
+            "control_active": control_active,
+            "env_index": env_index,
+            "gamepad_bindings": gamepad_bindings,
+            "key_bindings": key_bindings,
+        }
+        if input_ok is not None:
+            result["input_sent"] = input_ok
+        return result
 
     @staticmethod
     def _indexed_value(values: Any, index: int, default: Any = None) -> Any:
@@ -629,14 +733,14 @@ class BrowserMapDashboard:
             achieved = set()
         achieved_steps = dict(getattr(tracker, "achieved_steps", {}) or {})
         def _find_current():
-            for name in milestones:
+            for name in milestone_keys:
                 if name not in achieved:
                     return name
-            return milestones[-1] if milestones else None
+            return milestone_keys[-1] if milestone_keys else None
         current_target = self._safe_call(_find_current, None)
         return {
             "available": True,
-            "milestones": milestones,
+            "milestones": milestone_keys,
             "achieved": self._safe_call(lambda: sorted(achieved), list(achieved_raw)),
             "achieved_steps": achieved_steps,
             "current_target": current_target,
@@ -854,6 +958,16 @@ class BrowserMapDashboard:
                     self.end_headers()
                     self.wfile.write(data)
                     return
+                if parsed.path == "/api/control":
+                    result = dashboard.get_control_state()
+                    data = json.dumps(result).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("Content-Length", str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+                    return
                 if parsed.path == "/api/map-coords":
                     query = parse_qs(parsed.query)
                     try:
@@ -886,10 +1000,32 @@ class BrowserMapDashboard:
                     with dashboard._lock:
                         dashboard._config.update(payload)
                         dashboard._pending_saves["config"] = payload.copy()
+                        if "gamepad_bindings" in payload:
+                            dashboard._gamepad_bindings.update(payload["gamepad_bindings"])
+                        if "key_bindings" in payload:
+                            dashboard._key_bindings.update(payload["key_bindings"])
+                    config_data = json.dumps({"ok": True, "status": "saved"}).encode("utf-8")
                     self.send_response(200)
                     self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(config_data)))
                     self.end_headers()
-                    self.wfile.write(json.dumps({"ok": True, "status": "saved"}).encode("utf-8"))
+                    self.wfile.write(config_data)
+                    return
+                if parsed.path == "/api/control":
+                    content_length = int(self.headers.get("Content-Length", "0"))
+                    body = self.rfile.read(content_length)
+                    try:
+                        payload = json.loads(body.decode("utf-8"))
+                    except json.JSONDecodeError:
+                        self.send_error(400, "invalid json")
+                        return
+                    result = dashboard.handle_control_request(payload)
+                    ctrl_data = json.dumps(result).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(ctrl_data)))
+                    self.end_headers()
+                    self.wfile.write(ctrl_data)
                     return
                 if parsed.path == "/api/streaming":
                     content_length = int(self.headers.get("Content-Length", "0"))

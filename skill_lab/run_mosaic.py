@@ -520,6 +520,7 @@ def main(args: argparse.Namespace | None = None) -> None:
     dashboard = BrowserMapDashboard()
     dashboard.start()
     dashboard.open_browser()
+    dashboard.set_environment_provider(lambda: env)
 
     observation = env.reset()
     reward_modifiers = [0.0 for _ in range(env.num_envs)]
@@ -557,7 +558,9 @@ def main(args: argparse.Namespace | None = None) -> None:
                         actions = actions.detach().cpu().numpy()
 
                 for local_index in range(env.num_envs):
-                    if local_index == mosaic.selected_index and mosaic.control_active:
+                    if dashboard._control_active and local_index == dashboard._control_env_index:
+                        actions[local_index] = env.envs[local_index].noop_button_index
+                    elif local_index == mosaic.selected_index and mosaic.control_active:
                         human_action = mosaic.pending_human_action
                         if human_action is None:
                             actions[local_index] = env.envs[local_index].noop_button_index

@@ -77,14 +77,17 @@
         <div class="mosaic-content" id="dynamic-mosaic-grid"></div>
       </div>
     </div>
-    <div id="inspector-tab" class="tab-pane">
-      <div class="panel stats-panel">
-        <div class="header">
-          <div class="title">Environment Inspector</div>
-          <div class="badge" id="inspector-env-select-container">
-            <select id="inspector-env-select"></select>
-          </div>
-        </div>
+     <div id="inspector-tab" class="tab-pane">
+       <div class="panel stats-panel">
+         <div class="header">
+           <div class="title">Environment Inspector</div>
+           <div style="display: flex; gap: 8px; align-items: center;">
+             <div class="badge" id="inspector-env-select-container">
+               <select id="inspector-env-select"></select>
+             </div>
+             <button id="inspector-control-btn" class="control-btn" title="Take control of this environment with gamepad/keyboard">Take Control</button>
+           </div>
+         </div>
         <div class="stats-scroll" id="inspector-scroll">
           <div id="inspector-content">
             <div class="inspector-screen-wrapper">
@@ -144,22 +147,41 @@
           <div class="title">Environment Config</div>
           <div class="badge" id="config-status">idle</div>
         </div>
-        <div class="config-form">
-          <label>
-            <span>Max Steps</span>
-            <input type="range" id="max-steps" min="600" max="12000" step="120" value="2880" />
-            <span id="max-steps-value">2880</span>
-          </label>
-          <label>
-            <input type="checkbox" id="save-on-catch" checked />
-            Enable Save on Catch
-          </label>
-          <label>
-            <input type="checkbox" id="perfect-sound" checked />
-            Perfect DV Sound Effect
-          </label>
-          <button id="apply-config-btn">Apply Config</button>
-        </div>
+         <div class="config-form">
+           <label>
+             <span>Max Steps</span>
+             <input type="range" id="max-steps" min="600" max="12000" step="120" value="2880" />
+             <span id="max-steps-value">2880</span>
+           </label>
+           <label>
+             <input type="checkbox" id="save-on-catch" checked />
+             Enable Save on Catch
+           </label>
+           <label>
+             <input type="checkbox" id="perfect-sound" checked />
+             Perfect DV Sound Effect
+           </label>
+           <button id="apply-config-btn">Apply Config</button>
+           <div class="binding-sections">
+             <div class="binding-section">
+               <h4>Gamepad Bindings</h4>
+               <table class="binding-table">
+                 <thead>
+                   <tr><th>Action</th><th>Binding</th><th></th></tr>
+                 </thead>
+                 <tbody id="gamepad-bindings-body"></tbody>
+               </table>
+             </div>
+             <div class="binding-section">
+               <h4>Keyboard Bindings</h4>
+               <table class="binding-table">
+                 <thead>
+                   <tr><th>Action</th><th>Binding</th><th></th></tr>
+                 </thead>
+                 <tbody id="keyboard-bindings-body"></tbody>
+               </table>
+             </div>
+           </div>
       </div>
     </div>
   </div>
