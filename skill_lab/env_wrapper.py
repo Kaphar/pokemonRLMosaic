@@ -23,7 +23,7 @@ from skill_lab.events import EventTracker
 from skill_lab.party_reader import Gen1PartyReader, PyBoyMemoryReader
 from skill_lab.rewards import calculate_starter_reward, wrong_choice_penalty
 from skill_lab.breadcrumb import BreadcrumbTracker
-from milestonetracker import MilestoneTracker
+from skill_lab.milestones import MilestoneTracker
 from skill_lab.ram_map import GameState
 
 

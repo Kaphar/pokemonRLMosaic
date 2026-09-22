@@ -19,7 +19,7 @@ from skill_lab.panel_data import (
     draw_world_info,
     read_panel_data,
 )
-from milestonetracker import MilestoneTracker
+from skill_lab.milestones import MilestoneTracker
 from skill_lab.party_reader import Gen1PartyReader, PyBoyMemoryReader
 from skill_lab.ram_map import GameState
 

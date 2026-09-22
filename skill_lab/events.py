@@ -1,6 +1,6 @@
 ﻿"""Milestone / event-flag tracking using events.json.
 
-Unlike the curated :class:`~milestonetracker.MilestoneTracker`, this
+Unlike the curated :class:`~skill_lab.milestones.MilestoneTracker`, this
 tracker scans *every* event flag in ``events.json`` and awards a one-time
 ``effective_rewards["event"]`` reward when a new flag is set.
 
