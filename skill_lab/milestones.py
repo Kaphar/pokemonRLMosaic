@@ -1,8 +1,12 @@
-"""Milestone tracking using the converted milestones.json.
+﻿"""Milestone / event-flag tracking using events.json.
 
-Key fix: On reset(), we read the current memory state and mark
-already-set events as "achieved". This prevents the tracker from
-giving rewards for events that were already set in the initial state.
+Unlike the curated :class:`~skill_lab.checkpoints.CheckpointTracker`, this
+tracker scans *every* event flag in ``events.json`` and awards a one-time
+``effective_rewards["event"]`` reward when a new flag is set.
+
+It reads ``events.json`` directly (no separate ``milestones.json``) and uses
+``GameState.event_flag()`` for clean MSB-first bit access matching the
+``"0xD74B-5"`` key convention.
 """
 
 from __future__ import annotations
@@ -11,104 +15,129 @@ import json
 from pathlib import Path
 from typing import Any
 
-from skill_lab.rewards import medium_reward
-
-
-# Global singleton to ensure milestones are loaded only once
-_MILESTONE_SINGLETON = None
+from skill_lab.config import EVENT_JSON_PATH
+from skill_lab.ram_map import GameState
 
 
 class MilestoneTracker:
-    """Tracks game milestones and gives rewards when they're achieved."""
+    """Track all event flags and give rewards when they are achieved.
+
+    Parameters
+    ----------
+    effective_rewards
+        Dict produced by :func:`skill_lab.rewards.check_baseline_rewards`.
+        Uses ``"event"`` key for per-event rewards (falls back to 1.0).
+    event_json_path
+        Path to ``events.json`` (defaults to :data:`EVENT_JSON_PATH`).
+    """
 
     def __init__(
         self,
-        milestones_path: str | Path,
-        reward_per_milestone: float = medium_reward,
+        effective_rewards: dict[str, float] | None = None,
+        event_json_path: str | Path | None = None,
     ) -> None:
-        global _MILESTONE_SINGLETON
-        
-        # Use singleton pattern - load milestones only once globally
-        if _MILESTONE_SINGLETON is not None:
-            # Reuse already loaded milestones
-            self.milestones = _MILESTONE_SINGLETON["milestones"]
-            # print(f"[Milestones] Reusing {len(self.milestones)} milestones (loaded once globally)")
-        else:
-            # First time loading
-            self.milestones: list[dict[str, Any]] = []
-            path = Path(milestones_path)
-            if path.exists():
-                with open(path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                self.milestones = data.get("milestones", [])
-                # print(f"[Milestones] Loaded {len(self.milestones)} milestones from {path}")
-                _MILESTONE_SINGLETON = {"milestones": self.milestones}
-            else:
-                # print(f"[Milestones] WARNING: {path} not found. Milestone rewards disabled.")
-                _MILESTONE_SINGLETON = {"milestones": []}
-        
-        self.reward_per_milestone = reward_per_milestone
+        self.effective_rewards = effective_rewards or {}
+        self.event_json_path = Path(event_json_path) if event_json_path else EVENT_JSON_PATH
+        self.event_names: dict[str, str] = self._load_events()
         self.achieved: set[str] = set()
         self.achieved_steps: dict[str, int] = {}
+        self.total_reward: float = 0.0
 
-    def reset(self, env=None) -> None:
-        """Reset tracker and initialize achieved set from current memory state.
+    def _load_events(self) -> dict[str, str]:
+        """Load the events.json mapping. Returns ``{key: name}``."""
+        path = self.event_json_path
+        if path.exists():
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, dict):
+                    return {str(k): str(v) for k, v in data.items()}
+            except (json.JSONDecodeError, OSError):
+                pass
+        return {}
 
-        This is the KEY FIX: we read memory at reset time and mark
-        already-set events as achieved, so they don't give rewards.
-        """
+    @staticmethod
+    def _parse_event_key(key: str) -> tuple[int, int] | None:
+        """Parse ``"0xD74B-5"`` into ``(address, msb_index)``."""
+        try:
+            addr_str, bit_str = key.split("-", 1)
+            addr = int(addr_str, 16)
+            msb_index = int(bit_str)
+            return addr, msb_index
+        except (ValueError, AttributeError):
+            return None
+
+    def _reward_for_event(self) -> float:
+        return float(self.effective_rewards.get("event", 1.0))
+
+    def reset(self, env_or_state=None, env_label: str = "") -> None:
+        """Clear progress.  If a memory source is provided, pre-mark any
+        already-set event flags as achieved."""
         self.achieved.clear()
         self.achieved_steps.clear()
+        self.total_reward = 0.0
 
-        if env is None:
+        if env_or_state is None:
             return
 
-        # Read current memory state and mark already-set events as achieved
-        for milestone in self.milestones:
-            name = milestone["name"]
-            address = milestone["address"]
-            mask = milestone["mask"]
+        game_state = self._to_game_state(env_or_state)
+        if game_state is None:
+            return
 
-            try:
-                memory_value = env.pyboy.memory[address]
-                if (memory_value & mask) > 0:
-                    self.achieved.add(name)
-            except (IndexError, AttributeError):
-                pass
+        for key in self.event_names:
+            parsed = self._parse_event_key(key)
+            if parsed is None:
+                continue
+            addr, msb_index = parsed
+            if game_state.event_flag(addr, msb_index):
+                self.achieved.add(key)
 
         if self.achieved:
-            print(f"[Milestones] {len(self.achieved)} events already set in initial state (ignored)")
+            print(f"{env_label}[Event] {len(self.achieved)} event flags already set in initial state (ignored)")
 
-    def check_and_reward(self, env) -> float:
-        """Check all milestones and return reward for newly achieved ones."""
+    @staticmethod
+    def _to_game_state(env_or_state) -> GameState | None:
+        """Accept a GameState, a PyBoy env, or a SkillLabWrapper env."""
+        if isinstance(env_or_state, GameState):
+            return env_or_state
+        pyboy = getattr(env_or_state, "pyboy", None)
+        if pyboy is not None:
+            return GameState(pyboy)
+        return None
+
+    def check_and_reward(self, env_or_state, env_label: str = "") -> float:
+        """Check all event flags and return reward for newly achieved ones."""
+        game_state = self._to_game_state(env_or_state)
+        if game_state is None:
+            return 0.0
+
         total_reward = 0.0
+        unwrapped = getattr(env_or_state, "unwrapped", env_or_state)
 
-        for milestone in self.milestones:
-            name = milestone["name"]
-            if name in self.achieved:
+        for key, name in self.event_names.items():
+            if key in self.achieved:
                 continue
 
-            address = milestone["address"]
-            mask = milestone["mask"]
-
-            try:
-                memory_value = env.pyboy.memory[address]
-            except (IndexError, AttributeError):
+            parsed = self._parse_event_key(key)
+            if parsed is None:
                 continue
+            addr, msb_index = parsed
 
-            if (memory_value & mask) > 0:
-                self.achieved.add(name)
-                step_count = getattr(env, "unwrapped", env).step_count
-                self.achieved_steps[name] = int(step_count)
-                total_reward += self.reward_per_milestone
-                print(f"[Milestone] ACHIEVED: {name} at step {step_count} (reward +{self.reward_per_milestone})")
+            if game_state.event_flag(addr, msb_index):
+                self.achieved.add(key)
+                step_count = getattr(unwrapped, "step_count", 0)
+                self.achieved_steps[key] = int(step_count)
+                reward = self._reward_for_event()
+                total_reward += reward
+                self.total_reward += reward
+                display_name = name if name else key
+                print(f"{env_label}[Event] ACHIEVED: {display_name} ({key}) at step {step_count} (reward +{reward:.2f})")
 
         return total_reward
 
     def get_progress(self) -> dict[str, Any]:
-        """Return current progress info (useful for UI)."""
         return {
-            "total_milestones": len(self.milestones),
+            "total_milestones": len(self.event_names),
             "achieved": len(self.achieved),
             "achieved_names": list(self.achieved),
             "achieved_steps": dict(self.achieved_steps),

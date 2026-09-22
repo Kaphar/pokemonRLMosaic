@@ -44,24 +44,35 @@ from skill_lab.rewards import check_baseline_rewards, medium_reward
 from skill_lab.throughput import ThroughputLogger
 
 class Profile:
-    def __init__(self, name: str, count: int, model_path: str | None, explore_weight: float) -> None:
+    def __init__(self, name: str, count: int, model_path: str | None,
+                 explore_weight: float, reward_scale: float = 1.0,
+                 category_multipliers: dict[str, float] | None = None) -> None:
         self.name = name
         self.count = count
         self.model_path = model_path
         self.explore_weight = explore_weight
+        self.reward_scale = reward_scale
+        self.category_multipliers = category_multipliers or {}
 
 
 def make_config(profile: Profile, session_path: Path, args: argparse.Namespace) -> dict[str, Any]:
-    from skill_lab.env_setup import load_stage_config
+    from skill_lab.env_setup import load_stage_config, load_profile_config
+    from skill_lab.rewards import check_baseline_rewards
 
     stage_config = load_stage_config(args.stage)
+    profile_config = load_profile_config(args.specialization or "trainer")
 
     reward_scale = args.reward_scale
     explore_weight = args.explore_weight
+    profile_category_multipliers: dict[str, float] = {}
+
     if args.specialization and args.specialization in SPECIALIZATION_PRESETS:
         preset = SPECIALIZATION_PRESETS[args.specialization]
         reward_scale = preset["reward_scale"]
         explore_weight = preset["explore_weight"]
+        profile_category_multipliers = preset.get("category_multipliers", {})
+        # Merge preset overrides into profile_config so check_baseline_rewards sees them
+        profile_config = {**profile_config, **preset}
 
     # Determine max_steps based on training mode
     training_mode = getattr(args, "training_mode", "segment")
@@ -69,6 +80,10 @@ def make_config(profile: Profile, session_path: Path, args: argparse.Namespace) 
         max_steps = 999999  # Effectively no limit
     else:
         max_steps = args.max_steps or stage_config.get("max_steps", 7200)
+
+    # Compute effective rewards via the new system
+    reward_summary = check_baseline_rewards(profile_config, stage_config)
+    effective_rewards = reward_summary["effective_rewards"]
 
     init_state = Path(stage_config.get("init_state", "v2/state/init.state"))
     if args.init_state and args.init_state.exists():
@@ -97,7 +112,7 @@ def make_config(profile: Profile, session_path: Path, args: argparse.Namespace) 
         "reward_scale": reward_scale,
         "explore_weight": explore_weight,
         "noop_button": True,
-        "speed": getattr(args, "emulator_speed", 2),
+        "speed": getattr(args, "emulator_speed", 0),
         "training_mode": training_mode,
         # Button masks from unified config
         "disable_start": disable_start,
@@ -107,7 +122,10 @@ def make_config(profile: Profile, session_path: Path, args: argparse.Namespace) 
         "reward_scale": reward_scale,
         "milestone_reward": stage_config.get("milestone_reward", medium_reward),
         "healing_reward_multiplier": stage_config.get("healing_reward_multiplier", stage_config.get("healing_reward", 1.0)),
-        "milestones_path": str(PROJECT_ROOT / "skill_lab" / "milestones.json"),
+        "events_path": str(EVENT_JSON_PATH),
+        "effective_rewards": effective_rewards,
+        "profile_category_multipliers": profile_category_multipliers,
+        "stage_config": stage_config,
         "names_path": str(PROJECT_ROOT / "skill_lab" / "names.json"),
         # Save on catch settings
         "save_on_catch_enabled": SAVE_ON_CATCH_ENABLED,
@@ -166,7 +184,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-envs", type=int, default=DEFAULT_ENV_AMOUNT, help="Number of environments to run")
     parser.add_argument("--reward-scale", type=float, default=1.0)
     parser.add_argument("--explore-weight", type=float, default=1.0)
-    parser.add_argument("--specialization", type=str, default=None, choices=list(SPECIALIZATION_PRESETS.keys()))
+    parser.add_argument("--specialization", type=str, default=None, choices=list(SPECIALIZATION_PRESETS.keys()), help="Profile specialization (trainer, speedrunner, explorer)")
     parser.add_argument("--no-hud", action="store_true", help="Disable HUD overlay on emulator tiles")
 
     parser.add_argument("--continuous", action="store_true", help="Run indefinitely without batch limits")
@@ -253,8 +271,11 @@ def show_report(stats: BatchStats, profile_name: str) -> None:
 
 def log_reward_configuration_summary(profile_name: str, profile_config: dict[str, Any], stage_name: str, stage_config: dict[str, Any]) -> None:
     """Print a clear reward summary derived from the JSON configuration."""
+    from skill_lab.rewards import REWARD_BASELINES, REWARD_CATEGORIES, CATEGORIES
+
     summary = check_baseline_rewards(profile_config, stage_config)
     stage_multipliers = summary["stage_reward_multipliers"]
+    profile_multipliers = summary["profile_category_multipliers"]
     effective = summary["effective_rewards"]
 
     cyan = "\033[36m"
@@ -275,28 +296,25 @@ def log_reward_configuration_summary(profile_name: str, profile_config: dict[str
     print(f"  - explore_weight: {green}{profile_config.get('explore_weight', 1.0):.2f}{reset}")
     print(f"{yellow}Stage:{reset} {stage_name}")
     print(f"  - source: {stage_source}")
-    for label, key in (
-        ("milestone_reward_multiplier", "milestone"),
-        ("exploration_reward_multiplier", "exploration"),
-        ("combat_reward_multiplier", "combat"),
-        ("capture_reward_multiplier", "capture"),
-        ("healing_reward_multiplier", "healing"),
-    ):
-        value = stage_multipliers.get(key, 0.0)
+    print(f"\n{magenta}Stage Multipliers:{reset}")
+    for cat in CATEGORIES:
+        value = stage_multipliers.get(cat, 1.0)
         color = green if value > 0 else red
-        print(f"  - {label}: {color}{value:.2f}{reset}")
+        print(f"  - {cat}_reward_multiplier: {color}{value:.2f}{reset}")
+    print(f"{magenta}Profile Category Multipliers:{reset}")
+    for cat in CATEGORIES:
+        value = profile_multipliers.get(cat, 1.0)
+        color = green if value > 0 else red
+        print(f"  - {cat}: {color}{value:.2f}{reset}")
     print(f"\n{magenta}Final Effective Rewards:{reset}")
-    for label, key in (
-        ("Milestone", "milestone"),
-        ("Exploration", "exploration"),
-        ("Combat", "combat"),
-        ("Capture", "capture"),
-        ("Healing", "healing"),
-    ):
-        multiplier = stage_multipliers.get(key, 0.0)
-        reward_value = effective.get(key, 0.0)
-        calc = f"{multiplier:.2f} x {summary['reward_scale']:.2f}"
-        print(f"  - {label}: {green}{reward_value:.2f}{reset} ({yellow}{calc}{reset})")
+    for reward_name in REWARD_BASELINES:
+        baseline = REWARD_BASELINES[reward_name]
+        category = REWARD_CATEGORIES.get(reward_name, reward_name)
+        stage_mult = stage_multipliers.get(category, 1.0)
+        prof_mult = profile_multipliers.get(category, 1.0)
+        reward_value = effective.get(reward_name, 0.0)
+        calc = f"{baseline:.2f} x {stage_mult:.1f} x {prof_mult:.1f} x {summary['reward_scale']:.1f}"
+        print(f"  - {reward_name:20s}: {green}{reward_value:.2f}{reset} ({yellow}{calc}{reset})")
     print(f"{cyan}=" * 90 + f"{reset}\n")
 
 
@@ -331,7 +349,15 @@ def main(args: argparse.Namespace | None = None) -> None:
     session_path = Path("mosaic_sessions")
     session_path.mkdir(exist_ok=True)
 
-    profile = Profile("V2", args.num_envs, args.model, args.explore_weight)
+    preset = SPECIALIZATION_PRESETS.get(profile_name, {})
+    profile = Profile(
+        "V2", args.num_envs, args.model, args.explore_weight,
+        reward_scale=float(profile_config.get("reward_scale", preset.get("reward_scale", 1.0))),
+        category_multipliers=profile_config.get(
+            "category_multipliers",
+            preset.get("category_multipliers", {}),
+        ),
+    )
     config = make_config(profile, session_path / profile.name.lower(), args)
     config["session_path"].mkdir(exist_ok=True)
 

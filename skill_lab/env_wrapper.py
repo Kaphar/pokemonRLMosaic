@@ -1,8 +1,9 @@
-"""Gymnasium Wrapper with early termination and per-env directives."""
+﻿"""Gymnasium Wrapper with early termination and per-env directives."""
 
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 from pathlib import Path
@@ -20,7 +21,10 @@ from skill_lab.config import (
 )
 from skill_lab.milestones import MilestoneTracker
 from skill_lab.party_reader import Gen1PartyReader, PyBoyMemoryReader
-from skill_lab.rewards import calculate_starter_reward, medium_reward, wrong_choice_penalty
+from skill_lab.rewards import calculate_starter_reward, wrong_choice_penalty
+from skill_lab.breadcrumb import BreadcrumbTracker
+from skill_lab.checkpoints import CheckpointTracker
+from skill_lab.ram_map import GameState
 
 
 class SkillLabWrapper(gymnasium.Wrapper):
@@ -32,6 +36,34 @@ class SkillLabWrapper(gymnasium.Wrapper):
         0xB1: "Squirtle",
     }
 
+    _ROM_RED = 31
+    _ROM_BLUE = 34
+
+    def _colored_env_label(self) -> str:
+        """Return env name wrapped in ANSI color based on ROM (blue or red)."""
+        rom = self.rom_path
+        if "Blue" in rom or "blue" in rom:
+            return f"\033[34m[{self.env_name}]\033[0m"
+        return f"\033[31m[{self.env_name}]\033[0m"
+
+    def _diminished_reward(self, reward_type: str, base_reward: float) -> float:
+        """Apply diminishing returns: each subsequent reward of the same type
+        is reduced by 1/sqrt(1 + count).  Applies to combat, healing, capture,
+        new_coord, map_discovery."""
+        diminishing_types = {
+            "combat_wild", "combat_trainer", "heal", "capture",
+            "new_coord", "map_discovery",
+        }
+        if reward_type not in diminishing_types:
+            return base_reward
+        self._reward_counts[reward_type] = self._reward_counts.get(reward_type, 0) + 1
+        count = self._reward_counts[reward_type]
+        if count <= 1:
+            return base_reward
+        import math
+        multiplier = 1.0 / math.sqrt(count)
+        return base_reward * multiplier
+
     def __init__(self, env, config: dict[str, Any]) -> None:
         super().__init__(env)
 
@@ -39,11 +71,13 @@ class SkillLabWrapper(gymnasium.Wrapper):
         self.disable_start = config.get("disable_start", True)
         self.disable_select = config.get("disable_select", True)
         self.reward_scale = float(config.get("reward_scale", 1.0))
-        self.milestone_reward = config.get("milestone_reward", medium_reward)
+        self.effective_rewards = config.get("effective_rewards", {})
+        self.profile_multipliers = config.get("profile_category_multipliers", {})
+        self.milestone_reward = self.effective_rewards.get("milestone", 1.0)
         self.healing_reward_multiplier = float(
             config.get("healing_reward_multiplier", config.get("healing_reward", 1.0))
         )
-        self.milestones_path = config.get("milestones_path", None)
+        self.events_path = config.get("events_path", None)
         self.speed_bonus_enabled = config.get("speed_bonus", True)
         self.training_mode = config.get("training_mode", "segment")
         self.target_starter = config.get("target_starter", None)
@@ -75,6 +109,28 @@ class SkillLabWrapper(gymnasium.Wrapper):
         self._last_bag_signature: tuple[tuple[int, int], ...] | None = None
         self._last_summary_map_id = int(getattr(self.env.unwrapped, "current_map_id", 0))
 
+        # --- GameState for clean RAM access ---
+        self.game_state = GameState(self.env.unwrapped.pyboy)
+
+        # --- Checkpoint Tracker (curated story milestones for UI) ---
+        self.checkpoint_tracker = CheckpointTracker.from_stage_config(
+            config.get("stage_config", {}), self.effective_rewards
+        )
+
+        # --- Breadcrumb Tracker (navigation rewards) ---
+        self.breadcrumb_tracker = BreadcrumbTracker.from_stage_config(
+            config.get("stage_config", {}), self.effective_rewards
+        )
+
+        # --- Diminishing returns tracker ---
+        self._reward_counts: dict[str, int] = {}
+
+        # --- Map discovery tracking ---
+        self._visited_maps: set[int] = set()
+
+        # --- Level sum tracking (for healing fix) ---
+        self._prior_level_sum = 0
+
         # --- Detect action indices ---
         self.start_action_index = None
         self.select_action_index = None
@@ -92,9 +148,9 @@ class SkillLabWrapper(gymnasium.Wrapper):
 
         # Print directive confirmation
         if self.target_starter:
-            print(f"[{self.env_name}] Directive: Pick {self.target_starter}")
+            print(f"{self._colored_env_label()} Directive: Pick {self.target_starter}")
         else:
-            print(f"[{self.env_name}] Directive: Pick any starter")
+            print(f"{self._colored_env_label()} Directive: Pick any starter")
 
         masked = []
         if self.disable_start and self.start_action_index is not None:
@@ -112,12 +168,12 @@ class SkillLabWrapper(gymnasium.Wrapper):
         if self.train_directive:
             print(f"[{self.env_name}] Train directive: {self.train_directive}")
 
-        # --- Milestone Tracker ---
+        # --- Milestone Tracker (event-flag scanner) ---
+        # Reads events.json directly; awards effective_rewards["event"] per flag.
         self.milestone_tracker: MilestoneTracker | None = None
-        if self.milestones_path:
+        if self.events_path or self.effective_rewards:
             self.milestone_tracker = MilestoneTracker(
-                milestones_path=self.milestones_path,
-                reward_per_milestone=self.milestone_reward,
+                effective_rewards=self.effective_rewards,
             )
 
         # --- Stats ---
@@ -341,7 +397,7 @@ class SkillLabWrapper(gymnasium.Wrapper):
         if check_dv_threshold and self.save_on_catch_enabled:
             if not all(dv >= self.save_on_catch_min_dv for dv in dvs):
                 print(
-                    f"[{self.env_name}] Skipped saving {pokemon_name} - DVs {dvs} below threshold {self.save_on_catch_min_dv}"
+                    f"{self._colored_env_label()} Skipped saving {pokemon_name} - DVs {dvs} below threshold {self.save_on_catch_min_dv}"
                 )
                 return False
 
@@ -373,7 +429,7 @@ class SkillLabWrapper(gymnasium.Wrapper):
             }, inputs_file, indent=2)
 
         print(
-            f"[{self.env_name}] Saved objective state: {state_path} "
+            f"{self._colored_env_label()} Saved objective state: {state_path} "
             f"and inputs: {inputs_path}"
         )
         if suffix == "PERFECT" and self.perfect_sound_enabled:
@@ -638,38 +694,93 @@ class SkillLabWrapper(gymnasium.Wrapper):
         prior_hp = self._current_hp_fraction()
         prior_map_id = int(getattr(self.env.unwrapped, "current_map_id", 0))
         prior_party_size = self._read_party_size()
+        prior_level_sum = self.game_state.party_levels_sum()
+        prior_trainer_wins = self.env.unwrapped.trainer_wins
+        prior_wild_wins = self.env.unwrapped.wild_wins
+        prior_trainer_wins = self.env.unwrapped.trainer_wins
+        prior_wild_wins = self.env.unwrapped.wild_wins
 
         # Execute in real environment
         observation, reward, terminated, truncated, info = self.env.step(action)
 
+        cur_trainer_wins = self.env.unwrapped.trainer_wins
+        cur_wild_wins = self.env.unwrapped.wild_wins
+        if cur_trainer_wins > prior_trainer_wins:
+            trainer_reward = self.effective_rewards.get("combat_trainer", 5.0)
+            reward += trainer_reward
+            print(f"{self._colored_env_label()} Combat: trainer win #{cur_trainer_wins} reward +{trainer_reward:.2f}")
+            info["combat_trainer_reward"] = trainer_reward
+        if cur_wild_wins > prior_wild_wins:
+            wild_reward = self.effective_rewards.get("combat_wild", 2.0)
+            reward += wild_reward
+            print(f"{self._colored_env_label()} Combat: wild win #{cur_wild_wins} reward +{wild_reward:.2f}")
+            info["combat_wild_reward"] = wild_reward
+
+
         milestone_reward = 0.0
         milestone_triggered = False
-        # Add milestone rewards with speed bonus
-        if self.milestone_tracker is not None:
-            milestone_reward = self.milestone_tracker.check_and_reward(self.env)
-            if milestone_reward > 0:
+        current_hp = self._current_hp_fraction()
+        current_map_id = int(getattr(self.env.unwrapped, "current_map_id", 0))
+        current_party_size = self._read_party_size()
+        current_level_sum = self.game_state.party_levels_sum()
+        hp_gain = max(0.0, current_hp - prior_hp)
+
+        # --- Checkpoint reward (curated story milestones) with speed bonus ---
+        checkpoint_reward = 0.0
+        if self.checkpoint_tracker is not None:
+            checkpoint_reward = self.checkpoint_tracker.check_and_reward(self.env, self._colored_env_label())
+            if checkpoint_reward > 0:
                 milestone_triggered = True
+                milestone_reward = checkpoint_reward
                 steps_since_last = self.env.unwrapped.step_count - self.last_milestone_step
-                
-                # SPEED BONUS: fewer steps = higher multiplier
                 if self.speed_bonus_enabled and steps_since_last > 0:
                     speed_multiplier = max(1.0, 3.0 - (steps_since_last / 100.0))
                     milestone_reward *= speed_multiplier
-                    print(f"[{self.env_name}] 🚀 Speed bonus! Milestone in {steps_since_last} steps → x{speed_multiplier:.1f}")
-
+                    print(f"{self._colored_env_label()} Speed bonus! Checkpoint in {steps_since_last} steps -> x{speed_multiplier:.1f}")
                 reward += milestone_reward
                 self.total_milestone_reward += milestone_reward
                 self.last_milestone_step = self.env.unwrapped.step_count
                 info["milestone_reward"] = milestone_reward
 
-        current_hp = self._current_hp_fraction()
-        current_map_id = int(getattr(self.env.unwrapped, "current_map_id", 0))
-        current_party_size = self._read_party_size()
-        hp_gain = max(0.0, current_hp - prior_hp)
+        # --- Event flag scanner (broad, for event reward) ---
+        event_reward = 0.0
+        if self.milestone_tracker is not None:
+            event_reward = self.milestone_tracker.check_and_reward(self.env, self._colored_env_label())
+            if event_reward > 0:
+                reward += event_reward
+                info["event_reward"] = event_reward
+
         progress_signal = milestone_triggered or (current_party_size > prior_party_size) or (current_map_id != prior_map_id)
 
+        # --- Map discovery reward ---
+        map_discovery_reward = 0.0
+        if current_map_id != prior_map_id:
+            if current_map_id not in self._visited_maps:
+                self._visited_maps.add(current_map_id)
+                base_map_disc = self.effective_rewards.get("map_discovery", 5.0)
+                visited_count = len(self._visited_maps)
+                map_discovery_reward = base_map_disc / max(1.0, math.sqrt(visited_count))
+                reward += map_discovery_reward
+                info["map_discovery_reward"] = map_discovery_reward
+                print(f"{self._colored_env_label()} New map discovered: 0x{current_map_id:02X} (+{map_discovery_reward:.2f})")
+
+        self._prior_level_sum = current_level_sum
+
+        # --- Breadcrumb navigation reward ---
+        if self.breadcrumb_tracker is not None:
+            x_pos, y_pos = self.env.unwrapped.get_game_coords()[:2]
+            breadcrumb_reward = self.breadcrumb_tracker.update(
+                x_pos, y_pos, current_map_id, env_label=self._colored_env_label()
+            )
+            if breadcrumb_reward > 0:
+                reward += breadcrumb_reward
+                info["breadcrumb_reward"] = breadcrumb_reward
+
+        level_up = current_level_sum > prior_level_sum
         if self.healing_reward_multiplier > 0.0 and progress_signal and hp_gain > 0.05 and 0 < prior_hp <= 0.9:
             healing_reward = self.reward_scale * self.healing_reward_multiplier
+            if level_up:
+                healing_reward *= 0.1
             reward += healing_reward
             info["healing_reward"] = healing_reward
             info["healing_reward_multiplier"] = self.healing_reward_multiplier
@@ -684,10 +795,11 @@ class SkillLabWrapper(gymnasium.Wrapper):
             if current_map_id != prior_map_id:
                 progress_labels.append("map")
             reasons = ", ".join(progress_labels) if progress_labels else "progress"
+            label = self._colored_env_label()
             color = "\033[32m"
             reset = "\033[0m"
             print(
-                f"{color}[{self.env_name}] 💚 Healing reward! "
+                f"{color}{label} 💚 Healing reward! "
                 f"HP {prior_hp:.0%} -> {current_hp:.0%} after {reasons} "
                 f"→ +{healing_reward:.2f} = {self.reward_scale:.2f} × {self.healing_reward_multiplier:.2f}{reset}"
             )
@@ -704,7 +816,7 @@ class SkillLabWrapper(gymnasium.Wrapper):
                     self.objective_met = True
                     reward += calculate_starter_reward(*dvs)
                     # NOTE: Do NOT terminate on correct starter - continue playing!
-                    print(f"[{self.env_name}] ✅ CORRECT starter (species=0x{species:02X}) at step {self.env.unwrapped.step_count}")
+                    print(f"{self._colored_env_label()} [Env {self.env_name}] CORRECT starter (species=0x{species:02X}) at step {self.env.unwrapped.step_count} (reward +{calculate_starter_reward(*dvs):.2f})")
                     info["objective_success"] = True
                     info["objective_steps"] = self.env.unwrapped.step_count
                     info["objective_directive"] = self.target_starter or "any"
@@ -721,9 +833,9 @@ class SkillLabWrapper(gymnasium.Wrapper):
                     reward += wrong_choice_penalty
                     terminated = True
                     if saved:
-                        print(f"[{self.env_name}] ❌ WRONG starter (species=0x{species:02X}) at step {self.env.unwrapped.step_count} → saved (DVs meet threshold)")
+                        print(f"{self._colored_env_label()} ❌ [Env {self.env_name}] WRONG starter (species=0x{species:02X}) at step {self.env.unwrapped.step_count} saved (penalty {wrong_choice_penalty:.2f}) → saved (DVs meet threshold)")
                     else:
-                        print(f"[{self.env_name}] ❌ WRONG starter (species=0x{species:02X}) at step {self.env.unwrapped.step_count} → not saved (DVs below threshold)")
+                        print(f"{self._colored_env_label()} ❌ [Env {self.env_name}] WRONG starter (species=0x{species:02X}) at step {self.env.unwrapped.step_count} not saved (penalty {wrong_choice_penalty:.2f}) → not saved (DVs below threshold)")
                     info["objective_success"] = False
                     info["objective_steps"] = self.env.unwrapped.step_count
                     info["objective_directive"] = self.target_starter or "any"
@@ -739,14 +851,14 @@ class SkillLabWrapper(gymnasium.Wrapper):
                     if saved:
                         reward += calculate_starter_reward(*dvs)
                         # NOTE: Do NOT terminate on any starter - continue playing!
-                        print(f"[{self.env_name}] ✅ Picked a starter (species=0x{species:02X}) at step {self.env.unwrapped.step_count}")
+                        print(f"{self._colored_env_label()} [Env {self.env_name}] Picked a starter (species=0x{species:02X}) at step {self.env.unwrapped.step_count} (reward +{calculate_starter_reward(*dvs):.2f})")
                         info["objective_success"] = True
                         info["objective_steps"] = self.env.unwrapped.step_count
                         info["objective_directive"] = "any"
                         info["objective_env_name"] = self.env_name
                     else:
                         # DVs below threshold - don't save, but objective is still met
-                        print(f"[{self.env_name}] ✅ Picked a starter (species=0x{species:02X}) but DVs below threshold - not saved")
+                        print(f"{self._colored_env_label()} [Env {self.env_name}] Picked a starter (species=0x{species:02X}) but DVs below threshold - not saved")
                         info["objective_success"] = True
                         info["objective_steps"] = self.env.unwrapped.step_count
                         info["objective_directive"] = "any"
@@ -770,7 +882,7 @@ class SkillLabWrapper(gymnasium.Wrapper):
         observation, info = self.env.reset(**kwargs)
 
         if self.milestone_tracker is not None:
-            self.milestone_tracker.reset(self.env)
+            self.milestone_tracker.reset(self.game_state, self._colored_env_label())
 
         self.masked_action_count = 0
         self.total_milestone_reward = 0.0
@@ -782,6 +894,13 @@ class SkillLabWrapper(gymnasium.Wrapper):
         self._replay_frame = 0
         self._previous_party_size = 0
         self._last_bag_signature = None
+        self._visited_maps.clear()
+        self._reward_counts.clear()
+        self._prior_level_sum = 0
+        if self.checkpoint_tracker is not None:
+            self.checkpoint_tracker.reset(self.game_state, self._colored_env_label())
+        if self.breadcrumb_tracker is not None:
+            self.breadcrumb_tracker.reset()
 
         # The standalone plugin replay loads the recording's state before
         # priming. Do the same instead of relying on per-environment defaults.

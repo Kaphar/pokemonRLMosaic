@@ -2,11 +2,15 @@
   "name": "route1",
   "description": "Navigate Route 1, battle trainers, catch Pokemon",
   "max_steps": 10000,
-  "milestone_reward_multiplier": 1,
-  "exploration_reward_multiplier": 1.0,
-  "combat_reward_multiplier": 1.0,
+  "milestone_reward_multiplier": 1.0,
+  "event_reward_multiplier": 1.0,
+  "exploration_reward_multiplier": 2.0,
+  "combat_reward_multiplier": 1.5,
   "capture_reward_multiplier": 1.0,
   "healing_reward_multiplier": 1.0,
+  "training_reward_multiplier": 1.0,
+  "breadcrumb_reward_multiplier": 1.0,
+  "init_state": "init.state",
   "button_masks": {
     "Start": true,
     "Select": true,
@@ -14,6 +18,31 @@
     "A": false
   },
   "reset_on_catch": false,
+  "checkpoints": [
+    {
+      "name": "Got Pokeballs",
+      "event_key": "0xD74B-5",
+      "reward_baseline": 5.0,
+      "description": "Obtain the Pokedex and receive Pokéballs from Oak"
+    },
+    {
+      "name": "Caught First Pokemon",
+      "event_key": "0xD74E-0",
+      "reward_baseline": 10.0,
+      "description": "Catch your first wild Pokemon on Route 1"
+    },
+    {
+      "name": "Entered Viridian Forest",
+      "event_key": "0xD755-0",
+      "reward_baseline": 5.0,
+      "description": "Reach Viridian Forest"
+    }
+  ],
+  "breadcrumbs": [
+    {"target_x": 20, "target_y": 50, "target_map": 4, "label": "Viridian City gate"},
+    {"target_x": 10, "target_y": 8, "target_map": 0, "label": "Oak's Lab"},
+    {"target_x": 15, "target_y": 30, "target_map": 1, "label": "Route 1 center path"}
+  ],
   "target_milestones": [
     "0xD747-0",
     "0xD747-1",

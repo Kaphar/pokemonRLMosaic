@@ -2,11 +2,14 @@
   "name": "starter",
   "description": "Get a starter Pokemon. Short episodes for fast learning.",
   "max_steps": 1200,
-  "milestone_reward_multiplier": 1.0,
-  "exploration_reward_multiplier": 1.0,
-  "combat_reward_multiplier": 1.0,
-  "capture_reward_multiplier": 1.0,
-  "healing_reward_multiplier": 1.0,
+  "milestone_reward_multiplier": 3.0,
+  "event_reward_multiplier": 0.0,
+  "exploration_reward_multiplier": 0.5,
+  "combat_reward_multiplier": 0.0,
+  "capture_reward_multiplier": 0.0,
+  "healing_reward_multiplier": 0.0,
+  "training_reward_multiplier": 0.0,
+  "breadcrumb_reward_multiplier": 0.0,
   "init_state": "init.state",
   "button_masks": {
     "Start": true,
@@ -15,9 +18,35 @@
     "A": false
   },
   "reset_on_catch": false,
+  "checkpoints": [
+    {
+      "name": "Followed Oak Into Lab",
+      "event_key": "0xD747-0",
+      "reward_baseline": 1.0,
+      "description": "Enter Professor Oak's lab in Pallet Town"
+    },
+    {
+      "name": "Got Starter",
+      "event_key": "0xD74E-1",
+      "reward_baseline": 5.0,
+      "description": "Receive your starter Pokemon from Oak"
+    },
+    {
+      "name": "Got Pokedex",
+      "event_key": "0xD74B-5",
+      "reward_baseline": 10.0,
+      "description": "Receive the Pokedex from Oak"
+    }
+  ],
+  "breadcrumbs": [
+    {"target_x": 4, "target_y": 11, "target_map": 0, "label": "Oak's Lab entrance"},
+    {"target_x": 5, "target_y": 10, "target_map": 0, "label": "First poke ball"},
+    {"target_x": 5, "target_y": 9, "target_map": 0, "label": "Second poke ball"},
+    {"target_x": 5, "target_y": 8, "target_map": 0, "label": "Third poke ball"}
+  ],
   "target_milestones": [
     "0xD747-0",
-    "0xD747-1", 
+    "0xD747-1",
     "0xD747-2"
   ],
   "directives": {

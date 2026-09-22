@@ -621,7 +621,7 @@ class Launcher:
             mosaic_cols=cols,
             training_mode=training_mode,
             emulator_speed=self.speed_var.get(),
-            milestones_path=Path("skill_lab/milestones.json"),
+            events_path=Path("v2/events.json"),
             continuous=self.continuous_var.get(),
             record_input_with_plugin=self.record_input_var.get(),
             use_legacy_recorder=self.legacy_recorder_var.get(),

@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from skill_lab.rewards import big_reward, huge_reward, medium_reward, small_reward
+from skill_lab.rewards import REWARD_BASELINES, big_reward, medium_reward, small_reward
 
 
 @dataclass
@@ -170,9 +170,14 @@ def stage_to_config(stage: Stage) -> dict[str, Any]:
     return {
         "disable_start": stage.disable_start,
         "disable_select": stage.disable_select,
-        "milestone_reward": stage.milestone_reward,
-        "exploration_reward": stage.exploration_reward,
-        "combat_reward": stage.combat_reward,
-        "milestones_path": "skill_lab/milestones.json",
+        "milestone_reward_multiplier": stage.milestone_reward,
+        "event_reward_multiplier": 0.0,
+        "exploration_reward_multiplier": stage.exploration_reward,
+        "combat_reward_multiplier": stage.combat_reward,
+        "capture_reward_multiplier": 0.0,
+        "healing_reward_multiplier": 0.0,
+        "training_reward_multiplier": 0.0,
+        "breadcrumb_reward_multiplier": 0.0,
+        "events_path": "v2/events.json",
         "max_steps": stage.max_steps,
     }

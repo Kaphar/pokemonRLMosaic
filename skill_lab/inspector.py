@@ -19,7 +19,9 @@ from skill_lab.panel_data import (
     draw_world_info,
     read_panel_data,
 )
+from skill_lab.checkpoints import CheckpointTracker
 from skill_lab.party_reader import Gen1PartyReader, PyBoyMemoryReader
+from skill_lab.ram_map import GameState
 
 
 def get_env_directives(env, env_index: int) -> dict[str, Any]:
@@ -139,7 +141,7 @@ class ObservationInspector:
         y = 25
         # Env label with ROM color
         env_label = f"Env {env_index + 1} [{directives['env_name']}]"
-        cv2.putText(panel, env_label, (15, y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        cv2.putText(panel, env_label, (15, y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, directives["rom_color"], 2)
         y += 28
         
         # ROM indicator with color
@@ -215,6 +217,37 @@ class ObservationInspector:
         else:
             cv2.putText(panel, "Milestones: (not available)", (15, y), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (150, 150, 150), 1)
             y += 18
+
+        # --- Checkpoint Tracker ---
+        checkpoint_tracker = getattr(env.envs[env_index], "checkpoint_tracker", None)
+        if checkpoint_tracker is not None:
+            progress = checkpoint_tracker.get_progress()
+            cv2.putText(panel, "Checkpoints:", (15, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+            y += 18
+            checkpoint_names = progress.get("checkpoint_names", [])
+            achieved_names = set(progress.get("achieved_names", []))
+            current_target = progress.get("current_target_index", 0)
+            start_idx = max(0, current_target - 2)
+            end_idx = min(len(checkpoint_names), current_target + 4)
+            for idx in range(start_idx, end_idx):
+                cp_name = checkpoint_names[idx] if idx < len(checkpoint_names) else f"cp_{idx}"
+                done = cp_name in achieved_names
+                is_target = idx == current_target
+                if done:
+                    color = (0, 255, 0)
+                    label = "#"
+                    step_text = f" @ step {checkpoint_tracker.achieved_steps.get(cp_name, 0)}"
+                elif is_target:
+                    color = (0, 255, 255)
+                    label = ">"
+                    step_text = " (current target)"
+                else:
+                    color = (110, 110, 110)
+                    label = "o"
+                    step_text = ""
+                cv2.putText(panel, f"{label} {cp_name}{step_text}", (20, y), cv2.FONT_HERSHEY_SIMPLEX, 0.38, color, 1)
+                y += 15
+            y += 8
 
         hp_color = (0, 255, 0) if hp > 0.5 else ((0, 255, 255) if hp > 0.2 else (0, 0, 255))
         cv2.putText(panel, f"HP: {hp:.0%}", (15, y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, hp_color, 1)

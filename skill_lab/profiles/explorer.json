@@ -1,0 +1,14 @@
+{
+  "name": "explorer",
+  "description": "Maximize map exploration and discovery",
+  "settings": {
+    "reward_scale": 1.0,
+    "explore_weight": 3.0,
+    "category_multipliers": {
+      "milestone": 1.0, "event": 1.0, "exploration": 3.0,
+      "combat": 0.5, "healing": 1.0, "training": 1.0, "breadcrumb": 1.0
+    },
+    "catch_directive": [],
+    "train_directive": []
+  }
+}

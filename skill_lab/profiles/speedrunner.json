@@ -2,8 +2,12 @@
   "name": "speedrunner",
   "description": "Focus on rapid completion of milestones and efficient navigation",
   "settings": {
-    "reward_scale": 2.0,
+    "reward_scale": 3.0,
     "explore_weight": 0.1,
+    "category_multipliers": {
+      "milestone": 3.0, "event": 3.0, "exploration": 0.5,
+      "combat": 0.5, "healing": 0.5, "training": 0.5, "breadcrumb": 3.0
+    },
     "catch_directive": [],
     "train_directive": []
   }

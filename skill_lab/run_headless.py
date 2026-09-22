@@ -19,7 +19,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from skill_lab.config import ACTION_FREQ, DEFAULT_INIT_STATE, DEFAULT_ROM
+from skill_lab.config import ACTION_FREQ, DEFAULT_INIT_STATE, DEFAULT_ROM, EVENT_JSON_PATH
 from skill_lab.curriculum import get_stage, list_stages
 from skill_lab.emulator import make_env
 from skill_lab.env_setup import setup_envs
@@ -89,7 +89,7 @@ def build_config(args: argparse.Namespace, init_state: Path) -> dict:
         "disable_start": stage.disable_start,
         "disable_select": stage.disable_select,
         "milestone_reward": stage.milestone_reward,
-        "milestones_path": str(PROJECT_ROOT / "skill_lab" / "milestones.json"),
+        "events_path": str(EVENT_JSON_PATH),
         "names_path": str(PROJECT_ROOT / "skill_lab" / "names.json"),
         "save_objective_states": not args.no_save_objective_states,
     }

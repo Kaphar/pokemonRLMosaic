@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from skill_lab.rewards import medium_reward, reward_penalty, small_reward
+from skill_lab.rewards import REWARD_BASELINES, medium_reward, reward_penalty
 
 
 # --- Paths ---
@@ -46,8 +46,8 @@ ACTION_SELECT = 7
 ACTION_START = 8
 
 # --- Milestone Rewards ---
-MILESTONE_REWARD = medium_reward       # Reward for hitting an event flag
-EXPLORATION_REWARD = small_reward       # Small reward for visiting new coordinates
+MILESTONE_REWARD = REWARD_BASELINES["milestone"]       # Reward for hitting an event flag
+EXPLORATION_REWARD = REWARD_BASELINES["new_coord"]       # Small reward for visiting new coordinates
 
 # --- Teacher/Human Guidance ---
 REWARD_MODIFIER_PRAISE = medium_reward
@@ -74,9 +74,38 @@ TRAIN_DIRECTIVES = {
 
 
 SPECIALIZATION_PRESETS = {
-    "default": {"reward_scale": 1.0, "explore_weight": 1.0},
-    "trainer": {"reward_scale": 2.0, "explore_weight": 0.5},
-    "speedrunner": {"reward_scale": 3.0, "explore_weight": 0.1},
+    "default": {
+        "reward_scale": 1.0,
+        "explore_weight": 1.0,
+        "category_multipliers": {
+            "milestone": 1.0, "event": 1.0, "exploration": 1.0,
+            "combat": 1.0, "healing": 1.0, "training": 1.0, "breadcrumb": 1.0,
+        },
+    },
+    "trainer": {
+        "reward_scale": 1.0,
+        "explore_weight": 1.0,
+        "category_multipliers": {
+            "milestone": 1.0, "event": 1.0, "exploration": 1.0,
+            "combat": 2.0, "healing": 1.0, "training": 1.0, "breadcrumb": 1.0,
+        },
+    },
+    "speedrunner": {
+        "reward_scale": 3.0,
+        "explore_weight": 0.1,
+        "category_multipliers": {
+            "milestone": 3.0, "event": 3.0, "exploration": 1.0,
+            "combat": 1.0, "healing": 0.5, "training": 1.0, "breadcrumb": 3.0,
+        },
+    },
+    "explorer": {
+        "reward_scale": 1.0,
+        "explore_weight": 3.0,
+        "category_multipliers": {
+            "milestone": 1.0, "event": 1.0, "exploration": 3.0,
+            "combat": 0.5, "healing": 1.0, "training": 1.0, "breadcrumb": 1.0,
+        },
+    },
 }
 
 # --- Settings Loader ---

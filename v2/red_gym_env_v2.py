@@ -181,6 +181,7 @@ class RedGymEnv(Env):
         self._same_dir_count = 0
         self._last_dir = None
         self.first_trainer_win_step = 0
+        self._prior_level_sum = 0
         self._last_trainer_wins = 0
         self._combat_speed_bonus = 0.0
         self.lava_zones = self._load_lava_zones()
@@ -242,6 +243,7 @@ class RedGymEnv(Env):
 
 
         old_x, old_y, old_map = self.get_game_coords()
+        self._prior_level_sum = self.get_levels_sum()
 
         self.run_action_on_emulator(action)
         self.append_agent_stats(action)
@@ -617,6 +619,12 @@ class RedGymEnv(Env):
         explore_thresh = 22
         scale_factor = 4
         level_sum = self.get_levels_sum()
+        # to try for fun
+        # # Cap level rewards at starter level (5 + 4 = 9) until Pokedex is obtained.
+        # # Without Pokedex, level gains beyond the starter are not rewarded.
+        # has_pokedex = self.read_event_bit(0xD74B, 5)
+        # if not has_pokedex:
+        #     level_sum = min(level_sum, 9)
         if level_sum < explore_thresh:
             scaled = level_sum
         else:
@@ -686,8 +694,15 @@ class RedGymEnv(Env):
     def update_heal_reward(self):
         cur_health = self.read_hp_fraction()
         if cur_health > self.last_health and self.read_m(0xD163) == self.party_size:
+            # Suppress healing from level-up: level-up healing is automatic and
+            # should not be rewarded as a strategic decision.
+            current_level_sum = self.get_levels_sum()
+            level_up = current_level_sum > self._prior_level_sum
             if self.last_health > 0:
                 heal_amount = cur_health - self.last_health
+                # 90% discount when healing came from level-up HP gain
+                if level_up:
+                    heal_amount *= 0.1
                 self.total_healing_rew += heal_amount * heal_amount
             else:
                 self.died_count += 1

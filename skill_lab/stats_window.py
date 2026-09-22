@@ -14,9 +14,9 @@ class StatsWindow:
         self._needs_initial_render = False
         self.row_height = 22
         self.header_height = 28
-        self.col_widths = [60, 70, 60, 90, 70, 80, 80, 80, 70, 70, 80]
+        self.col_widths = [50, 70, 60, 90, 70, 80, 80, 80, 70, 70, 70, 60]
         self.col_labels = [
-            "Env", "HP", "Pkmn", "Trainer W", "Wild W", "Walls", "Steps", "Mins", "Steps/m", "Map", "Score"
+            "Env", "HP", "Pkmn", "Trainer W", "Wild W", "Walls", "Steps", "Mins", "Steps/m", "Map", "Core", "Check"
         ]
 
     def show(self) -> None:
@@ -89,6 +89,16 @@ class StatsWindow:
             wall_collisions = int(env.get_attr("wall_collisions")[env_index])
             steps = int(env.get_attr("step_count")[env_index])
             map_id = int(env.get_attr("current_map_id")[env_index])
+            checkpoint_progress = ""
+            try:
+                tracker = env.get_attr("checkpoint_tracker")[env_index]
+                if tracker is not None:
+                    progress = tracker.get_progress()
+                    achieved = progress.get("achieved", 0)
+                    total = progress.get("total", 0)
+                    checkpoint_progress = f"{achieved}/{total}"
+            except Exception:
+                checkpoint_progress = "" 
 
             emulator_frames = steps * action_freq
             game_seconds = emulator_frames / 60.0
@@ -117,18 +127,26 @@ class StatsWindow:
             f"{steps_per_min:.0f}",
             f"{map_id:02X}",
             f"{score:+.1f}",
+            checkpoint_progress,
         ]
 
         x = 0
-        for label, col_w in zip(values, self.col_widths):
-            color = (220, 220, 220)
-            if label == f"{hp:.0%}":
+        rom_file = ""
+        if hasattr(env, "envs") and env_index < len(env.envs):
+            rom_file = getattr(env.envs[env_index], "rom_path", "")
+        is_red = "Blue" not in rom_file
+        for col_idx, (label, col_w) in enumerate(zip(values, self.col_widths)):
+            if col_idx == 0:
+                color = (0, 0, 255) if is_red else (255, 0, 0)
+            elif label == f"{hp:.0%}":
                 if hp > 0.5:
                     color = (0, 255, 0)
                 elif hp > 0.2:
                     color = (0, 255, 255)
                 else:
                     color = (0, 0, 255)
+            else:
+                color = (220, 220, 220)
             text_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.4, 1)[0]
             text_x = x + (col_w - text_size[0]) // 2
             text_y = (self.row_height + text_size[1]) // 2

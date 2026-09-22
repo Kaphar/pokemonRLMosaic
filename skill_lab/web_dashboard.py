@@ -578,6 +578,10 @@ class BrowserMapDashboard:
                     "walls": walls,
                 },
                 "milestones": milestones,
+                "checkpoints": self._safe_call(
+                    lambda: self._inspector_checkpoints(env_obj),
+                    {"available": False},
+                ),
                 "memory_watch": memory_watch,
                 "recent_actions": recent_action_names,
                 "raw_recent_actions": recent_actions,
@@ -616,7 +620,8 @@ class BrowserMapDashboard:
         tracker = getattr(env_obj, "milestone_tracker", None)
         if tracker is None:
             return {"available": False}
-        milestones = list(getattr(tracker, "milestones", []) or [])
+        event_names = getattr(tracker, "event_names", {}) or {}
+        milestone_keys = list(event_names.keys()) if isinstance(event_names, dict) else []
         achieved_raw = getattr(tracker, "achieved", set()) or set()
         try:
             achieved = set(achieved_raw)

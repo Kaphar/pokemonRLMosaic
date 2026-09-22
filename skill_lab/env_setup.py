@@ -46,7 +46,7 @@ from skill_lab.config import (
     GRID_COLS,
     GRID_ROWS,
 )
-from skill_lab.rewards import big_reward, huge_reward, medium_reward, small_reward
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -60,6 +60,10 @@ PROFILES = {
         "name": "trainer",
         "reward_scale": 1.0,
         "explore_weight": 1.0,
+        "category_multipliers": {
+            "milestone": 1.0, "event": 1.0, "exploration": 1.0,
+            "combat": 2.0, "healing": 1.0, "training": 1.0, "breadcrumb": 1.0,
+        },
         "catch_directive": ["Nidoran♂", "Pidgey", "Rattata", "Spearow", "Pikachu"],
         "train_directive": ["Nidoran♂", "Pikachu"],
     },
@@ -67,6 +71,21 @@ PROFILES = {
         "name": "speedrunner",
         "reward_scale": 3.0,
         "explore_weight": 0.1,
+        "category_multipliers": {
+            "milestone": 3.0, "event": 3.0, "exploration": 1.0,
+            "combat": 1.0, "healing": 0.5, "training": 1.0, "breadcrumb": 3.0,
+        },
+        "catch_directive": [],
+        "train_directive": [],
+    },
+    "explorer": {
+        "name": "explorer",
+        "reward_scale": 1.0,
+        "explore_weight": 3.0,
+        "category_multipliers": {
+            "milestone": 1.0, "event": 1.0, "exploration": 3.0,
+            "combat": 0.5, "healing": 1.0, "training": 1.0, "breadcrumb": 1.0,
+        },
         "catch_directive": [],
         "train_directive": [],
     },
@@ -124,12 +143,14 @@ def load_stage_config(stage_name: str) -> dict[str, Any]:
         "name": stage_name,
         "description": f"Default {stage_name} stage",
         "max_steps": 7200,
-        "milestone_reward": medium_reward,
         "milestone_reward_multiplier": 1.0,
+        "event_reward_multiplier": 1.0,
         "exploration_reward_multiplier": 1.0,
         "combat_reward_multiplier": 1.0,
         "capture_reward_multiplier": 1.0,
         "healing_reward_multiplier": 1.0,
+        "training_reward_multiplier": 1.0,
+        "breadcrumb_reward_multiplier": 1.0,
         "init_state": str(DEFAULT_INIT_STATE),
         "button_masks": {
             "Start": True,
