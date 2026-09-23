@@ -629,6 +629,7 @@ class BrowserMapDashboard:
 
                 panel_data = read_panel_data(memory) or {}
         party = panel_data.get("party") or self._read_party(memory)
+        opponent = self._safe_call(lambda: self._read_opponent_party(memory), [])
         trainer = panel_data.get("trainer") or {}
         bag = panel_data.get("bag") or self._read_bag(memory)
         hp = self._safe_call(lambda: float(env_obj.read_hp_fraction()), 0.0)
@@ -640,6 +641,7 @@ class BrowserMapDashboard:
         steps = self._as_int(getattr(unwrapped, "step_count", 0), 0) or 0
         trainer_wins = self._as_int(getattr(unwrapped, "trainer_wins", 0), 0) or 0
         wild_wins = self._as_int(getattr(unwrapped, "wild_wins", 0), 0) or 0
+        fled_battle = self._as_int(getattr(unwrapped, "fled_battle", 0), 0) or 0
         walls = self._as_int(getattr(unwrapped, "wall_collisions", 0), 0) or 0
         recent_actions = self._safe_call(lambda: list(getattr(unwrapped, "recent_actions", [])), [])
         action_names = ["Down", "Left", "Right", "Up", "A", "B", "Start", "Select"]
@@ -668,6 +670,7 @@ class BrowserMapDashboard:
                 "screen_height": screen_shape[0] if screen_shape else 0,
                 "directives": directives,
                 "party": party,
+                "opponent": opponent,
                 "trainer": trainer,
                 "bag": bag,
                 "stats": {
@@ -679,6 +682,7 @@ class BrowserMapDashboard:
                     "steps": steps,
                     "trainer_wins": trainer_wins,
                     "wild_wins": wild_wins,
+                    "fled_battle": fled_battle,
                     "walls": walls,
                 },
                 "milestones": milestones,
@@ -690,6 +694,17 @@ class BrowserMapDashboard:
                 "recent_actions": recent_action_names,
                 "raw_recent_actions": recent_actions,
                 "panel_data": panel_data,
+                "reward_history": {
+                    "events": self._safe_call(
+                        lambda: list(getattr(env_obj, "reward_events", [])[-50:]),
+                        [],
+                    ),
+                    "counts": self._safe_call(
+                        lambda: dict(getattr(env_obj, "reward_counts", {})),
+                        {},
+                    ),
+                    "fled_battle": self._as_int(getattr(env_obj, "fled_battle", 0), 0) or 0,
+                },
             }
         )
 
@@ -746,6 +761,13 @@ class BrowserMapDashboard:
             "current_target": current_target,
         }
 
+    def _inspector_checkpoints(self, env_obj: Any) -> dict[str, Any]:
+        """Collect checkpoint progress from the SkillLabWrapper's checkpoint_tracker."""
+        tracker = getattr(env_obj, "checkpoint_tracker", None)
+        if tracker is None:
+            return {"available": False}
+        return self._safe_call(lambda: tracker.get_progress(), {"available": False})
+
     def _inspector_memory_watch(self, memory: Any) -> list[dict[str, Any]]:
         if memory is None:
             return []
@@ -789,6 +811,33 @@ class BrowserMapDashboard:
                 "partySlotsCounterAddr": Gen1PartyReader.PARTY_SIZE_ADDRESS,
                 "partyNicknamesAddr": Gen1PartyReader.PARTY_NICKNAMES_ADDRESS,
             })
+        return []
+
+    def _read_opponent_party(self, memory: Any) -> list[dict[str, Any]]:
+        """Read the current enemy Pokemon in battle (single slot)."""
+        if memory is None:
+            return []
+        with suppress(Exception):
+            from skill_lab.party_reader import Gen1PartyReader
+
+            in_battle = int(memory[0xD057]) != 0
+            if not in_battle:
+                return []
+            species_id = int(memory[0xCFE5])
+            level = int(memory[0xCFF3])
+            cur_hp = int(memory[0xCFE6]) | (int(memory[0xCFE7]) << 8)
+            max_hp = int(memory[0xCFF4]) | (int(memory[0xCFF5]) << 8)
+            names = getattr(Gen1PartyReader, "SPECIES_NAMES", [])
+            species_name = names[species_id - 1] if 1 <= species_id <= len(names) else str(species_id)
+            return [{
+                "slot": 0,
+                "speciesID": species_id,
+                "speciesName": species_name,
+                "level": level,
+                "curHP": cur_hp,
+                "maxHP": max_hp,
+                "nickname": species_name,
+            }]
         return []
 
     def _read_bag(self, memory: Any) -> list[dict[str, Any]]:

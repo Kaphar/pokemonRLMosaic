@@ -38,9 +38,7 @@ function update() {
   if (isMosaicTabActive()) {
     updateMosaic();
   }
-  if (isInspectorTabActive()) {
-    fetchInspectorData();
-  }
+  // Inspector data is fetched on its own interval (see initInspector polling)
 }
 
 function initTabs() {
@@ -137,8 +135,22 @@ scheduleDynamicMosaic();
 
 // Fetch inspector control state on startup and when switching to the inspector tab
 fetchControlState();
-setInterval(function() {
-  if (isInspectorTabActive()) {
-    updateInspectorScreen();
+
+// Inspector data polling — separate interval (1000ms) to avoid blocking the main update loop.
+// The 500ms update() cycle no longer calls fetchInspectorData() to prevent unresponsiveness.
+let inspectorDataPollId = null;
+function startInspectorPolling() {
+  if (inspectorDataPollId !== null) return;
+  inspectorDataPollId = setInterval(function() {
+    if (isInspectorTabActive() && state.lastInspectorData !== null) {
+      fetchInspectorData();
+    }
+  }, 1000);
+}
+function stopInspectorPolling() {
+  if (inspectorDataPollId !== null) {
+    clearInterval(inspectorDataPollId);
+    inspectorDataPollId = null;
   }
-}, 300);
+}
+startInspectorPolling();

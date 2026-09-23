@@ -50,6 +50,12 @@ function initInspector() {
     el.inspectorControlBtn.addEventListener('click', toggleInspectorControl);
   }
 
+  if (el.inspectorDetailsToggle) {
+    el.inspectorDetailsToggle.addEventListener('click', toggleInspectorDetails);
+  }
+
+  state.inspectorDetailsCollapsed = true;
+
   if (el.inspectorStatus) el.inspectorStatus.textContent = 'idle';
 }
 
@@ -200,6 +206,102 @@ function sendInput(action, pressed) {
   }).catch(function() {});
 }
 
+function toggleInspectorDetails() {
+  state.inspectorDetailsCollapsed = !state.inspectorDetailsCollapsed;
+  if (el.inspectorDetails) {
+    if (state.inspectorDetailsCollapsed) {
+      el.inspectorDetails.classList.remove('inspector-details-expanded');
+      el.inspectorDetails.classList.add('inspector-details-collapsed');
+    } else {
+      el.inspectorDetails.classList.remove('inspector-details-collapsed');
+      el.inspectorDetails.classList.add('inspector-details-expanded');
+    }
+  }
+  if (el.inspectorDetailsToggle) {
+    var icon = el.inspectorDetailsToggle.querySelector('.toggle-icon');
+    if (icon) icon.classList.toggle('collapsed', state.inspectorDetailsCollapsed);
+  }
+}
+
+function renderPartyTable(party, showDVs) {
+  if (!party || party.length === 0) {
+    return '<div style="color: #8aa0c7; font-size: 0.85rem;">No Pok&eacute;mon available</div>';
+  }
+  let t = '<table class="inspector-table party-table">';
+  if (showDVs !== false) {
+    t += '<thead><tr><th>#</th><th>Nickname</th><th>Species</th><th>Lv</th><th>HP</th><th>Types</th><th>DVs (Atk/Def/Spe/SpA)</th><th>Shiny</th></tr></thead>';
+  } else {
+    t += '<thead><tr><th>#</th><th>Species</th><th>Lv</th><th>HP</th></tr></thead>';
+  }
+  t += '<tbody>';
+  for (let i = 0; i < party.length; i++) {
+    const p = party[i];
+    t += '<tr>';
+    t += '<td>' + (i + 1) + '</td>';
+    if (showDVs !== false) {
+      const nickname = p.nickname || p.speciesName || '?';
+      const species = p.speciesName || '?';
+      const level = p.level || 0;
+      const hp = (p.curHP !== undefined ? p.curHP : '?');
+      const maxHp = (p.maxHP !== undefined ? p.maxHP : '?');
+      const type1 = p.type1Name || '?';
+      const type2 = (p.type2Name && p.type2Name !== type1) ? '/' + p.type2Name : '';
+      const dvStr = (p.ivAttack !== undefined)
+        ? p.ivAttack + '/' + p.ivDefense + '/' + p.ivSpeed + '/' + p.ivSpAttack
+        : '-';
+      const shinyStr = p.isShiny ? 'Yes' : 'No';
+      t += '<td>' + nickname + '</td>';
+      t += '<td>' + species + '</td>';
+      t += '<td>' + level + '</td>';
+      t += '<td>' + hp + '/' + maxHp + '</td>';
+      t += '<td>' + type1 + type2 + '</td>';
+      t += '<td>' + dvStr + '</td>';
+      t += '<td>' + shinyStr + '</td>';
+    } else {
+      const species = p.speciesName || p.nickname || '?';
+      const level = p.level || 0;
+      const hp = (p.curHP !== undefined ? p.curHP : '?');
+      const maxHp = (p.maxHP !== undefined ? p.maxHP : '?');
+      t += '<td>' + species + '</td>';
+      t += '<td>' + level + '</td>';
+      t += '<td>' + hp + '/' + maxHp + '</td>';
+    }
+    t += '</tr>';
+  }
+  t += '</tbody></table>';
+  return t;
+}
+
+function renderMilestones(data) {
+  const checkpoints = (data.checkpoints && data.checkpoints.checkpoints) || [];
+  if (!el.inspectorMilestones) return;
+  if (!checkpoints.length) {
+    el.inspectorMilestones.innerHTML = '<div style="color: #8aa0c7; font-size: 0.8rem; padding: 4px 0;">No milestones configured</div>';
+    return;
+  }
+  let html = '';
+  const currentIdx = data.checkpoints.current_target_index || 0;
+  checkpoints.forEach(function(cp, idx) {
+    const achieved = cp.achieved || false;
+    const isCurrent = idx === currentIdx && !achieved;
+    let cls = 'milestone-pending';
+    let label = '';
+    if (achieved) {
+      cls = 'milestone-done';
+      label = '✓';
+    } else if (isCurrent) {
+      cls = 'milestone-current';
+      label = '▶';
+    }
+    const step = cp.achieved_step ? ' @ s' + cp.achieved_step : '';
+    html += '<div class="milestone-item ' + cls + '">';
+    html += '<span class="milestone-name">' + label + ' ' + (cp.name || 'unnamed') + '</span>';
+    html += '<span class="milestone-step">' + step + '</span>';
+    html += '</div>';
+  });
+  el.inspectorMilestones.innerHTML = html;
+}
+
 function renderInspectorDetails(data) {
   if (!el.inspectorDetails) return;
 
@@ -211,6 +313,33 @@ function renderInspectorDetails(data) {
   }
 
   state.lastInspectorData = data;
+
+  // ---- Render world info inline in header ----
+  const stats = data.stats || {};
+  const mapId = stats.map_id || 0;
+  if (el.inspectorWorldInfo) {
+    el.inspectorWorldInfo.innerHTML =
+      'Map: <span class="val">0x' + mapId.toString(16).toUpperCase().padStart(2, '0') + '</span>' +
+      ' X: <span class="val">' + (stats.x ?? 0) + '</span>' +
+      ' Y: <span class="val">' + (stats.y ?? 0) + '</span>';
+  }
+
+  // ---- Render milestones under the screen ----
+  renderMilestones(data);
+
+  // ---- Render player party ----
+  const party = Array.isArray(data.party) ? data.party : [];
+  if (el.inspectorParty) {
+    el.inspectorParty.innerHTML = renderPartyTable(party, true);
+  }
+
+  // ---- Render opponent party ----
+  const opponent = Array.isArray(data.opponent) ? data.opponent : [];
+  if (el.inspectorOpponent) {
+    el.inspectorOpponent.innerHTML = renderPartyTable(opponent, false);
+  }
+
+  // ---- Build collapsible details (everything else) ----
   let html = '';
 
   // ---- Environment Directives ----
@@ -237,7 +366,6 @@ function renderInspectorDetails(data) {
   html += '</div>';
 
   // ---- Game Stats ----
-  const stats = data.stats || {};
   html += '<div class="inspector-section">';
   html += '<h3>Game Stats</h3>';
   html += '<table class="inspector-table">';
@@ -248,58 +376,11 @@ function renderInspectorDetails(data) {
   html += '<tr><td class="inspect-label">Steps</td><td>' + (stats.steps || 0) + '</td></tr>';
   html += '<tr><td class="inspect-label">Trainer Wins</td><td>' + (stats.trainer_wins || 0) + '</td></tr>';
   html += '<tr><td class="inspect-label">Wild Wins</td><td>' + (stats.wild_wins || 0) + '</td></tr>';
+  var fledCount = stats.fled_battle || 0;
+  var fledClass = fledCount > 0 ? 'stat-danger' : '';
+  html += '<tr><td class="inspect-label">Fled Battles</td><td class="' + fledClass + '">' + fledCount + '</td></tr>';
   html += '<tr><td class="inspect-label">Wall Collisions</td><td>' + (stats.walls || 0) + '</td></tr>';
   html += '</table>';
-  html += '</div>';
-
-  // ---- World Info ----
-  const mapId = stats.map_id || 0;
-  html += '<div class="inspector-section">';
-  html += '<h3>World Info</h3>';
-  html += '<table class="inspector-table">';
-  html += '<tr><td class="inspect-label">Map ID</td><td>0x' + mapId.toString(16).toUpperCase().padStart(2, '0') + '</td></tr>';
-  html += '<tr><td class="inspect-label">X Position</td><td>' + (stats.x ?? 0) + '</td></tr>';
-  html += '<tr><td class="inspect-label">Y Position</td><td>' + (stats.y ?? 0) + '</td></tr>';
-  html += '</table>';
-  html += '</div>';
-
-  // ---- Party ----
-  const party = Array.isArray(data.party) ? data.party : [];
-  html += '<div class="inspector-section">';
-  html += '<h3>Pok&eacute;mons Party (' + party.length + '/6)</h3>';
-  if (party.length === 0) {
-    html += '<div style="color: #8aa0c7; font-size: 0.85rem;">No Pok&eacute;mon in party</div>';
-  } else {
-    html += '<table class="inspector-table party-table">';
-    html += '<thead><tr><th>#</th><th>Nickname</th><th>Species</th><th>Lv</th><th>HP</th><th>Types</th><th>DVs (Atk/Def/Spe/SpA)</th><th>Shiny</th></tr></thead>';
-    html += '<tbody>';
-    for (let i = 0; i < party.length; i++) {
-      const p = party[i];
-      const nickname = p.nickname || p.speciesName || '?';
-      const species = p.speciesName || '?';
-      const level = p.level || 0;
-      const hp = (p.curHP !== undefined ? p.curHP : '?');
-      const maxHp = (p.maxHP !== undefined ? p.maxHP : '?');
-      const type1 = p.type1Name || '?';
-      const type2 = (p.type2Name && p.type2Name !== type1) ? '/' + p.type2Name : '';
-      const dvStr = (p.ivAttack !== undefined)
-        ? p.ivAttack + '/' + p.ivDefense + '/' + p.ivSpeed + '/' + p.ivSpAttack
-        : '-';
-      const shinyStr = p.isShiny ? 'Yes' : 'No';
-      html += '<tr>';
-      html += '<td>' + (i + 1) + '</td>';
-      html += '<td>' + nickname + '</td>';
-      html += '<td>' + species + '</td>';
-      html += '<td>' + level + '</td>';
-      html += '<td>' + hp + '/' + maxHp + '</td>';
-      html += '<td>' + type1 + type2 + '</td>';
-      html += '<td>' + dvStr + '</td>';
-      html += '<td>' + shinyStr + '</td>';
-      html += '</tr>';
-    }
-    html += '</tbody>';
-    html += '</table>';
-  }
   html += '</div>';
 
   // ---- Trainer Info ----
@@ -339,6 +420,49 @@ function renderInspectorDetails(data) {
     html += '<div style="font-family: monospace; color: #8aa0c7; font-size: 0.8rem;">' + recentActions.join(' \u2192 ') + '</div>';
     html += '</div>';
   }
+
+  // ---- Reward History ----
+  const rewardHistory = data.reward_history || {};
+  const rewardCounts = rewardHistory.counts || {};
+  const rewardEvents = Array.isArray(rewardHistory.events) ? rewardHistory.events : [];
+  const totalFled = rewardCounts.fled_battle || 0;
+  html += '<div class="inspector-section">';
+  html += '<h3>Reward History</h3>';
+  if (rewardEvents.length === 0 && Object.keys(rewardCounts).length === 0) {
+    html += '<div style="color: #8aa0c7; font-size: 0.85rem;">No rewards recorded yet</div>';
+  } else {
+    html += '<table class="inspector-table">';
+    html += '<tr><td class="inspect-label">Fled Battles</td><td class="' + (totalFled > 0 ? 'stat-danger' : '') + '">' + totalFled + '</td></tr>';
+    html += '<tr><td class="inspect-label">Trainer Wins</td><td>' + (rewardCounts.combat_trainer || 0) + '</td></tr>';
+    html += '<tr><td class="inspect-label">Wild Wins</td><td>' + (rewardCounts.combat_wild || 0) + '</td></tr>';
+    html += '<tr><td class="inspect-label">Milestones</td><td>' + (rewardCounts.milestone || 0) + '</td></tr>';
+    html += '<tr><td class="inspect-label">Events</td><td>' + (rewardCounts.event || 0) + '</td></tr>';
+    html += '<tr><td class="inspect-label">Map Discovers</td><td>' + (rewardCounts.map_discovery || 0) + '</td></tr>';
+    html += '<tr><td class="inspect-label">Heals</td><td>' + (rewardCounts.healing || 0) + '</td></tr>';
+    html += '<tr><td class="inspect-label">Breadcrumbs</td><td>' + (rewardCounts.breadcrumb || 0) + '</td></tr>';
+    html += '</table>';
+    if (rewardEvents.length > 0) {
+      html += '<div style="margin-top: 8px; font-size: 0.75rem; color: #aaa;">Recent events:</div>';
+      html += '<div class="reward-event-list">';
+      var recent = rewardEvents.slice(-10).reverse();
+      for (var i = 0; i < recent.length; i++) {
+        var evt = recent[i];
+        var amt = evt.amount !== undefined ? evt.amount : 0;
+        var evtClass = amt < 0 ? 'reward-negative' : 'reward-positive';
+        var evtType = evt.type || '?';
+        var evtStep = evt.step !== undefined ? evt.step : 0;
+        var evtDesc = evt.description || '';
+        html += '<div class="reward-event ' + evtClass + '">';
+        html += '<span class="reward-type">' + evtType + '</span>';
+        html += '<span class="reward-amount">' + (amt >= 0 ? '+' : '') + amt.toFixed(2) + '</span>';
+        html += '<span class="reward-step">s' + evtStep + '</span>';
+        if (evtDesc) html += '<span class="reward-desc">' + evtDesc + '</span>';
+        html += '</div>';
+      }
+      html += '</div>';
+    }
+  }
+  html += '</div>';
 
   el.inspectorDetails.innerHTML = html;
 }

@@ -79,39 +79,57 @@
     </div>
      <div id="inspector-tab" class="tab-pane">
        <div class="panel stats-panel">
-         <div class="header">
-           <div class="title">Environment Inspector</div>
-           <div style="display: flex; gap: 8px; align-items: center;">
-             <div class="badge" id="inspector-env-select-container">
-               <select id="inspector-env-select"></select>
+          <div class="header">
+            <div class="title">Environment Inspector</div>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <div class="badge" id="inspector-env-select-container">
+                <select id="inspector-env-select"></select>
+              </div>
+              <button id="inspector-control-btn" class="control-btn" title="Take control of this environment with gamepad/keyboard">Take Control</button>
+              <div class="world-info-bar" id="inspector-world-info">Map: -- X: -- Y: --</div>
+            </div>
+          </div>
+         <div class="stats-scroll" id="inspector-scroll">
+           <div id="inspector-content">
+             <div class="inspector-screen-wrapper">
+               <img id="inspector-screen" src="" alt="Emulator screen" />
+               <div class="inspector-milestones" id="inspector-milestones"></div>
              </div>
-             <button id="inspector-control-btn" class="control-btn" title="Take control of this environment with gamepad/keyboard">Take Control</button>
+             <div class="inspector-right-column">
+               <div class="inspector-party-split">
+                 <div class="inspector-party-block">
+                   <h4>Party</h4>
+                   <div id="inspector-party"></div>
+                 </div>
+                 <div class="inspector-party-block">
+                   <h4>Opponent</h4>
+                   <div id="inspector-opponent"></div>
+                 </div>
+               </div>
+              <button class="inspector-toggle-btn" id="inspector-details-toggle">
+                <span class="toggle-icon collapsed">▼</span>
+                <span>Environment Details</span>
+              </button>
+               <div id="inspector-details" class="inspector-details-collapsed"></div>
+             </div>
+           </div>
+           <div class="panel memory-watch-panel">
+             <div class="header">
+               <div class="title">Observation Inspector</div>
+               <div class="badge" id="inspector-status">idle</div>
+             </div>
+             <div class="memory-watch-scroll">
+               <table>
+                 <thead>
+                   <tr><th>Address</th><th>Value</th><th>Description</th></tr>
+                 </thead>
+                 <tbody id="inspector-body"></tbody>
+               </table>
+             </div>
            </div>
          </div>
-        <div class="stats-scroll" id="inspector-scroll">
-          <div id="inspector-content">
-            <div class="inspector-screen-wrapper">
-              <img id="inspector-screen" src="" alt="Emulator screen" />
-            </div>
-            <div id="inspector-details"></div>
-          </div>
-          <div class="panel memory-watch-panel">
-            <div class="header">
-              <div class="title">Observation Inspector</div>
-              <div class="badge" id="inspector-status">idle</div>
-            </div>
-            <div class="memory-watch-scroll">
-              <table>
-                <thead>
-                  <tr><th>Address</th><th>Value</th><th>Description</th></tr>
-                </thead>
-                <tbody id="inspector-body"></tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+       </div>
+     </div>
     <div id="stats-tab" class="tab-pane">
       <div class="panel stats-panel">
         <div class="header">

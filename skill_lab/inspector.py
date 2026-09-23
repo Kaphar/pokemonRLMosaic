@@ -226,19 +226,22 @@ class ObservationInspector:
             progress = checkpoint_tracker.get_progress()
             cv2.putText(panel, "Checkpoints:", (15, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
             y += 18
-            checkpoint_names = progress.get("checkpoint_names", [])
-            achieved_names = set(progress.get("achieved_names", []))
+            checkpoint_list = progress.get("checkpoints", [])
             current_target = progress.get("current_target_index", 0)
             start_idx = max(0, current_target - 2)
-            end_idx = min(len(checkpoint_names), current_target + 4)
+            end_idx = min(len(checkpoint_list), current_target + 4)
             for idx in range(start_idx, end_idx):
-                cp_name = checkpoint_names[idx] if idx < len(checkpoint_names) else f"cp_{idx}"
-                done = cp_name in achieved_names
+                if idx >= len(checkpoint_list):
+                    break
+                cp = checkpoint_list[idx]
+                cp_name = cp.get("name", f"checkpoint_{idx}")
+                done = cp.get("achieved", False)
                 is_target = idx == current_target
+                cp_step = cp.get("achieved_step", None)
                 if done:
                     color = (0, 255, 0)
                     label = "#"
-                    step_text = f" @ step {checkpoint_tracker.achieved_steps.get(cp_name, 0)}"
+                    step_text = f" @ step {cp_step}" if cp_step else ""
                 elif is_target:
                     color = (0, 255, 255)
                     label = ">"

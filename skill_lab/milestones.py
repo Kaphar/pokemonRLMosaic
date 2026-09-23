@@ -7,6 +7,14 @@ for a stage.  Each checkpoint maps to an ``events.json`` key (e.g.
 
 Checkpoints are loaded from the stage config's ``"checkpoints"`` array, so
 different stages can define their own ordered progression.
+
+Two checkpoint subtypes are supported:
+
+* **event-based** — detected via an ``event_key`` (an ``events.json`` bit flag).
+* **stat-based** — detected via a ``stat_check`` dict that inspects live env
+  attributes (e.g. ``{"attr": "party_size", "op": ">", "value": 0}``).
+  Useful for milestones that have no dedicated event flag, such as obtaining
+  the first Pokemon or winning the first battle.
 """
 
 from __future__ import annotations
@@ -18,15 +26,25 @@ from typing import Any
 from skill_lab.ram_map import GameState
 
 
+_STAT_OPERATORS = {
+    ">": lambda a, b: a > b,
+    ">=": lambda a, b: a >= b,
+    "==": lambda a, b: a == b,
+    "<": lambda a, b: a < b,
+    "<=": lambda a, b: a <= b,
+}
+
+
 class MilestoneTracker:
     """Track a curated, ordered list of story checkpoints.
 
     Parameters
     ----------
     checkpoints
-        List of dicts, each with keys: ``name``, ``event_key``,
-        ``reward_baseline`` (optional, defaults to 1.0), ``description``
-        (optional).
+        List of dicts, each with keys: ``name``, and either ``event_key``
+        (an ``events.json`` key like ``"0xD74B-5"``) or ``stat_check``
+        (a dict with ``attr``, ``op``, ``value``).  Optional keys:
+        ``reward_baseline`` (defaults to 1.0), ``description``.
     effective_rewards
         Dict produced by :func:`skill_lab.rewards.check_baseline_rewards`.
         Must contain ``"milestone"`` key for the default reward value.
@@ -83,6 +101,32 @@ class MilestoneTracker:
         addr, msb_index = parsed
         return game_state.event_flag(addr, msb_index)
 
+    def _check_stat_condition(self, env, stat_check: dict[str, Any]) -> bool:
+        """Evaluate a ``stat_check`` dict against live env attributes.
+
+        ``stat_check`` keys:
+            ``attr``  – attribute name on the env (e.g. ``"party_size"``).
+            ``op``    – comparison operator (default ``">"``).
+            ``value`` – numeric threshold.
+        """
+        attr = stat_check.get("attr")
+        if not attr:
+            return False
+        op = stat_check.get("op", ">")
+        operator = _STAT_OPERATORS.get(op)
+        if operator is None:
+            return False
+        target = stat_check.get("value")
+        current = getattr(env, attr, None)
+        if current is None:
+            return False
+        try:
+            current = float(current)
+            target = float(target)
+        except (TypeError, ValueError):
+            return False
+        return operator(current, target)
+
     def _reward_for(self, checkpoint: dict[str, Any]) -> float:
         """Return the reward for a checkpoint, using a per-checkpoint override
         if present, falling back to ``effective_rewards["milestone"]``."""
@@ -130,17 +174,25 @@ class MilestoneTracker:
             if name in self.achieved:
                 continue
 
+            achieved = False
+
             key = cp.get("event_key")
-            if not key:
+            if key and self._event_is_set(game_state, key):
+                achieved = True
+
+            if not achieved and cp.get("stat_check"):
+                if self._check_stat_condition(game_state_or_env, cp["stat_check"]):
+                    achieved = True
+
+            if not achieved:
                 continue
 
-            if self._event_is_set(game_state, key):
-                self.achieved.add(name)
-                self.achieved_steps[name] = int(step_count)
-                cp_reward = self._reward_for(cp)
-                reward += cp_reward
-                self.total_reward += cp_reward
-                print(f"{env_label}[Checkpoint] ACHIEVED: {name} at step {step_count} (reward +{cp_reward:.2f})")
+            self.achieved.add(name)
+            self.achieved_steps[name] = int(step_count)
+            cp_reward = self._reward_for(cp)
+            reward += cp_reward
+            self.total_reward += cp_reward
+            print(f"{env_label}[Checkpoint] ACHIEVED: {name} at step {step_count} (reward +{cp_reward:.2f})")
 
         return reward
 
@@ -157,13 +209,25 @@ class MilestoneTracker:
     def get_progress(self) -> dict[str, Any]:
         """Return a serializable progress summary for the UI / dashboard."""
         total = len(self.checkpoints)
-        names = [cp.get("name", f"checkpoint_{i}") for i, cp in enumerate(self.checkpoints)]
+        checkpoint_infos = []
+        for i, cp in enumerate(self.checkpoints):
+            achieved = cp["name"] in self.achieved
+            subtype = "event" if cp.get("event_key") else "stat"
+            checkpoint_infos.append({
+                "index": i,
+                "name": cp.get("name", f"checkpoint_{i}"),
+                "description": cp.get("description", ""),
+                "subtype": subtype,
+                "achieved": achieved,
+                "achieved_step": self.achieved_steps.get(cp["name"], None),
+                "reward": self._reward_for(cp) if achieved else 0.0,
+            })
         return {
             "total": total,
             "achieved": len(self.achieved),
-            "achieved_names": list(self.achieved),
+            "achieved_names": sorted(self.achieved, key=lambda n: self.achieved_steps.get(n, 0)),
             "achieved_steps": dict(self.achieved_steps),
-            "checkpoint_names": names,
+            "checkpoints": checkpoint_infos,
             "current_target_index": self.current_target_index,
             "total_reward": self.total_reward,
         }

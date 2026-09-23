@@ -78,6 +78,16 @@ class BreadcrumbTracker:
         self._current_waypoint_idx = 0
         self.total_reward = 0.0
 
+    def set_waypoints(self, waypoints: list[dict[str, Any]]) -> None:
+        """Replace the current waypoint list and reset progress.
+
+        Used when the milestone progression shifts the navigation goal
+        (e.g. after obtaining Oak's Parcel the agent must return to
+        Oak's Lab instead of continuing toward the original destination).
+        """
+        self.waypoints = list(waypoints or [])
+        self.reset()
+
     def update(self, x: int, y: int, map_id: int, env_label: str = "") -> float:
         """Process a new position and return any reward earned.
 

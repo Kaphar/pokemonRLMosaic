@@ -172,11 +172,13 @@ class RedGymEnv(Env):
         self.step_count = 0
         self.trainer_wins = 0
         self.wild_wins = 0
+        self.fled_battle = 0
         self.in_battle = False
         self.battle_type = 0
         self._last_enemy_hp = None
         self._last_enemy_max_hp = None
         self._enemy_damage_dealt = 0.0
+        self._enemy_defeated = False
         self.wall_collisions = 0
         self._same_dir_count = 0
         self._last_dir = None
@@ -354,6 +356,7 @@ class RedGymEnv(Env):
                 "healr": self.total_healing_rew,
                 "trainer_wins": self.trainer_wins,
                 "wild_wins": self.wild_wins,
+                "fled_battle": self.fled_battle,
                 "enemy_damage_dealt": self._enemy_damage_dealt,
                 "game_minutes": game_minutes,
                 "wall_collisions": self.wall_collisions,
@@ -616,20 +619,8 @@ class RedGymEnv(Env):
         return max(sum(poke_levels) - starter_additional_levels, 0)
 
     def get_levels_reward(self):
-        explore_thresh = 22
-        scale_factor = 4
         level_sum = self.get_levels_sum()
-        # to try for fun
-        # # Cap level rewards at starter level (5 + 4 = 9) until Pokedex is obtained.
-        # # Without Pokedex, level gains beyond the starter are not rewarded.
-        # has_pokedex = self.read_event_bit(0xD74B, 5)
-        # if not has_pokedex:
-        #     level_sum = min(level_sum, 9)
-        if level_sum < explore_thresh:
-            scaled = level_sum
-        else:
-            scaled = (level_sum - explore_thresh) / scale_factor + explore_thresh
-        self.max_level_rew = max(self.max_level_rew, scaled)
+        self.max_level_rew = max(self.max_level_rew, level_sum)
         return self.max_level_rew
 
     def get_badges(self):
@@ -658,7 +649,7 @@ class RedGymEnv(Env):
         # https://github.com/pret/pokered/blob/91dc3c9f9c8fd529bb6e8307b58b96efa0bec67e/constants/event_constants.asm
         state_scores = {
             "event": self.reward_scale * self.update_max_event_rew() * 4,
-            #"level": self.reward_scale * self.get_levels_reward(),
+            "level": self.reward_scale * self.get_levels_reward(),
             "heal": self.reward_scale * self.total_healing_rew * 10,
             "enemy_damage": self._enemy_damage_dealt * 0.1,
             #"op_lvl": self.reward_scale * self.update_max_op_level() * 0.2,
@@ -712,6 +703,7 @@ class RedGymEnv(Env):
         if not self.in_battle and cur_battle_type != 0:
             self.in_battle = True
             self.battle_type = cur_battle_type
+            self._enemy_defeated = False
             # Initialize enemy HP tracking when entering battle
             enemy_hp = self.read_hp(0xCFE6)
             enemy_max_hp = self.read_hp(0xCFF4)
@@ -721,18 +713,26 @@ class RedGymEnv(Env):
             self.in_battle = False
             if self.read_hp_fraction() > 0:
                 if self.battle_type == 1:
-                    self.wild_wins += 1
+                    # Wild battle ended — only count as a win if the
+                    # enemy was actually defeated (HP reached 0).
+                    if self._enemy_defeated:
+                        self.wild_wins += 1
+                    else:
+                        self.fled_battle += 1
                 elif self.battle_type >= 2:
                     self.trainer_wins += 1
                     if self.first_trainer_win_step == 0:
                         self.first_trainer_win_step = self.step_count
-                        print(f"[Combat] 🥊 First trainer win at step {self.step_count} — speed bonus active!")
+                        print(f"[Combat] First trainer win at step {self.step_count} — speed bonus active!")
             self.battle_type = 0
             self._last_enemy_hp = None
             self._last_enemy_max_hp = None
+            self._enemy_defeated = False
         elif self.in_battle and cur_battle_type != 0:
             # Track enemy HP deltas for damage dealt reward
             current_enemy_hp = self.read_hp(0xCFE6)
+            if current_enemy_hp <= 0:
+                self._enemy_defeated = True
             if self._last_enemy_hp is not None and current_enemy_hp < self._last_enemy_hp:
                 hp_lost = self._last_enemy_hp - current_enemy_hp
                 self._enemy_damage_dealt += hp_lost

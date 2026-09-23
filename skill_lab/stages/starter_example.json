@@ -1,6 +1,6 @@
 {
   "name": "starter",
-  "description": "Get a starter Pokemon. Short episodes for fast learning.",
+  "description": "Example: Get a starter Pokemon. Short episodes for fast learning.",
   "max_steps": 1200,
   "milestone_reward_multiplier": 3.0,
   "event_reward_multiplier": 0.0,

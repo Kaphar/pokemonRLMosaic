@@ -74,6 +74,7 @@ class SkillLabWrapper(gymnasium.Wrapper):
         self.effective_rewards = config.get("effective_rewards", {})
         self.profile_multipliers = config.get("profile_category_multipliers", {})
         self.milestone_reward = self.effective_rewards.get("milestone", 1.0)
+        self.flee_penalty = float(self.effective_rewards.get("flee_penalty", -0.1))
         self.healing_reward_multiplier = float(
             config.get("healing_reward_multiplier", config.get("healing_reward", 1.0))
         )
@@ -186,6 +187,13 @@ class SkillLabWrapper(gymnasium.Wrapper):
         self.party_reader = Gen1PartyReader(
             PyBoyMemoryReader(self.env.unwrapped.pyboy.memory)
         )
+
+        # --- Reward History (for inspector UI) ---
+        self._reward_events: list[dict[str, Any]] = []
+        self._reward_counts: dict[str, int] = {}
+
+        # --- Breadcrumb redirection tracking ---
+        self._breadcrumbs_redirected = False
 
         # --- Input Replay ---
         # Optional recorded input sequence replayed from the init state. Once the
@@ -676,6 +684,27 @@ class SkillLabWrapper(gymnasium.Wrapper):
         else:
             return "wrong", species
 
+    def _update_breadcrumb_after_milestone(self, current_map_id: int) -> None:
+        """After a major story milestone, refresh BreadcrumbTracker waypoints.
+
+        Currently handles the 'Got Oak's Parcel' → deliver to Oak → receive Pokédex
+        transition, redirecting navigation toward Oak's Lab (map 40).
+        """
+        if getattr(self, "_breadcrumbs_redirected", False):
+            return
+        try:
+            oak_parcel_delivered = self.game_state.event_flag(0xD74E, 0)
+        except Exception:
+            oak_parcel_delivered = False
+        if not oak_parcel_delivered:
+            return
+        if self.breadcrumb_tracker is not None:
+            self.breadcrumb_tracker.set_waypoints([
+                {"label": "Oak's Lab", "target_map": 40, "target_x": 1058, "target_y": 1022}
+            ])
+        self._breadcrumbs_redirected = True
+        print(f"{self._colored_env_label()} Breadcrumb updated: targeting Oak's Lab")
+
     def step(self, action: int):
         """Intercept action, apply masking, check for early termination."""
 
@@ -697,24 +726,34 @@ class SkillLabWrapper(gymnasium.Wrapper):
         prior_level_sum = self.game_state.party_levels_sum()
         prior_trainer_wins = self.env.unwrapped.trainer_wins
         prior_wild_wins = self.env.unwrapped.wild_wins
-        prior_trainer_wins = self.env.unwrapped.trainer_wins
-        prior_wild_wins = self.env.unwrapped.wild_wins
+        prior_fled_battle = self.env.unwrapped.fled_battle
 
         # Execute in real environment
         observation, reward, terminated, truncated, info = self.env.step(action)
 
         cur_trainer_wins = self.env.unwrapped.trainer_wins
         cur_wild_wins = self.env.unwrapped.wild_wins
+        cur_fled_battle = self.env.unwrapped.fled_battle
         if cur_trainer_wins > prior_trainer_wins:
             trainer_reward = self.effective_rewards.get("combat_trainer", 5.0)
+            self._log_reward("combat_trainer", trainer_reward,
+                             f"Trainer win #{cur_trainer_wins}")
             reward += trainer_reward
             print(f"{self._colored_env_label()} Combat: trainer win #{cur_trainer_wins} reward +{trainer_reward:.2f}")
             info["combat_trainer_reward"] = trainer_reward
         if cur_wild_wins > prior_wild_wins:
             wild_reward = self.effective_rewards.get("combat_wild", 2.0)
+            self._log_reward("combat_wild", wild_reward,
+                             f"Wild win #{cur_wild_wins}")
             reward += wild_reward
             print(f"{self._colored_env_label()} Combat: wild win #{cur_wild_wins} reward +{wild_reward:.2f}")
             info["combat_wild_reward"] = wild_reward
+        if cur_fled_battle > prior_fled_battle:
+            flee_penalty = -abs(self.flee_penalty)
+            self._log_reward("fled_battle", flee_penalty,
+                             f"Fled from {cur_fled_battle - prior_fled_battle} battle(s)")
+            reward += flee_penalty
+            print(f"{self._colored_env_label()} Combat: fled from battle penalty {flee_penalty:.2f}")
 
 
         milestone_reward = 0.0
@@ -740,7 +779,13 @@ class SkillLabWrapper(gymnasium.Wrapper):
                 reward += milestone_reward
                 self.total_milestone_reward += milestone_reward
                 self.last_milestone_step = self.env.unwrapped.step_count
+                self._log_reward("milestone", milestone_reward, "Checkpoint milestone",
+                                 self.env.unwrapped.step_count)
                 info["milestone_reward"] = milestone_reward
+
+        # --- Post-milestone breadcrumb update (e.g. after delivering Oak's Parcel) ---
+        if milestone_triggered and self.breadcrumb_tracker is not None:
+            self._update_breadcrumb_after_milestone(current_map_id)
 
         # --- Event flag scanner (broad, for event reward) ---
         event_reward = 0.0
@@ -748,6 +793,7 @@ class SkillLabWrapper(gymnasium.Wrapper):
             event_reward = self.event_tracker.check_and_reward(self.env, self._colored_env_label())
             if event_reward > 0:
                 reward += event_reward
+                self._log_reward("event", event_reward, "Event flag achieved")
                 info["event_reward"] = event_reward
 
         progress_signal = milestone_triggered or (current_party_size > prior_party_size) or (current_map_id != prior_map_id)
@@ -761,6 +807,8 @@ class SkillLabWrapper(gymnasium.Wrapper):
                 visited_count = len(self._visited_maps)
                 map_discovery_reward = base_map_disc / max(1.0, math.sqrt(visited_count))
                 reward += map_discovery_reward
+                self._log_reward("map_discovery", map_discovery_reward,
+                                 f"New map 0x{current_map_id:02X}")
                 info["map_discovery_reward"] = map_discovery_reward
                 print(f"{self._colored_env_label()} New map discovered: 0x{current_map_id:02X} (+{map_discovery_reward:.2f})")
 
@@ -774,6 +822,7 @@ class SkillLabWrapper(gymnasium.Wrapper):
             )
             if breadcrumb_reward > 0:
                 reward += breadcrumb_reward
+                self._log_reward("breadcrumb", breadcrumb_reward, "Navigation waypoint reached")
                 info["breadcrumb_reward"] = breadcrumb_reward
 
         level_up = current_level_sum > prior_level_sum
@@ -782,6 +831,7 @@ class SkillLabWrapper(gymnasium.Wrapper):
             if level_up:
                 healing_reward *= 0.1
             reward += healing_reward
+            self._log_reward("healing", healing_reward, f"HP heal {prior_hp:.0%} -> {current_hp:.0%}")
             info["healing_reward"] = healing_reward
             info["healing_reward_multiplier"] = self.healing_reward_multiplier
             info["healing_reward_scale"] = self.reward_scale
@@ -815,7 +865,8 @@ class SkillLabWrapper(gymnasium.Wrapper):
                 if dvs is not None and self._save_objective_state(check_dv_threshold=False):
                     self.objective_met = True
                     reward += calculate_starter_reward(*dvs)
-                    # NOTE: Do NOT terminate on correct starter - continue playing!
+                    self._log_reward("starter_correct", calculate_starter_reward(*dvs),
+                                     f"Correct starter species=0x{species:02X}")
                     print(f"{self._colored_env_label()} [Env {self.env_name}] CORRECT starter (species=0x{species:02X}) at step {self.env.unwrapped.step_count} (reward +{calculate_starter_reward(*dvs):.2f})")
                     info["objective_success"] = True
                     info["objective_steps"] = self.env.unwrapped.step_count
@@ -831,6 +882,8 @@ class SkillLabWrapper(gymnasium.Wrapper):
                     saved = self._save_objective_state(check_dv_threshold=True)
                     # Apply wrong choice penalty but NOT the starter DV reward
                     reward += wrong_choice_penalty
+                    self._log_reward("starter_wrong", wrong_choice_penalty,
+                                     f"Wrong starter species=0x{species:02X}")
                     terminated = True
                     if saved:
                         print(f"{self._colored_env_label()} ❌ [Env {self.env_name}] WRONG starter (species=0x{species:02X}) at step {self.env.unwrapped.step_count} saved (penalty {wrong_choice_penalty:.2f}) → saved (DVs meet threshold)")
@@ -850,6 +903,8 @@ class SkillLabWrapper(gymnasium.Wrapper):
                     saved = self._save_objective_state(check_dv_threshold=True)
                     if saved:
                         reward += calculate_starter_reward(*dvs)
+                        self._log_reward("starter_any", calculate_starter_reward(*dvs),
+                                         f"Any starter species=0x{species:02X}")
                         # NOTE: Do NOT terminate on any starter - continue playing!
                         print(f"{self._colored_env_label()} [Env {self.env_name}] Picked a starter (species=0x{species:02X}) at step {self.env.unwrapped.step_count} (reward +{calculate_starter_reward(*dvs):.2f})")
                         info["objective_success"] = True
@@ -896,7 +951,9 @@ class SkillLabWrapper(gymnasium.Wrapper):
         self._last_bag_signature = None
         self._visited_maps.clear()
         self._reward_counts.clear()
+        self._reward_events.clear()
         self._prior_level_sum = 0
+        self._breadcrumbs_redirected = False
         if self.checkpoint_tracker is not None:
             self.checkpoint_tracker.reset(self.game_state, self._colored_env_label())
         if self.breadcrumb_tracker is not None:
@@ -922,6 +979,32 @@ class SkillLabWrapper(gymnasium.Wrapper):
         return observation, info
 
     # Expose wrapped attributes
+    def _log_reward(self, reward_type: str, amount: float, description: str, step: int | None = None) -> None:
+        """Log a reward event to the per-env reward history for the inspector UI."""
+        if step is None:
+            step = int(getattr(self.env.unwrapped, "step_count", 0))
+        self._reward_events.append({
+            "step": step,
+            "type": reward_type,
+            "amount": round(float(amount), 4),
+            "description": description,
+        })
+        self._reward_counts[reward_type] = self._reward_counts.get(reward_type, 0) + 1
+
+    @property
+    def reward_events(self) -> list[dict[str, Any]]:
+        """Chronological list of all reward events for this env."""
+        return self._reward_events
+
+    @property
+    def reward_counts(self) -> dict[str, int]:
+        """Count of each repeatable reward type triggered this episode."""
+        return dict(self._reward_counts)
+
+    @property
+    def fled_battle(self) -> int:
+        return self.env.unwrapped.fled_battle
+
     @property
     def step_count(self):
         return self.env.unwrapped.step_count
