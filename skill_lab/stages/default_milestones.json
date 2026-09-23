@@ -1,0 +1,48 @@
+{
+  "name": "default_milestones",
+  "description": "Default checkpoint list used when a stage does not define its own checkpoints. These cover the early-game story beats of Pokemon Red (Pallet Town through Route 1).",
+  "checkpoints": [
+    {
+      "name": "Followed Oak Into Lab",
+      "event_key": "0xD747-0",
+      "reward_baseline": 1.0,
+      "description": "Enter Professor Oak's lab in Pallet Town"
+    },
+    {
+      "name": "Got Starter",
+      "event_key": "0xD74B-2",
+      "reward_baseline": 5.0,
+      "description": "Receive your starter Pokemon from Oak"
+    },
+    {
+      "name": "Got Pokedex",
+      "event_key": "0xD74B-5",
+      "reward_baseline": 10.0,
+      "description": "Receive the Pokedex from Oak"
+    },
+    {
+      "name": "Party Has Starter",
+      "stat_check": {"attr": "party_size", "op": ">=", "value": 1},
+      "reward_baseline": 5.0,
+      "description": "Party contains at least one Pokemon"
+    },
+    {
+      "name": "Won Rival Battle",
+      "stat_check": {"attr": "trainer_wins", "op": ">=", "value": 1},
+      "reward_baseline": 15.0,
+      "description": "Win your first trainer battle against the rival"
+    },
+    {
+      "name": "Got Oak's Parcel",
+      "event_key": "0xD74E-1",
+      "reward_baseline": 10.0,
+      "description": "Obtain the Oak's Parcel from the guard on Route 1"
+    },
+    {
+      "name": "Oak Got Parcel",
+      "event_key": "0xD74E-0",
+      "reward_baseline": 20.0,
+      "description": "Deliver Oak's Parcel to Professor Oak in Pallet Lab"
+    }
+  ]
+}

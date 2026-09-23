@@ -273,14 +273,15 @@ function renderPartyTable(party, showDVs) {
 }
 
 function renderMilestones(data) {
-  const checkpoints = (data.checkpoints && data.checkpoints.checkpoints) || [];
+  const checkpointsData = data.checkpoints || {};
+  const checkpoints = checkpointsData.checkpoints || [];
   if (!el.inspectorMilestones) return;
   if (!checkpoints.length) {
     el.inspectorMilestones.innerHTML = '<div style="color: #8aa0c7; font-size: 0.8rem; padding: 4px 0;">No milestones configured</div>';
     return;
   }
   let html = '';
-  const currentIdx = data.checkpoints.current_target_index || 0;
+  const currentIdx = checkpointsData.current_target_index || 0;
   checkpoints.forEach(function(cp, idx) {
     const achieved = cp.achieved || false;
     const isCurrent = idx === currentIdx && !achieved;

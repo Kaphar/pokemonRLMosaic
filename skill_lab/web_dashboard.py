@@ -426,6 +426,30 @@ class BrowserMapDashboard:
                 "key_bindings": dict(self._key_bindings),
             }
 
+    def get_config_state(self) -> dict[str, Any]:
+        """Return the current applied config snapshot (read-only)."""
+        with self._lock:
+            return {
+                "max_steps": self._config.get("max_steps"),
+                "extra_steps": self._config.get("extra_steps", 0),
+                "save_on_catch": self._config.get("save_on_catch"),
+                "gamepad_bindings": dict(self._gamepad_bindings),
+                "key_bindings": dict(self._key_bindings),
+            }
+
+    def take_pending_config(self) -> dict[str, Any] | None:
+        """Atomically pop the pending config payload (if any).
+
+        Returns a copy of the payload that was applied via the /api/config
+        POST, or ``None`` if no new config has arrived since the last call.
+        """
+        with self._lock:
+            if not self._pending_saves:
+                return None
+            pending = dict(self._pending_saves)
+            self._pending_saves.clear()
+            return pending
+
     def handle_control_request(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Handle control toggle, input events, and binding updates."""
         with self._lock:
@@ -1009,6 +1033,16 @@ class BrowserMapDashboard:
                     return
                 if parsed.path == "/api/control":
                     result = dashboard.get_control_state()
+                    data = json.dumps(result).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("Content-Length", str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+                    return
+                if parsed.path == "/api/config":
+                    result = dashboard.get_config_state()
                     data = json.dumps(result).encode("utf-8")
                     self.send_response(200)
                     self.send_header("Content-Type", "application/json")

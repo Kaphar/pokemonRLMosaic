@@ -114,6 +114,8 @@ def make_env(rank: int, env_conf: dict[str, Any], env_setup_config: dict[str, An
             "save_on_catch_enabled": cfg.get("save_on_catch_enabled", SAVE_ON_CATCH_ENABLED),
             "save_on_catch_min_dv": cfg.get("save_on_catch_min_dv", SAVE_ON_CATCH_MIN_DV),
             "input_replay": cfg.get("input_replay", ""),
+            "training_mode": cfg.get("training_mode", "segment"),
+            "extra_steps": int(cfg.get("extra_steps", 0) or 0),
         })
 
         return wrapped_env

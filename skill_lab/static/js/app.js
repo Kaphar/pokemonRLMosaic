@@ -142,7 +142,8 @@ let inspectorDataPollId = null;
 function startInspectorPolling() {
   if (inspectorDataPollId !== null) return;
   inspectorDataPollId = setInterval(function() {
-    if (isInspectorTabActive() && state.lastInspectorData !== null) {
+    if (isInspectorTabActive()) {
+      updateInspectorScreen();
       fetchInspectorData();
     }
   }, 1000);

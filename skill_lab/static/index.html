@@ -166,11 +166,16 @@
           <div class="badge" id="config-status">idle</div>
         </div>
          <div class="config-form">
-           <label>
-             <span>Max Steps</span>
-             <input type="range" id="max-steps" min="600" max="12000" step="120" value="2880" />
-             <span id="max-steps-value">2880</span>
-           </label>
+            <label>
+              <span>Max Steps</span>
+              <input type="range" id="max-steps" min="600" max="12000" step="120" value="2880" />
+              <span id="max-steps-value">2880</span>
+            </label>
+            <label>
+              <span>Extra Steps (mid-run bonus)</span>
+              <input type="range" id="extra-steps" min="0" max="5000" step="60" value="0" />
+              <span id="extra-steps-value">0</span>
+            </label>
            <label>
              <input type="checkbox" id="save-on-catch" checked />
              Enable Save on Catch

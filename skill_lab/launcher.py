@@ -358,6 +358,8 @@ class Launcher:
         self.stage_var = tk.StringVar(value="starter")
         self.training_mode_var = tk.StringVar(value="segment")  # NEW
         self.override_trainer_stage_var = tk.BooleanVar(value=False)  # NEW
+        self.override_trainer_steps_var = tk.BooleanVar(value=False)  # NEW: override reset steps
+        self.extra_steps_var = tk.IntVar(value=0)  # NEW: extra steps added to max_steps (mid-run)
         self.rows_var = tk.IntVar(value=ROWS)
         self.cols_var = tk.IntVar(value=COLS)
         self.num_envs_var = tk.IntVar(value=DEFAULT_ENV_AMOUNT)
@@ -453,10 +455,21 @@ class Launcher:
         self.steps_label = ttk.Label(steps_frame, text="(steps per segment before reset)")
         self.steps_label.pack(side=tk.LEFT)
 
-        # Row 6: Speed
-        ttk.Label(main_frame, text="Speed:").grid(row=6, column=0, sticky="w", pady=2)
+        # Row 6: Override reset steps + Extra steps
+        override_steps_frame = ttk.Frame(main_frame)
+        override_steps_frame.grid(row=6, column=0, columnspan=2, sticky="w", pady=2)
+        ttk.Checkbutton(
+            override_steps_frame, text="Override trainers' reset steps with launcher value",
+            variable=self.override_trainer_steps_var,
+        ).pack(side=tk.LEFT)
+        ttk.Label(override_steps_frame, text="Extra steps (mid-run bonus):").pack(side=tk.LEFT, padx=(15, 5))
+        ttk.Spinbox(override_steps_frame, from_=0, to=5000, textvariable=self.extra_steps_var, width=8).pack(side=tk.LEFT)
+        ttk.Label(override_steps_frame, text="(added to each reset; applied mid-run on next apply)").pack(side=tk.LEFT, padx=5)
+
+        # Row 7: Speed
+        ttk.Label(main_frame, text="Speed:").grid(row=7, column=0, sticky="w", pady=2)
         speed_frame = ttk.Frame(main_frame)
-        speed_frame.grid(row=6, column=1, sticky="w")
+        speed_frame.grid(row=7, column=1, sticky="w")
         ttk.Spinbox(speed_frame, from_=0, to=10, textvariable=self.speed_var, width=4).pack(side=tk.LEFT, padx=5)
         ttk.Label(speed_frame, text="(0=auto/turbo, 1=normal, 2=double)").pack(side=tk.LEFT)
 
@@ -482,10 +495,10 @@ class Launcher:
         ).pack(side=tk.LEFT, padx=5)
         ttk.Label(batch_frame, text="(steps before each reset/report)").pack(side=tk.LEFT)
 
-        # Row 7: Layout
-        ttk.Label(main_frame, text="Layout:").grid(row=7, column=0, sticky="w", pady=2)
+        # Row 11: Layout
+        ttk.Label(main_frame, text="Layout:").grid(row=11, column=0, sticky="w", pady=2)
         layout_frame = ttk.Frame(main_frame)
-        layout_frame.grid(row=7, column=1, sticky="w")
+        layout_frame.grid(row=11, column=1, sticky="w")
         ttk.Label(layout_frame, text="Rows:").pack(side=tk.LEFT)
         ttk.Spinbox(layout_frame, from_=1, to=10, textvariable=self.rows_var, width=4).pack(side=tk.LEFT, padx=(2, 10))
         ttk.Label(layout_frame, text="Cols:").pack(side=tk.LEFT)
@@ -495,40 +508,40 @@ class Launcher:
         self.rows_var.trace_add("write", self._update_total)
         self.cols_var.trace_add("write", self._update_total)
 
-        # Row 11: HUD
+        # Row 12: HUD
         ttk.Checkbutton(
             main_frame, text="Use HUD overlay", variable=self.hud_var
-        ).grid(row=11, column=0, columnspan=2, sticky="w", pady=5)
-
-        # Row 12: Record frame-exact inputs (plugin-based, enabled by default)
-        ttk.Checkbutton(
-            main_frame, text="Record frame-exact inputs (plugin)", variable=self.record_input_var
         ).grid(row=12, column=0, columnspan=2, sticky="w", pady=5)
 
-        # Row 13: Legacy recorder (only if plugin recording is disabled)
+        # Row 13: Record frame-exact inputs (plugin-based, enabled by default)
+        ttk.Checkbutton(
+            main_frame, text="Record frame-exact inputs (plugin)", variable=self.record_input_var
+        ).grid(row=13, column=0, columnspan=2, sticky="w", pady=5)
+
+        # Row 14: Legacy recorder (only if plugin recording is disabled)
         self.legacy_check = ttk.Checkbutton(
             main_frame, text="Use legacy recorder (instead of plugin)", variable=self.legacy_recorder_var, state="disabled"
         )
-        self.legacy_check.grid(row=13, column=0, columnspan=2, sticky="w", pady=5)
+        self.legacy_check.grid(row=14, column=0, columnspan=2, sticky="w", pady=5)
         self.record_input_var.trace_add("write", self._toggle_legacy_option)
 
-        # Row 14: Stage description
+        # Row 15: Stage description
         self.stage_desc_var = tk.StringVar(value="")
         ttk.Label(
             main_frame, textvariable=self.stage_desc_var,
             font=("", 8), foreground="gray"
-        ).grid(row=14, column=0, columnspan=2, sticky="w")
+        ).grid(row=15, column=0, columnspan=2, sticky="w")
 
-        # Row 15: Setup Environment Config button (separate frame for spacing)
+        # Row 16: Setup Environment Config button (separate frame for spacing)
         setup_frame = ttk.Frame(main_frame)
-        setup_frame.grid(row=15, column=0, columnspan=2, pady=(5, 15), sticky="ew")
+        setup_frame.grid(row=16, column=0, columnspan=2, pady=(5, 15), sticky="ew")
         ttk.Button(
             setup_frame, text="⚙️ Setup Environment Config", command=self._open_env_config
         ).pack(side="left", padx=20)
 
-        # Row 16: Launch button (separate frame for spacing)
+        # Row 17: Launch button (separate frame for spacing)
         launch_frame = ttk.Frame(main_frame)
-        launch_frame.grid(row=16, column=0, columnspan=2, pady=(0, 10), sticky="ew")
+        launch_frame.grid(row=17, column=0, columnspan=2, pady=(0, 10), sticky="ew")
         ttk.Button(
             launch_frame, text="🚀 Launch Training", command=self._launch
         ).pack(side="left", padx=20)
@@ -626,6 +639,8 @@ class Launcher:
             record_input_with_plugin=self.record_input_var.get(),
             use_legacy_recorder=self.legacy_recorder_var.get(),
             override_trainer_stage=self.override_trainer_stage_var.get(),
+            override_trainer_steps=self.override_trainer_steps_var.get(),
+            extra_steps=self.extra_steps_var.get(),
         )
 
         if mode == "train" and self.checkpoints:

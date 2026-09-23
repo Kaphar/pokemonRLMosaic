@@ -76,10 +76,21 @@ def make_config(profile: Profile, session_path: Path, args: argparse.Namespace) 
 
     # Determine max_steps based on training mode
     training_mode = getattr(args, "training_mode", "segment")
+    override_trainer_steps = getattr(args, "override_trainer_steps", False)
+    extra_steps = getattr(args, "extra_steps", 0)
     if training_mode == "fullrun":
         max_steps = 999999  # Effectively no limit
     else:
-        max_steps = args.max_steps or stage_config.get("max_steps", 7200)
+        if override_trainer_steps:
+            # Launcher value overrides any per-stage max_steps
+            max_steps = args.max_steps or stage_config.get("max_steps", 7200)
+        else:
+            # Default: use the stage's own max_steps so trainers keep their
+            # configured reset length; the launcher value is still applied
+            # when it is explicitly requested.
+            max_steps = stage_config.get("max_steps", args.max_steps or 7200)
+
+    print(f"  Base max_steps: {max_steps} (override_trainer_steps={override_trainer_steps}, extra_steps={extra_steps})")
 
     # Compute effective rewards via the new system
     reward_summary = check_baseline_rewards(profile_config, stage_config)
@@ -114,6 +125,10 @@ def make_config(profile: Profile, session_path: Path, args: argparse.Namespace) 
         "noop_button": True,
         "speed": getattr(args, "emulator_speed", 0),
         "training_mode": training_mode,
+        # Override trainers' per-stage max_steps with the launcher value
+        "override_trainer_steps": override_trainer_steps,
+        # Extra steps appended to each episode reset (applied mid-run via dashboard)
+        "extra_steps": extra_steps,
         # Button masks from unified config
         "disable_start": disable_start,
         "disable_select": disable_select,
@@ -168,6 +183,50 @@ def find_latest_checkpoint(checkpoint_dir: Path) -> Path | None:
     return checkpoints[0] if checkpoints else None
 
 
+def _apply_runtime_config(env, dashboard: "BrowserMapDashboard") -> None:
+    """Apply pending dashboard config changes to all running environments.
+
+    Only mutates attributes that are safe to change mid-run. ``extra_steps``
+    is applied immediately to each env's underlying ``max_steps`` (which
+    ``RedGymEnv.check_if_done`` reads every step), so the new threshold takes
+    effect for the current episode and all subsequent resets.
+    """
+    pending = dashboard.take_pending_config()
+    if not pending:
+        return
+
+    extra_steps = pending.get("extra_steps")
+    if extra_steps is not None:
+        extra_steps = int(extra_steps)
+        for env_obj in env.envs:
+            wrapper = getattr(env_obj, "env", env_obj)
+            if hasattr(wrapper, "set_extra_steps"):
+                wrapper.set_extra_steps(extra_steps)
+            else:
+                env_obj.unwrapped.max_steps = int(
+                    getattr(env_obj.unwrapped, "_base_max_steps", env_obj.unwrapped.max_steps)
+                ) + extra_steps
+        print(f"[Config] extra_steps -> {extra_steps}")
+    if "save_on_catch" in pending:
+        save_on_catch = bool(pending["save_on_catch"])
+        for env_obj in env.envs:
+            env_obj.unwrapped.save_on_catch = save_on_catch
+        print(f"[Config] save_on_catch -> {save_on_catch}")
+    if "max_steps" in pending and pending.get("max_steps"):
+        # Full override of the per-env max_steps (keeps the extra bonus). The
+        # dashboard's max_steps slider is treated as an explicit override when
+        # the user applies config mid-run.
+        new_max = int(pending["max_steps"])
+        for env_obj in env.envs:
+            wrapper = getattr(env_obj, "env", env_obj)
+            if hasattr(wrapper, "set_base_max_steps"):
+                wrapper.set_base_max_steps(new_max)
+            else:
+                env_obj.unwrapped.max_steps = new_max + int(getattr(env_obj, "extra_steps", 0))
+        print(f"[Config] max_steps -> {new_max}")
+    print(f"[Config] Applied runtime config: {pending}")
+
+
 def parse_args() -> argparse.Namespace:
     from skill_lab.config import ACTION_FREQ, DEFAULT_INIT_STATE, DEFAULT_ROM, DEFAULT_MAX_STEPS, DEFAULT_ENV_AMOUNT
     parser = argparse.ArgumentParser(description=__doc__)
@@ -190,6 +249,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--continuous", action="store_true", help="Run indefinitely without batch limits")
     parser.add_argument("--override-trainer-stage", action="store_true",
                         help="Force trainers to use the launcher-selected stage instead of their own saved stage")
+    parser.add_argument("--override-trainer-steps", action="store_true",
+                        help="Force all environments to use the launcher-selected max steps instead of their stage's")
+    parser.add_argument("--extra-steps", type=int, default=0,
+                        help="Extra steps added on top of the episode max_steps reset; can be adjusted mid-run via the dashboard config tab")
 
     parser.add_argument("--record-input-with-plugin", action="store_true",
                         help="Record frame-exact inputs via plugin-style hook for deterministic replay")
@@ -662,7 +725,13 @@ def main(args: argparse.Namespace | None = None) -> None:
                 # UI Rendering Logic (Preserved exactly as you had it)
                 if not mosaic.display_paused and mosaic.selected_index is not None:
                     inspector.show()
-                    if not inspector.render(env, mosaic.selected_index, reward_history[mosaic.selected_index]):
+                    try:
+                        if not inspector.render(env, mosaic.selected_index, reward_history[mosaic.selected_index]):
+                            mosaic.selected_index = None
+                    except Exception as e:
+                        import traceback as _tb
+                        print(f"INSPECTOR ERROR at step {step_count}: {e}", flush=True)
+                        _tb.print_exc()
                         mosaic.selected_index = None
                 else: inspector.hide()
 
@@ -679,6 +748,12 @@ def main(args: argparse.Namespace | None = None) -> None:
                 else: map_window.hide()
 
                 dashboard.update_state(env, env.num_envs, scores=batch_stats.env_rewards)
+
+                # Apply any config changes pushed from the dashboard config tab
+                # (extra_steps, save_on_catch, perfect_sound). These take effect
+                # for subsequent resets and, where the env reads live, for the
+                # current episode as well.
+                _apply_runtime_config(env, dashboard)
 
                 mosaic.pending_human_action = None
                 if not mosaic.display_paused:

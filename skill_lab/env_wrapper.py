@@ -81,7 +81,13 @@ class SkillLabWrapper(gymnasium.Wrapper):
         self.events_path = config.get("events_path", None)
         self.speed_bonus_enabled = config.get("speed_bonus", True)
         self.training_mode = config.get("training_mode", "segment")
+        self.extra_steps = int(config.get("extra_steps", 0) or 0)
         self.target_starter = config.get("target_starter", None)
+        # Snapshot the base max_steps (without the extra_steps bonus) so the
+        # bonus can be applied/adjusted mid-run without losing the original
+        # stage-configured episode length.
+        self._base_max_steps = int(getattr(self.env.unwrapped, "max_steps", 0))
+        self._apply_extra_steps()
         self.env_index = config.get("env_index", 0)
         self.env_name = config.get("env_name", f"Env{self.env_index}")
         self.env_dir = config.get("env_dir")
@@ -209,6 +215,28 @@ class SkillLabWrapper(gymnasium.Wrapper):
         self._replay_index = 0
         self._original_run_action = None
         self._load_input_replay()
+
+    # --- Runtime max_steps adjustment (extra steps, adjustable mid-run) ---
+
+    def _apply_extra_steps(self) -> None:
+        """Push the current ``extra_steps`` bonus onto the underlying env's max_steps.
+
+        ``RedGymEnv.check_if_done`` reads ``self.max_steps`` every step, so
+        updating it here takes effect immediately for the *current* episode
+        (truncation threshold moves) and persists across resets.
+        """
+        unwrapped = self.env.unwrapped
+        unwrapped.max_steps = self._base_max_steps + self.extra_steps
+
+    def set_extra_steps(self, extra_steps: int) -> None:
+        """Adjust the extra-steps bonus applied on top of the stage max_steps."""
+        self.extra_steps = int(extra_steps)
+        self._apply_extra_steps()
+
+    def set_base_max_steps(self, base_max_steps: int) -> None:
+        """Override the stage-configured max_steps and re-apply the bonus."""
+        self._base_max_steps = int(base_max_steps)
+        self._apply_extra_steps()
 
     # --- Input Replay ---
 
@@ -975,6 +1003,10 @@ class SkillLabWrapper(gymnasium.Wrapper):
         # alone drive deterministic replay from the init state.
         if self._replay_events:
             self._install_frame_exact_replay()
+
+        # Re-sync the underlying env's max_steps after a reset (some paths
+        # may restore the base value), so the extra-steps bonus persists.
+        self._apply_extra_steps()
 
         return observation, info
 

@@ -67,9 +67,24 @@ class MilestoneTracker:
         stage_config: dict[str, Any] | None,
         effective_rewards: dict[str, float] | None = None,
     ) -> "MilestoneTracker":
-        """Build a tracker from a stage config's ``checkpoints`` array."""
+        """Build a tracker from a stage config's ``checkpoints`` array.
+
+        If the stage provides no ``checkpoints``, fall back to the default
+        checkpoints defined in ``stages/default_milestones.json``.
+        """
         stage_config = stage_config or {}
         checkpoints = stage_config.get("checkpoints", [])
+        if not checkpoints:
+            default_path = Path(__file__).resolve().parent / "stages" / "default_milestones.json"
+            if default_path.exists():
+                try:
+                    with open(default_path, "r", encoding="utf-8") as f:
+                        default_data = json.load(f)
+                    checkpoints = default_data.get("checkpoints", [])
+                    if checkpoints:
+                        print(f"[MilestoneTracker] Loaded {len(checkpoints)} default checkpoints from {default_path.name}", flush=True)
+                except Exception as e:
+                    print(f"[MilestoneTracker] Failed to load default milestones: {e}", flush=True)
         return cls(checkpoints=checkpoints, effective_rewards=effective_rewards)
 
     @property

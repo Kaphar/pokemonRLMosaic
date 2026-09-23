@@ -7,6 +7,12 @@ function initConfig() {
     el.maxStepsSlider.addEventListener('input', function() {
       el.maxStepsValue.textContent = String(el.maxStepsSlider.value);
     });
+    if (el.extraStepsSlider && el.extraStepsValue) {
+      el.extraStepsSlider.addEventListener('input', function() {
+        el.extraStepsValue.textContent = String(el.extraStepsSlider.value);
+      });
+      el.extraStepsValue.textContent = String(el.extraStepsSlider.value);
+    }
   }
 
   initControlBindings();
@@ -15,6 +21,7 @@ function initConfig() {
     el.applyConfigBtn.addEventListener('click', function() {
       const payload = {
         max_steps: parseInt(el.maxStepsSlider.value, 10),
+        extra_steps: parseInt(el.extraStepsSlider ? el.extraStepsSlider.value : 0, 10),
         save_on_catch: el.saveOnCatchCheckbox.checked,
         gamepad_bindings: state.gamepadBindings,
         key_bindings: state.keyBindings,
@@ -49,6 +56,23 @@ function initControlBindings() {
       renderGamepadBindings();
       renderKeyBindings();
     });
+
+  // Load the runtime config snapshot (extra_steps, max_steps overrides, etc.)
+  // so the sliders reflect what the running train loop has applied.
+  fetch('/api/config', { cache: 'no-store' })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.extra_steps !== undefined && el.extraStepsSlider) {
+        el.extraStepsSlider.value = String(data.extra_steps);
+        if (el.extraStepsValue) el.extraStepsValue.textContent = String(data.extra_steps);
+      }
+      if (data.max_steps !== null && data.max_steps !== undefined && el.maxStepsSlider) {
+        el.maxStepsSlider.value = String(data.max_steps);
+        if (el.maxStepsValue) el.maxStepsValue.textContent = String(data.max_steps);
+      }
+      state.runtimeConfig = data;
+    })
+    .catch(function() {});
 }
 
 function renderGamepadBindings() {

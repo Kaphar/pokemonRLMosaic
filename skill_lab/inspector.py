@@ -73,14 +73,20 @@ class ObservationInspector:
         )
 
     def show(self) -> None:
-        if self.visible and self._window_created:
+        if self.visible and self._window_created and self._window_alive():
             return
         self.visible = True
-        if not self._window_created:
+        if not self._window_created or not self._window_alive():
             cv2.namedWindow(self.title, cv2.WINDOW_NORMAL)
             cv2.setMouseCallback(self.title, self._on_mouse)
             self._window_created = True
         self._needs_initial_render = True
+
+    def _window_alive(self) -> bool:
+        try:
+            return cv2.getWindowProperty(self.title, cv2.WND_PROP_VISIBLE) >= 1
+        except cv2.error:
+            return False
 
     def hide(self) -> None:
         self.visible = False
@@ -105,7 +111,7 @@ class ObservationInspector:
         if not self.visible:
             self._needs_initial_render = False
             return True
-        if not self._needs_initial_render and cv2.getWindowProperty(self.title, cv2.WND_PROP_VISIBLE) < 1:
+        if not self._needs_initial_render and not self._window_alive():
             self.visible = False
             self._needs_initial_render = False
             return False
@@ -220,40 +226,6 @@ class ObservationInspector:
             cv2.putText(panel, "Milestones: (not available)", (15, y), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (150, 150, 150), 1)
             y += 18
 
-        # --- Checkpoint Tracker ---
-        checkpoint_tracker = getattr(env.envs[env_index], "checkpoint_tracker", None)
-        if checkpoint_tracker is not None:
-            progress = checkpoint_tracker.get_progress()
-            cv2.putText(panel, "Checkpoints:", (15, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-            y += 18
-            checkpoint_list = progress.get("checkpoints", [])
-            current_target = progress.get("current_target_index", 0)
-            start_idx = max(0, current_target - 2)
-            end_idx = min(len(checkpoint_list), current_target + 4)
-            for idx in range(start_idx, end_idx):
-                if idx >= len(checkpoint_list):
-                    break
-                cp = checkpoint_list[idx]
-                cp_name = cp.get("name", f"checkpoint_{idx}")
-                done = cp.get("achieved", False)
-                is_target = idx == current_target
-                cp_step = cp.get("achieved_step", None)
-                if done:
-                    color = (0, 255, 0)
-                    label = "#"
-                    step_text = f" @ step {cp_step}" if cp_step else ""
-                elif is_target:
-                    color = (0, 255, 255)
-                    label = ">"
-                    step_text = " (current target)"
-                else:
-                    color = (110, 110, 110)
-                    label = "o"
-                    step_text = ""
-                cv2.putText(panel, f"{label} {cp_name}{step_text}", (20, y), cv2.FONT_HERSHEY_SIMPLEX, 0.38, color, 1)
-                y += 15
-            y += 8
-
         hp_color = (0, 255, 0) if hp > 0.5 else ((0, 255, 255) if hp > 0.2 else (0, 0, 255))
         cv2.putText(panel, f"HP: {hp:.0%}", (15, y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, hp_color, 1)
         y += 24
@@ -270,7 +242,12 @@ class ObservationInspector:
         cv2.putText(panel, f"Trainer W: {trainer_wins}", (15, y), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 0), 1)
         y += 20
         cv2.putText(panel, f"Wild W: {wild_wins}", (15, y), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 0), 1)
-        cv2.putText(panel, f"Walls: {env.envs[env_index].wall_collisions}", (15, y + 20),
+        y += 20
+        fled_battle = int(getattr(env.envs[env_index], "fled_battle", 0))
+        flee_color = (0, 0, 255) if fled_battle > 0 else (110, 110, 110)
+        cv2.putText(panel, f"Fled: {fled_battle}", (15, y), cv2.FONT_HERSHEY_SIMPLEX, 0.55, flee_color, 1)
+        y += 20
+        cv2.putText(panel, f"Walls: {env.envs[env_index].wall_collisions}", (15, y),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 0), 1)
 
         party_x = left_panel_w + 15
@@ -284,15 +261,105 @@ class ObservationInspector:
             "partyNicknamesAddr": Gen1PartyReader.PARTY_NICKNAMES_ADDRESS,
         })
         draw_party_panel(panel, party_x, party_y, party_width, 180, party)
-        draw_trainer_panel(panel, party_x, 210, party_width, panel_info.get("trainer"))
-        draw_bag_panel(panel, party_x, 255, party_width, panel_info.get("bag"))
-        draw_stats_panel(panel, party_x, 315, party_width, {
+
+        # --- Checkpoint Tracker ---
+        checkpoint_y = party_y + 180 + 10
+        checkpoint_tracker = getattr(env.envs[env_index], "checkpoint_tracker", None)
+        if checkpoint_tracker is not None:
+            progress = checkpoint_tracker.get_progress()
+            cv2.putText(panel, "Checkpoints:", (party_x, checkpoint_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+            checkpoint_y += 18
+            checkpoint_list = progress.get("checkpoints", [])
+            current_target = progress.get("current_target_index", 0)
+            start_idx = max(0, current_target - 2)
+            end_idx = min(len(checkpoint_list), current_target + 4)
+            for idx in range(start_idx, end_idx):
+                if idx >= len(checkpoint_list):
+                    break
+                cp = checkpoint_list[idx]
+                cp_name = cp.get("name", f"cp_{idx}")
+                done = cp.get("achieved", False)
+                is_target = idx == current_target
+                cp_step = cp.get("achieved_step", None)
+                if done:
+                    color = (0, 255, 0)
+                    label = "#"
+                    step_text = f" @ step {cp_step}" if cp_step else ""
+                elif is_target:
+                    color = (0, 255, 255)
+                    label = ">"
+                    step_text = " (current target)"
+                else:
+                    color = (110, 110, 110)
+                    label = "o"
+                    step_text = ""
+                cv2.putText(panel, f"{label} {cp_name}{step_text}", (party_x + 5, checkpoint_y), cv2.FONT_HERSHEY_SIMPLEX, 0.38, color, 1)
+                checkpoint_y += 15
+            checkpoint_y += 8
+
+        # --- Opponent / Battle info ---
+        opp_y = checkpoint_y + 10
+        enemy_species_name = None
+        enemy_level = None
+        enemy_hp = None
+        in_battle = False
+        try:
+            in_battle = int(mem[0xD057]) != 0
+            if in_battle:
+                enemy_species = int(mem[0xCFE5])
+                enemy_level = int(mem[0xCFF3])
+                enemy_species_name = Gen1PartyReader.SPECIES_NAMES[enemy_species - 1] \
+                    if 1 <= enemy_species <= len(Gen1PartyReader.SPECIES_NAMES) else f"#{enemy_species:03d}"
+                enemy_cur_hp = (int(mem[0xCFE6]) | (int(mem[0xCFE7]) << 8))
+                enemy_max_hp = (int(mem[0xCFF4]) | (int(mem[0xCFF5]) << 8))
+                enemy_hp = (enemy_cur_hp, enemy_max_hp)
+        except Exception:
+            in_battle = False
+
+        if in_battle and enemy_species_name:
+            cv2.putText(panel, f"Opponent: {enemy_species_name} Lv.{enemy_level}", (party_x, opp_y),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 200, 200), 1)
+            opp_y += 16
+            if enemy_hp:
+                cv2.putText(panel, f"  HP: {enemy_hp[0]}/{enemy_hp[1]}", (party_x, opp_y),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 200, 200), 1)
+            opp_y += 20
+        else:
+            cv2.putText(panel, "Opponent: (none)", (party_x, opp_y),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (110, 110, 110), 1)
+            opp_y += 20
+
+        draw_trainer_panel(panel, party_x, opp_y, party_width, panel_info.get("trainer"))
+        draw_bag_panel(panel, party_x, opp_y + 140, party_width, panel_info.get("bag"))
+        draw_stats_panel(panel, party_x, opp_y + 185, party_width, {
             "badges": badges,
             "events": str(events),
             "steps": str(steps),
             "hp": f"{hp:.0%}",
+            "trainer_wins": str(trainer_wins),
+            "wild_wins": str(wild_wins),
+            "fled_battle": str(fled_battle),
             "env": f"{env_index + 1}",
         })
+
+        # --- Reward History ---
+        reward_y = opp_y + 235
+        cv2.putText(panel, "Reward History", (party_x, reward_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        reward_y += 18
+        reward_counts = getattr(env.envs[env_index], "reward_counts", {})
+        if reward_counts:
+            for rtype, rlabel in [
+                ("fled_battle", "Fled:"),
+                ("combat_trainer", "Trainer:"),
+                ("combat_wild", "Wild:"),
+                ("milestone", "Milestones:"),
+                ("event", "Events:"),
+            ]:
+                cv2.putText(panel, f"{rlabel} {reward_counts.get(rtype, 0)}", (party_x, reward_y),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1)
+                reward_y += 14
+        else:
+            cv2.putText(panel, "  (no rewards yet)", (party_x, reward_y), cv2.FONT_HERSHEY_SIMPLEX, 0.36, (110, 110, 110), 1)
 
         watch_snapshot = self.address_watch.record(mem)
         self._button_rect = draw_memory_watch_panel(panel, 15, 360, left_panel_w - 30, watch_snapshot, title="Addr watch", max_rows=12)
@@ -313,14 +380,22 @@ class ObservationInspector:
 
         screen_canvas = np.full((panel_h, 320, 3), 30, dtype=np.uint8)
         screen_canvas[:screen.shape[0], :screen.shape[1]] = screen
-        inspector = np.hstack([screen_canvas, panel])
-        cv2.imshow(self.title, inspector)
+        inspector_frame = np.hstack([screen_canvas, panel])
+        try:
+            cv2.imshow(self.title, inspector_frame)
+        except cv2.error:
+            self.visible = False
+            self._needs_initial_render = False
+            return False
         
         # Resize window to fit content
-        if self._window_created:
+        if self._window_created and self._window_alive():
             total_w = 320 + left_panel_w + right_panel_w
             total_h = panel_h
-            cv2.resizeWindow(self.title, total_w, total_h)
+            try:
+                cv2.resizeWindow(self.title, total_w, total_h)
+            except cv2.error:
+                pass
         
         self._needs_initial_render = False
         return True
