@@ -77,33 +77,41 @@ SPECIALIZATION_PRESETS = {
     "default": {
         "reward_scale": 1.0,
         "explore_weight": 1.0,
+        "speed_reward_multiplier": 1.0,
         "category_multipliers": {
             "milestone": 1.0, "event": 1.0, "exploration": 1.0,
             "combat": 1.0, "healing": 1.0, "training": 1.0, "breadcrumb": 1.0,
+            "health": 1.0,
         },
     },
     "trainer": {
         "reward_scale": 1.0,
         "explore_weight": 1.0,
+        "speed_reward_multiplier": 1.0,
         "category_multipliers": {
             "milestone": 1.0, "event": 1.0, "exploration": 1.0,
             "combat": 2.0, "healing": 1.0, "training": 1.0, "breadcrumb": 1.0,
+            "health": 1.0,
         },
     },
     "speedrunner": {
         "reward_scale": 3.0,
         "explore_weight": 0.1,
+        "speed_reward_multiplier": 3.0,
         "category_multipliers": {
             "milestone": 3.0, "event": 3.0, "exploration": 1.0,
             "combat": 1.0, "healing": 0.5, "training": 1.0, "breadcrumb": 3.0,
+            "health": 0.5,
         },
     },
     "explorer": {
         "reward_scale": 1.0,
         "explore_weight": 3.0,
+        "speed_reward_multiplier": 1.0,
         "category_multipliers": {
             "milestone": 1.0, "event": 1.0, "exploration": 3.0,
             "combat": 0.5, "healing": 1.0, "training": 1.0, "breadcrumb": 1.0,
+            "health": 1.0,
         },
     },
 }

@@ -292,6 +292,11 @@ class GameState:
     def has_item(self, item_id: int) -> bool:
         return item_id in self.bag_item_ids()
 
+    # def has_item_quantity(self, item_id: int, min_quantity: int = 1) -> bool:
+    #     """True when ``item_id`` is in the bag with at least ``min_quantity`` copies."""
+    #     return any(iid == item_id and qty >= min_quantity
+    #                for iid, qty in self.bag_items())
+
     def pokeball_count(self) -> int:
         return sum(qty for iid, qty in self.bag_items() if iid in ITEM_POKEBALL_IDS)
 

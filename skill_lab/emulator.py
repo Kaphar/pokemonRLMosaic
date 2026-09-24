@@ -97,6 +97,7 @@ def make_env(rank: int, env_conf: dict[str, Any], env_setup_config: dict[str, An
             "profile_category_multipliers": cfg.get("profile_category_multipliers", {}),
             "stage_config": cfg.get("stage_config", {}),
             "speed_bonus": cfg.get("speed_bonus", True),
+            "speed_reward_multiplier": cfg.get("speed_reward_multiplier", 1.0),
             "training_mode": cfg.get("training_mode", "segment"),
             "target_starter": cfg.get("target_starter"),
             "env_index": cfg.get("env_index", rank),

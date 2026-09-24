@@ -22,9 +22,11 @@ from skill_lab.config import (
 from skill_lab.events import EventTracker
 from skill_lab.party_reader import Gen1PartyReader, PyBoyMemoryReader
 from skill_lab.rewards import calculate_starter_reward, wrong_choice_penalty
-from skill_lab.breadcrumb import BreadcrumbTracker
+from skill_lab.breadcrumb import BreadcrumbTracker, PokemonCenterTracker
 from skill_lab.milestones import MilestoneTracker
 from skill_lab.ram_map import GameState
+from skill_lab.speed_bonus import SpeedBonusTracker
+from skill_lab.zones import ZoneManager, ACTION_NAMES as ZONE_ACTION_NAMES
 
 
 class SkillLabWrapper(gymnasium.Wrapper):
@@ -129,6 +131,27 @@ class SkillLabWrapper(gymnasium.Wrapper):
             config.get("stage_config", {}), self.effective_rewards
         )
 
+        # --- Pokemon Center Health Tracker (health-scaled proximity rewards) ---
+        self.health_reward_multiplier = float(
+            config.get("health_reward_multiplier", config.get("health_reward", 1.0))
+        )
+        self.pokemon_center_tracker = PokemonCenterTracker(
+            effective_rewards=self.effective_rewards
+        )
+
+        # --- Speed Bonus Tracker (best-step tracking, multiplier) ---
+        self.speed_reward_multiplier = float(
+            config.get("speed_reward_multiplier", config.get("speed_reward", 1.0))
+        )
+        env_dir = config.get("env_dir")
+        persist_path = (
+            Path(env_dir) / "speed_stats.json" if env_dir else None
+        )
+        self.speed_bonus_tracker = SpeedBonusTracker(
+            speed_reward_multiplier=self.speed_reward_multiplier,
+            persist_path=persist_path,
+        )
+
         # --- Diminishing returns tracker ---
         self._reward_counts: dict[str, int] = {}
 
@@ -158,6 +181,8 @@ class SkillLabWrapper(gymnasium.Wrapper):
             print(f"{self._colored_env_label()} Directive: Pick {self.target_starter}")
         else:
             print(f"{self._colored_env_label()} Directive: Pick any starter")
+        if self.speed_bonus_enabled and self.speed_reward_multiplier != 1.0:
+            print(f"[{self.env_name}] Speed reward multiplier: {self.speed_reward_multiplier:.1f}x")
 
         masked = []
         if self.disable_start and self.start_action_index is not None:
@@ -174,6 +199,22 @@ class SkillLabWrapper(gymnasium.Wrapper):
             print(f"[{self.env_name}] Catch directive: {self.catch_directive}")
         if self.train_directive:
             print(f"[{self.env_name}] Train directive: {self.train_directive}")
+
+        # --- Zone Manager (lava + action_mask zones) ---
+        # Builds a name->index map for masking zones that reference actions
+        # (e.g. "Down", "Up").  Indices follow ACTION_NAMES order which matches
+        # RedGymEnv.valid_actions.
+        self._action_name_to_index: dict[str, int] = {}
+        for _idx, _name in enumerate(ZONE_ACTION_NAMES):
+            if _idx < len(valid_actions):
+                self._action_name_to_index[_name] = _idx
+
+        self.zone_manager = ZoneManager()
+        self._current_masked_actions: list[str] = []
+        self.steps_in_action_mask_zone = 0
+
+        print(f"[{self.env_name}] Zones loaded: {len(self.zone_manager.zones)} "
+              f"({', '.join(set(z['type'] for z in self.zone_manager.zones)) or 'none'})")
 
         # --- Event  Tracker (event-flag scanner) ---
         # Reads events.json directly; awards effective_rewards["event"] per flag.
@@ -623,6 +664,51 @@ class SkillLabWrapper(gymnasium.Wrapper):
             int(pokemon.get("ivSpAttack", 0)),
         )
 
+    def _project_agent_position(self) -> tuple[float, float]:
+        """Return the agent's current pixel position on the stitched map.
+
+        Delegates to ``RedGymEnv.get_game_coords`` + ``project_position`` when
+        available.  Falls back to ``(nan, nan)`` if the position cannot be read.
+        """
+        from v2.map_projection import project_position as _project
+        unwrapped = self.env.unwrapped
+        get_coords = getattr(unwrapped, "get_game_coords", None)
+        project = getattr(unwrapped, "project_position", None)
+        if get_coords is not None and project is not None:
+            try:
+                x_pos, y_pos, map_n = get_coords()
+                px, py = project(int(x_pos), int(y_pos), int(map_n))
+                return (float(px), float(py))
+            except Exception:
+                pass
+        return (float("nan"), float("nan"))
+
+    def _update_zone_masking(self) -> None:
+        """Refresh active action-mask zones and update tracking counters.
+
+        Called pre-step so masking decisions reflect the agent's current
+        position.  Uses the wrapper's MilestoneTracker so zones respond to
+        milestone progress.  Also reloads from disk if zones.json changed.
+        """
+        self.zone_manager.reload()
+        px, py = self._project_agent_position()
+        if math.isnan(px) or math.isnan(py):
+            self._current_masked_actions = []
+            return
+        achieved = (
+            self.checkpoint_tracker.achieved
+            if self.checkpoint_tracker
+            else None
+        )
+        self._current_masked_actions = self.zone_manager.tick(
+            int(px), int(py), achieved
+        )
+
+    @property
+    def zone_stats(self) -> dict:
+        """Public stats for the inspector / dashboard."""
+        return self.zone_manager.get_stats()
+
     def _should_mask(self, action: int) -> bool:
         if self.disable_start and action == self.start_action_index:
             return True
@@ -630,6 +716,12 @@ class SkillLabWrapper(gymnasium.Wrapper):
             return True
         if self.disable_B and action == self.B_action_index:
             return True
+        # Action-masking zones — mask the requested action when the agent is
+        # standing inside an active zone that targets this action.
+        if self._current_masked_actions:
+            action_name = ZONE_ACTION_NAMES[action] if action < len(ZONE_ACTION_NAMES) else None
+            if action_name and action_name in self._current_masked_actions:
+                return True
         return False
 
     def _read_party_size(self) -> int:
@@ -715,28 +807,37 @@ class SkillLabWrapper(gymnasium.Wrapper):
     def _update_breadcrumb_after_milestone(self, current_map_id: int) -> None:
         """After a major story milestone, refresh BreadcrumbTracker waypoints.
 
-        Currently handles the 'Got Oak's Parcel' → deliver to Oak → receive Pokédex
-        transition, redirecting navigation toward Oak's Lab (map 40).
+        Triggers when the "Got Oak's Parcel" checkpoint (event ``0xD74E-1``)
+        is achieved — the player now holds the parcel and must navigate back to
+        Pallet Town to deliver it to Oak.  Redirect navigation toward Oak's
+        Lab (map 40) so the breadcrumb rewards guide the agent the right way.
         """
         if getattr(self, "_breadcrumbs_redirected", False):
             return
         try:
-            oak_parcel_delivered = self.game_state.event_flag(0xD74E, 0)
+            oak_parcel_held = self.game_state.event_flag(0xD74E, 1)
         except Exception:
-            oak_parcel_delivered = False
-        if not oak_parcel_delivered:
+            oak_parcel_held = False
+        if not oak_parcel_held:
             return
         if self.breadcrumb_tracker is not None:
             self.breadcrumb_tracker.set_waypoints([
-                {"label": "Oak's Lab", "target_map": 40, "target_x": 1058, "target_y": 1022}
+                {"label": "Oak's Lab", "target_map": 40, "target_x": 5, "target_y": 3}
             ])
         self._breadcrumbs_redirected = True
-        print(f"{self._colored_env_label()} Breadcrumb updated: targeting Oak's Lab")
+        print(f"{self._colored_env_label()} Breadcrumb updated: targeting Oak's Lab (parcel held)")
 
     def step(self, action: int):
         """Intercept action, apply masking, check for early termination."""
 
         original_action = action
+
+        # --- Pre-step: check action-masking zones ---
+        # Read the agent's current position (before the action is applied)
+        # and determine which actions, if any, should be masked by active
+        # action_mask zones.
+        self._update_zone_masking()
+
         if self._should_mask(action):
             action = self.noop_action_index
             self.masked_action_count += 1
@@ -764,6 +865,7 @@ class SkillLabWrapper(gymnasium.Wrapper):
         cur_fled_battle = self.env.unwrapped.fled_battle
         if cur_trainer_wins > prior_trainer_wins:
             trainer_reward = self.effective_rewards.get("combat_trainer", 5.0)
+            trainer_reward = self._diminishing_returns("combat_trainer", trainer_reward)
             self._log_reward("combat_trainer", trainer_reward,
                              f"Trainer win #{cur_trainer_wins}")
             reward += trainer_reward
@@ -771,6 +873,7 @@ class SkillLabWrapper(gymnasium.Wrapper):
             info["combat_trainer_reward"] = trainer_reward
         if cur_wild_wins > prior_wild_wins:
             wild_reward = self.effective_rewards.get("combat_wild", 2.0)
+            wild_reward = self._diminishing_returns("combat_wild", wild_reward)
             self._log_reward("combat_wild", wild_reward,
                              f"Wild win #{cur_wild_wins}")
             reward += wild_reward
@@ -792,18 +895,30 @@ class SkillLabWrapper(gymnasium.Wrapper):
         current_level_sum = self.game_state.party_levels_sum()
         hp_gain = max(0.0, current_hp - prior_hp)
 
-        # --- Checkpoint reward (curated story milestones) with speed bonus ---
+         # --- Checkpoint reward (curated story milestones) with speed bonus ---
         checkpoint_reward = 0.0
         if self.checkpoint_tracker is not None:
+            prior_cp_achieved = self.checkpoint_tracker.achieved.copy()
             checkpoint_reward = self.checkpoint_tracker.check_and_reward(self.env, self._colored_env_label())
             if checkpoint_reward > 0:
                 milestone_triggered = True
                 milestone_reward = checkpoint_reward
-                steps_since_last = self.env.unwrapped.step_count - self.last_milestone_step
-                if self.speed_bonus_enabled and steps_since_last > 0:
-                    speed_multiplier = max(1.0, 3.0 - (steps_since_last / 100.0))
-                    milestone_reward *= speed_multiplier
-                    print(f"{self._colored_env_label()} Speed bonus! Checkpoint in {steps_since_last} steps -> x{speed_multiplier:.1f}")
+                if self.speed_bonus_enabled:
+                    current_step = self.env.unwrapped.step_count
+                    new_cps = self.checkpoint_tracker.achieved - prior_cp_achieved
+                    if new_cps:
+                        sorted_new = sorted(
+                            new_cps,
+                            key=lambda n: self.checkpoint_tracker.achieved_steps.get(n, 0),
+                        )
+                        cp_name = sorted_new[0]
+                        speed_mult = self.speed_bonus_tracker.record_achievement(cp_name, current_step)
+                        if speed_mult > 1.0:
+                            milestone_reward = checkpoint_reward * speed_mult
+                            speed_bonus_amount = milestone_reward - checkpoint_reward
+                            print(f"{self._colored_env_label()} Speed bonus! {cp_name} -> x{speed_mult:.1f} (+{speed_bonus_amount:.2f})")
+                            self._log_reward("speed_bonus", speed_bonus_amount,
+                                             f"Speed bonus: {cp_name}", current_step)
                 reward += milestone_reward
                 self.total_milestone_reward += milestone_reward
                 self.last_milestone_step = self.env.unwrapped.step_count
@@ -818,8 +933,27 @@ class SkillLabWrapper(gymnasium.Wrapper):
         # --- Event flag scanner (broad, for event reward) ---
         event_reward = 0.0
         if self.event_tracker is not None:
+            prior_ev_achieved = self.event_tracker.achieved.copy()
             event_reward = self.event_tracker.check_and_reward(self.env, self._colored_env_label())
             if event_reward > 0:
+                if self.speed_bonus_enabled:
+                    current_step = self.env.unwrapped.step_count
+                    new_events = self.event_tracker.achieved - prior_ev_achieved
+                    if new_events:
+                        sorted_new = sorted(
+                            new_events,
+                            key=lambda k: self.event_tracker.achieved_steps.get(k, 0),
+                        )
+                        event_key = sorted_new[0]
+                        event_name = self.event_tracker.event_names.get(event_key, event_key)
+                        speed_mult = self.speed_bonus_tracker.record_achievement(event_name, current_step)
+                        if speed_mult > 1.0:
+                            final_event_reward = event_reward * speed_mult
+                            speed_bonus_amount = final_event_reward - event_reward
+                            event_reward = final_event_reward
+                            print(f"{self._colored_env_label()} Speed bonus! {event_name} -> x{speed_mult:.1f} (+{speed_bonus_amount:.2f})")
+                            self._log_reward("speed_bonus", speed_bonus_amount,
+                                             f"Speed bonus: {event_name}", current_step)
                 reward += event_reward
                 self._log_reward("event", event_reward, "Event flag achieved")
                 info["event_reward"] = event_reward
@@ -842,16 +976,16 @@ class SkillLabWrapper(gymnasium.Wrapper):
 
         self._prior_level_sum = current_level_sum
 
-        # --- Breadcrumb navigation reward ---
-        if self.breadcrumb_tracker is not None:
-            x_pos, y_pos = self.env.unwrapped.get_game_coords()[:2]
-            breadcrumb_reward = self.breadcrumb_tracker.update(
-                x_pos, y_pos, current_map_id, env_label=self._colored_env_label()
-            )
-            if breadcrumb_reward > 0:
-                reward += breadcrumb_reward
-                self._log_reward("breadcrumb", breadcrumb_reward, "Navigation waypoint reached")
-                info["breadcrumb_reward"] = breadcrumb_reward
+        # --- Breadcrumb navigation reward (temporarily disabled) ---
+        # if self.breadcrumb_tracker is not None:
+        #     x_pos, y_pos = self.env.unwrapped.get_game_coords()[:2]
+        #     breadcrumb_reward = self.breadcrumb_tracker.update(
+        #         x_pos, y_pos, current_map_id, env_label=self._colored_env_label()
+        #     )
+        #     if breadcrumb_reward > 0:
+        #         reward += breadcrumb_reward
+        #         self._log_reward("breadcrumb", breadcrumb_reward, "Navigation waypoint reached")
+        #         info["breadcrumb_reward"] = breadcrumb_reward
 
         level_up = current_level_sum > prior_level_sum
         if self.healing_reward_multiplier > 0.0 and progress_signal and hp_gain > 0.05 and 0 < prior_hp <= 0.9:
@@ -881,6 +1015,30 @@ class SkillLabWrapper(gymnasium.Wrapper):
                 f"HP {prior_hp:.0%} -> {current_hp:.0%} after {reasons} "
                 f"→ +{healing_reward:.2f} = {self.reward_scale:.2f} × {self.healing_reward_multiplier:.2f}{reset}"
             )
+
+        # --- Pokemon Center health tracker (health-scaled proximity + death penalty) ---
+        if self.health_reward_multiplier > 0.0 and self.pokemon_center_tracker is not None:
+            x_pos, y_pos = self.env.unwrapped.get_game_coords()[:2]
+            all_fainted = self.game_state.all_fainted()
+            in_battle = self.game_state.in_battle()
+            health_reward, death_penalty = self.pokemon_center_tracker.update(
+                x_pos, y_pos, current_map_id,
+                hp_fraction=current_hp,
+                all_fainted=all_fainted,
+                in_battle=in_battle,
+                env_label=self._colored_env_label(),
+            )
+            if health_reward > 0:
+                reward += health_reward
+                self._log_reward("health_proximity", health_reward,
+                                 f"Pokemon Center proximity (HP {current_hp:.0%})",
+                                 self.env.unwrapped.step_count)
+                info["health_proximity_reward"] = health_reward
+            if death_penalty < 0:
+                reward += death_penalty
+                self._log_reward("death_penalty", death_penalty,
+                                 "Party blacked out", self.env.unwrapped.step_count)
+                info["death_penalty"] = death_penalty
 
         # ========================================
         # EARLY TERMINATION: Check starter status
@@ -982,10 +1140,14 @@ class SkillLabWrapper(gymnasium.Wrapper):
         self._reward_events.clear()
         self._prior_level_sum = 0
         self._breadcrumbs_redirected = False
+        self.steps_in_action_mask_zone = 0
         if self.checkpoint_tracker is not None:
             self.checkpoint_tracker.reset(self.game_state, self._colored_env_label())
         if self.breadcrumb_tracker is not None:
             self.breadcrumb_tracker.reset()
+        if self.pokemon_center_tracker is not None:
+            self.pokemon_center_tracker.reset()
+        self.speed_bonus_tracker.reset(current_step=int(getattr(self.env.unwrapped, "step_count", 0)))
 
         # The standalone plugin replay loads the recording's state before
         # priming. Do the same instead of relying on per-environment defaults.
@@ -1022,6 +1184,18 @@ class SkillLabWrapper(gymnasium.Wrapper):
             "description": description,
         })
         self._reward_counts[reward_type] = self._reward_counts.get(reward_type, 0) + 1
+
+    def _diminishing_returns(self, reward_type: str, amount: float) -> float:
+        """Scale *amount* down based on how many times this reward type
+        has already fired this episode.
+
+        Uses ``1 / sqrt(1 + count * 0.5)`` so that early rewards are full
+        value and later ones taper off — e.g. the 5th repeat is ~58% of base.
+        """
+        count = self._reward_counts.get(reward_type, 0)
+        if count <= 0:
+            return amount
+        return amount / math.sqrt(1.0 + count * 0.5)
 
     @property
     def reward_events(self) -> list[dict[str, Any]]:

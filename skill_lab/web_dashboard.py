@@ -14,6 +14,13 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 import webbrowser
 
+try:
+    from skill_lab.zones import ZoneManager, KNOWN_CHECKPOINTS as _KNOWN_CHECKPOINTS
+    _HAS_ZONES = True
+except ImportError:
+    _HAS_ZONES = False
+    _KNOWN_CHECKPOINTS = []
+
 INSPECTOR_WATCH_ADDRESSES = [
     0xD356,  # badges
     0xD35E,  # map
@@ -60,6 +67,7 @@ MAP_IMAGE_PATH = (
     / "pokemap_full_calibrated_CROPPED_1.png"
 )
 LAVA_JSON_PATH = PROJECT_ROOT / "skill_lab" / "lava.json"
+ZONES_JSON_PATH = PROJECT_ROOT / "skill_lab" / "zones.json"
 CONTROLS_PATH = PROJECT_ROOT / "skill_lab" / "controls.json"
 
 ACTION_BUTTON_EVENTS: dict[str, tuple[Any, Any]] = {
@@ -126,11 +134,19 @@ class BrowserMapDashboard:
         self.state: dict[str, Any] = {
             "title": "Skill Lab Dashboard",
             "envs": [],
-            "lava_zones": [],
+            "zones": [],
+            "zone_stats": {},
+            "lava_zones": [],  # legacy alias, populated from zones for backward compat
             "map_width": self.map_width,
             "map_height": self.map_height,
             "last_updated": 0.0,
         }
+        self._zone_manager: ZoneManager | None = None
+        if _HAS_ZONES:
+            self._zone_manager = ZoneManager(ZONES_JSON_PATH)
+            with self._lock:
+                self.state["zones"] = self._zone_manager.list_zones()
+                self.state["zone_stats"] = self._zone_manager.get_stats()
         self._load_lava_zones()
 
     def set_mosaic_frame(self, frame) -> None:
@@ -179,24 +195,44 @@ class BrowserMapDashboard:
         with self._lock:
             self._individual_frames.clear()
 
-    def _save_lava_zones(self) -> None:
-        """Persist lava zones to lava.json so the env can read them."""
+    def _sync_zones_to_state(self) -> None:
+        """Copy zone manager state into ``self.state`` (including legacy alias)."""
+        if self._zone_manager is None:
+            return
         with self._lock:
-            zones = list(self.state["lava_zones"])
-        with suppress(Exception):
-            with LAVA_JSON_PATH.open("w", encoding="utf-8") as f:
-                json.dump({"lava_zones": zones}, f, indent=2)
+            self.state["zones"] = self._zone_manager.list_zones()
+            self.state["zone_stats"] = self._zone_manager.get_stats()
+            # Legacy alias for frontend backward-compat
+            lava_cells = [
+                [c, r] if isinstance(c, (int, float)) and not isinstance(c, list)
+                else c
+                for z in self.state["zones"] if z.get("type") == "lava"
+                for c in z.get("cells", [])
+            ]
+            self.state["lava_zones"] = lava_cells
+
+    def _save_lava_zones(self) -> None:
+        """Persist zones via the ZoneManager (writes zones.json)."""
+        if self._zone_manager is None:
+            return
+        self._zone_manager._save_zones()
+        self._sync_zones_to_state()
 
     def _load_lava_zones(self) -> None:
-        """Load lava zones from lava.json if it exists."""
-        with suppress(Exception):
-            if LAVA_JSON_PATH.exists():
-                with LAVA_JSON_PATH.open("r", encoding="utf-8") as f:
-                    data = json.load(f)
+        """Load zones from zones.json (ZoneManager), falling back to legacy lava.json."""
+        if self._zone_manager is None:
+            try:
+                if LAVA_JSON_PATH.exists():
+                    with LAVA_JSON_PATH.open("r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    cells = [(int(z[0]), int(z[1])) for z in data.get("lava_zones", [])]
                     with self._lock:
-                        self.state["lava_zones"] = [
-                            (int(z[0]), int(z[1])) for z in data.get("lava_zones", [])
-                        ]
+                        self.state["lava_zones"] = cells
+            except Exception:
+                pass
+            return
+        self._zone_manager.reload()
+        self._sync_zones_to_state()
 
     def _read_map_size(self) -> tuple[int, int]:
         """Read PNG dimensions without requiring an image-processing package."""
@@ -659,6 +695,8 @@ class BrowserMapDashboard:
         hp = self._safe_call(lambda: float(env_obj.read_hp_fraction()), 0.0)
         level_sum = self._as_int(getattr(unwrapped, "current_level_sum", 0), 0) or 0
         map_id = self._as_int(getattr(unwrapped, "current_map_id", 0), 0) or 0
+        x_pos = self._as_int(self._memory_byte(memory, 0xD362), 0) or 0
+        y_pos = self._as_int(self._memory_byte(memory, 0xD361), 0) or 0
         badges = self._as_int(self._memory_byte(memory, 0xD356), 0) or 0
         badge_count = badges.bit_count()
         events = self._safe_call(lambda: list(unwrapped.read_event_bits()), [])
@@ -701,6 +739,8 @@ class BrowserMapDashboard:
                     "hp": hp,
                     "level_sum": level_sum,
                     "map_id": map_id,
+                    "x": x_pos,
+                    "y": y_pos,
                     "badges": badge_count,
                     "events": len(events) if isinstance(events, list) else events,
                     "steps": steps,
@@ -718,6 +758,10 @@ class BrowserMapDashboard:
                 "recent_actions": recent_action_names,
                 "raw_recent_actions": recent_actions,
                 "panel_data": panel_data,
+                "zone_stats": self._safe_call(
+                    lambda: getattr(env_obj, "zone_stats", {}) or {},
+                    {},
+                ),
                 "reward_history": {
                     "events": self._safe_call(
                         lambda: list(getattr(env_obj, "reward_events", [])[-50:]),
@@ -952,29 +996,65 @@ class BrowserMapDashboard:
             "in_bounds": False,
         }
 
+    def _ensure_lava_zone(self) -> str:
+        """Return the ID of the first ``lava`` zone, creating one if needed."""
+        if self._zone_manager is None:
+            return ""
+        for z in self._zone_manager.zones:
+            if z.get("type") == "lava":
+                return z["id"]
+        return self._zone_manager.create_zone("lava", label="Lava Zone")
+
+    def _ensure_zone(self, zone_type: str = "lava") -> str:
+        """Return the ID of the first zone of *zone_type*, creating one if needed."""
+        if self._zone_manager is None:
+            return ""
+        for z in self._zone_manager.zones:
+            if z.get("type") == zone_type:
+                return z["id"]
+        return self._zone_manager.create_zone(zone_type, label=zone_type.capitalize())
+
     def add_lava_zone(self, x: int, y: int) -> None:
+        if self._zone_manager is None:
+            with self._lock:
+                zone = (int(x), int(y))
+                if zone not in self.state["lava_zones"]:
+                    self.state["lava_zones"].append(zone)
+            return
+        zone_id = self._ensure_lava_zone()
         with self._lock:
-            zone = (int(x), int(y))
-            existing = self.state["lava_zones"]
-            if zone not in existing:
-                existing.append(zone)
+            cur = int(round((self._zone_manager.get_zone(zone_id) or {}).get("cells", []).__len__() and 0))
+        self._zone_manager.batch_toggle_cells([[int(x), int(y)]], zone_id)
+        self._sync_zones_to_state()
 
     def remove_lava_zone(self, x: int, y: int) -> None:
-        with self._lock:
-            zone = (int(x), int(y))
-            self.state["lava_zones"] = [z for z in self.state["lava_zones"] if z != zone]
+        if self._zone_manager is None:
+            with self._lock:
+                zone = (int(x), int(y))
+                self.state["lava_zones"] = [z for z in self.state["lava_zones"] if z != zone]
+            return
+        zone_id = self._ensure_lava_zone()
+        self._zone_manager.batch_toggle_cells([[int(x), int(y)]], zone_id)
+        self._sync_zones_to_state()
 
     def toggle_lava_zone(self, x: int, y: int) -> None:
-        with self._lock:
-            zone = (int(x), int(y))
-            current = self.state["lava_zones"]
-            if zone in current:
-                self.state["lava_zones"] = [z for z in current if z != zone]
-                print(f"[LAVA DEBUG] Removed zone {zone}, count={len(self.state['lava_zones'])}", flush=True)
-            else:
-                current.append(zone)
-                print(f"[LAVA DEBUG] Added zone {zone}, count={len(self.state['lava_zones'])}", flush=True)
-        self._save_lava_zones()
+        """Toggle a single cell on/off the lava zone."""
+        if self._zone_manager is None:
+            with self._lock:
+                zone = (int(x), int(y))
+                if zone in self.state["lava_zones"]:
+                    self.state["lava_zones"] = [z for z in self.state["lava_zones"] if z != zone]
+                    print(f"[LAVA DEBUG] Removed zone {zone}, count={len(self.state['lava_zones'])}", flush=True)
+                else:
+                    self.state["lava_zones"].append(zone)
+                    print(f"[LAVA DEBUG] Added zone {zone}, count={len(self.state['lava_zones'])}", flush=True)
+            self._save_lava_zones()
+            return
+        zone_id = self._ensure_lava_zone()
+        self._zone_manager.batch_toggle_cells([[int(x), int(y)]], zone_id)
+        self._sync_zones_to_state()
+        count = len((self._zone_manager.get_zone(zone_id) or {}).get("cells", []))
+        print(f"[LAVA DEBUG] After toggle: zone_id={zone_id}, cells count={count}", flush=True)
 
     def _build_handler(self):
         dashboard = self
@@ -1143,7 +1223,73 @@ class BrowserMapDashboard:
                     self.end_headers()
                     self.wfile.write(json.dumps({"ok": True}).encode("utf-8"))
                     return
-                if parsed.path != "/api/lava":
+                if parsed.path == "/api/zone-create":
+                    content_length = int(self.headers.get("Content-Length", "0"))
+                    body = self.rfile.read(content_length)
+                    try:
+                        payload = json.loads(body.decode("utf-8"))
+                    except json.JSONDecodeError:
+                        self.send_error(400, "invalid json")
+                        return
+                    zone_type = payload.get("zone_type", "lava")
+                    zone_id = None
+                    if dashboard._zone_manager is not None:
+                        zone_id = dashboard._zone_manager.create_zone(zone_type, label=zone_type.capitalize())
+                        dashboard._sync_zones_to_state()
+                    resp_data = {"ok": True, "zone_id": zone_id}
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(json.dumps(resp_data))))
+                    self.end_headers()
+                    self.wfile.write(json.dumps(resp_data).encode("utf-8"))
+                    return
+                if parsed.path == "/api/zone-update":
+                    content_length = int(self.headers.get("Content-Length", "0"))
+                    body = self.rfile.read(content_length)
+                    try:
+                        payload = json.loads(body.decode("utf-8"))
+                    except json.JSONDecodeError:
+                        self.send_error(400, "invalid json")
+                        return
+                    zone_id = payload.get("zone_id", "")
+                    if dashboard._zone_manager is not None:
+                        zone = dashboard._zone_manager.get_zone(zone_id)
+                        if zone is not None:
+                            if "label" in payload and payload["label"] is not None:
+                                zone["label"] = payload["label"]
+                            if "field" in payload and "value" in payload:
+                                field = payload["field"]
+                                value = payload["value"]
+                                zone[field] = value
+                            dashboard._zone_manager._save_zones()
+                            dashboard._sync_zones_to_state()
+                    resp_data = {"ok": True}
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(json.dumps(resp_data))))
+                    self.end_headers()
+                    self.wfile.write(json.dumps(resp_data).encode("utf-8"))
+                    return
+                if parsed.path == "/api/zone-delete":
+                    content_length = int(self.headers.get("Content-Length", "0"))
+                    body = self.rfile.read(content_length)
+                    try:
+                        payload = json.loads(body.decode("utf-8"))
+                    except json.JSONDecodeError:
+                        self.send_error(400, "invalid json")
+                        return
+                    zone_id = payload.get("zone_id", "")
+                    if dashboard._zone_manager is not None:
+                        dashboard._zone_manager.delete_zone(zone_id)
+                        dashboard._sync_zones_to_state()
+                    resp_data = {"ok": True}
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(json.dumps(resp_data))))
+                    self.end_headers()
+                    self.wfile.write(json.dumps(resp_data).encode("utf-8"))
+                    return
+                if parsed.path not in ("/api/lava", "/api/zones"):
                     self.send_error(404)
                     return
                 content_length = int(self.headers.get("Content-Length", "0"))
@@ -1153,24 +1299,50 @@ class BrowserMapDashboard:
                 except json.JSONDecodeError:
                     self.send_error(400, "invalid json")
                     return
-                if "zones" in payload:
+                if "zones" in payload and isinstance(payload["zones"], list) and payload["zones"] and isinstance(payload["zones"][0], dict) and "cells" in payload["zones"][0]:
+                    if dashboard._zone_manager is not None:
+                        with dashboard._lock:
+                            dashboard._zone_manager.zones = payload["zones"]
+                            dashboard._zone_manager._save_zones()
+                        dashboard._sync_zones_to_state()
+                    else:
+                        with dashboard._lock:
+                            dashboard.state["lava_zones"] = [
+                                (int(z[0]), int(z[1])) for z in payload["zones"][0].get("cells", [])
+                            ]
+                        dashboard._save_lava_zones()
+                elif "zones" in payload:
                     zones = payload["zones"]
-                    for zone in zones:
-                        dashboard.toggle_lava_zone(int(zone["x"]), int(zone["y"]))
-                    print(f"[LAVA DEBUG] Batch toggle: {len(zones)} zones, first={zones[0] if zones else 'none'}", flush=True)
-                    print(f"[LAVA DEBUG] After batch: zones={dashboard.state['lava_zones']}", flush=True)
+                    cells = [[int(z["x"]), int(z["y"])] for z in zones]
+                    zone_type = payload.get("zone_type", "lava")
+                    if dashboard._zone_manager is not None:
+                        zone_id = dashboard._ensure_zone(zone_type)
+                        if zone_id:
+                            dashboard._zone_manager.batch_toggle_cells(cells, zone_id)
+                            dashboard._sync_zones_to_state()
+                    else:
+                        for zone in zones:
+                            dashboard.toggle_lava_zone(int(zone["x"]), int(zone["y"]))
                 else:
                     x = int(payload.get("x", 0))
                     y = int(payload.get("y", 0))
-                    print(f"[LAVA DEBUG] Toggle request received: x={x}, y={y}", flush=True)
-                    dashboard.toggle_lava_zone(x, y)
-                    print(f"[LAVA DEBUG] After toggle: zones={dashboard.state['lava_zones']}", flush=True)
+                    zone_type = payload.get("zone_type", "lava")
+                    print(f"[ZONE DEBUG] Toggle request: x={x}, y={y}, type={zone_type}", flush=True)
+                    if dashboard._zone_manager is not None:
+                        zone_id = dashboard._ensure_zone(zone_type)
+                        if zone_id:
+                            dashboard._zone_manager.batch_toggle_cells([[x, y]], zone_id)
+                            dashboard._sync_zones_to_state()
+                    else:
+                        dashboard.toggle_lava_zone(x, y)
                 with dashboard._lock:
-                    lava_zones = list(dashboard.state["lava_zones"])
+                    zones_resp = list(dashboard.state["zones"])
+                    lava_resp = list(dashboard.state["lava_zones"])
+                resp = {"ok": True, "zones": zones_resp, "lava_zones": lava_resp}
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
-                self.wfile.write(json.dumps({"ok": True, "lava_zones": lava_zones}).encode("utf-8"))
+                self.wfile.write(json.dumps(resp).encode("utf-8"))
 
             def _send_map_image(self) -> None:
                 if not MAP_IMAGE_PATH.exists():

@@ -15,6 +15,15 @@ Two checkpoint subtypes are supported:
   attributes (e.g. ``{"attr": "party_size", "op": ">", "value": 0}``).
   Useful for milestones that have no dedicated event flag, such as obtaining
   the first Pokemon or winning the first battle.
+* **item-based** — detected via an ``item_check`` dict that inspects the
+  player's bag contents (e.g. ``{"item_id": 70, "min_quantity": 1}``).
+  Useful for milestones tied to holding a specific item, such as Oak's Parcel.
+* **map-based** — detected via a ``map_check`` dict that compares the
+  player's current map ID against a target (e.g.
+  ``{"map_id": 40, "require_item": 70}``).  Optionally requires the player
+  to hold a specific item (by internal item id) at the time of entry, so
+  milestones like "return to Oak's Lab with the Parcel" can be expressed
+  as a single checkpoint.
 """
 
 from __future__ import annotations
@@ -38,13 +47,15 @@ _STAT_OPERATORS = {
 class MilestoneTracker:
     """Track a curated, ordered list of story checkpoints.
 
-    Parameters
+    Attributes
     ----------
     checkpoints
         List of dicts, each with keys: ``name``, and either ``event_key``
-        (an ``events.json`` key like ``"0xD74B-5"``) or ``stat_check``
-        (a dict with ``attr``, ``op``, ``value``).  Optional keys:
-        ``reward_baseline`` (defaults to 1.0), ``description``.
+        (an ``events.json`` key like ``"0xD74B-5"``), ``stat_check``
+        (a dict with ``attr``, ``op``, ``value``), ``item_check``
+        (a dict with ``item_id`` and optional ``min_quantity``), or
+        ``map_check`` (a dict with ``map_id`` and optional ``require_item``).
+        Optional keys: ``reward_baseline`` (defaults to 1.0), ``description``.
     effective_rewards
         Dict produced by :func:`skill_lab.rewards.check_baseline_rewards`.
         Must contain ``"milestone"`` key for the default reward value.
@@ -142,6 +153,48 @@ class MilestoneTracker:
             return False
         return operator(current, target)
 
+    def _check_item_condition(self, game_state: GameState, item_check: dict[str, Any]) -> bool:
+        """Evaluate an ``item_check`` dict against the player's bag contents.
+
+        ``item_check`` keys:
+            ``item_id``      – Gen 1 internal item id (e.g. 70 for Oak's Parcel).
+            ``min_quantity`` – minimum quantity required (default 1).
+        """
+        item_id = item_check.get("item_id")
+        if item_id is None:
+            return False
+        min_quantity = int(item_check.get("min_quantity", 1))
+        return game_state.has_item(item_id)
+
+    def _check_map_condition(
+        self,
+        game_state: GameState,
+        map_check: dict[str, Any],
+    ) -> bool:
+        """Evaluate a ``map_check`` dict against the player's current map.
+
+        Returns True when the player is on ``map_id`` and (if
+        ``require_item`` is set) is holding that item.
+
+        ``map_check`` keys:
+            ``map_id``       – target map / area id to match.
+            ``require_item`` – optional item id that must be held on entry.
+        """
+        target_map = map_check.get("map_id")
+        if target_map is None:
+            return False
+        try:
+            current_map = int(game_state.map_id)
+        except (TypeError, ValueError, AttributeError):
+            return False
+        if current_map != int(target_map):
+            return False
+        require_item = map_check.get("require_item")
+        if require_item is not None:
+            if not game_state.has_item(int(require_item)):
+                return False
+        return True
+
     def _reward_for(self, checkpoint: dict[str, Any]) -> float:
         """Return the reward for a checkpoint, using a per-checkpoint override
         if present, falling back to ``effective_rewards["milestone"]``."""
@@ -163,6 +216,14 @@ class MilestoneTracker:
         for cp in self.checkpoints:
             key = cp.get("event_key")
             if key and self._event_is_set(game_state, key):
+                self.achieved.add(cp["name"])
+
+            item_check = cp.get("item_check")
+            if item_check and self._check_item_condition(game_state, item_check):
+                self.achieved.add(cp["name"])
+
+            map_check = cp.get("map_check")
+            if map_check and self._check_map_condition(game_state, map_check):
                 self.achieved.add(cp["name"])
 
         if self.achieved:
@@ -199,6 +260,14 @@ class MilestoneTracker:
                 if self._check_stat_condition(game_state_or_env, cp["stat_check"]):
                     achieved = True
 
+            if not achieved and cp.get("item_check"):
+                if self._check_item_condition(game_state, cp["item_check"]):
+                    achieved = True
+
+            if not achieved and cp.get("map_check"):
+                if self._check_map_condition(game_state, cp["map_check"]):
+                    achieved = True
+
             if not achieved:
                 continue
 
@@ -227,7 +296,10 @@ class MilestoneTracker:
         checkpoint_infos = []
         for i, cp in enumerate(self.checkpoints):
             achieved = cp["name"] in self.achieved
-            subtype = "event" if cp.get("event_key") else "stat"
+            subtype = ("event" if cp.get("event_key")
+                       else "item" if cp.get("item_check")
+                       else "map" if cp.get("map_check")
+                       else "stat")
             checkpoint_infos.append({
                 "index": i,
                 "name": cp.get("name", f"checkpoint_{i}"),

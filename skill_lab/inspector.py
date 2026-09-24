@@ -354,12 +354,41 @@ class ObservationInspector:
                 ("combat_wild", "Wild:"),
                 ("milestone", "Milestones:"),
                 ("event", "Events:"),
+                ("speed_bonus", "SpeedBonus:"),
+                ("health_proximity", "HealthNav:"),
+                ("death_penalty", "Deaths:"),
             ]:
                 cv2.putText(panel, f"{rlabel} {reward_counts.get(rtype, 0)}", (party_x, reward_y),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1)
                 reward_y += 14
         else:
             cv2.putText(panel, "  (no rewards yet)", (party_x, reward_y), cv2.FONT_HERSHEY_SIMPLEX, 0.36, (110, 110, 110), 1)
+
+        # --- Speed Bonus Stats ---
+        speed_y = reward_y + 30
+        speed_tracker = getattr(env.envs[env_index], "speed_bonus_tracker", None)
+        if speed_tracker is not None:
+            cv2.putText(panel, "Speed Stats", (party_x, speed_y), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
+            speed_y += 16
+            stats = speed_tracker.get_stats()
+            best_steps = stats.get("best_steps", {})
+            if best_steps:
+                cv2.putText(panel, f"  Best steps: {len(best_steps)} achievements", (party_x, speed_y),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.36, (180, 180, 180), 1)
+                speed_y += 14
+                # Show top 5 best-step achievements
+                sorted_best = sorted(best_steps.items(), key=lambda kv: kv[1])
+                for name, steps in sorted_best[:5]:
+                    label = name[:24] if len(name) > 24 else name
+                    cv2.putText(panel, f"  {label}: {steps}", (party_x, speed_y),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.34, (150, 200, 150), 1)
+                    speed_y += 14
+            else:
+                cv2.putText(panel, "  (no speed data yet)", (party_x, speed_y),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.36, (110, 110, 110), 1)
+            sm = stats.get("speed_reward_multiplier", 1.0)
+            cv2.putText(panel, f"  Multiplier: {sm:.1f}x", (party_x, speed_y),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.34, (180, 180, 180), 1)
 
         watch_snapshot = self.address_watch.record(mem)
         self._button_rect = draw_memory_watch_panel(panel, 15, 360, left_panel_w - 30, watch_snapshot, title="Addr watch", max_rows=12)

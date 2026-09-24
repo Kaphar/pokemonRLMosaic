@@ -17,6 +17,7 @@ from global_map import local_to_global, GLOBAL_MAP_SHAPE
 from map_projection import project_position as _project_position_impl
 
 _V2_DIR = Path(__file__).resolve().parent
+ZONES_JSON_PATH = _V2_DIR.parent / "skill_lab" / "zones.json"
 LAVA_JSON_PATH = _V2_DIR.parent / "skill_lab" / "lava.json"
 
 event_flags_start = 0xD747
@@ -429,11 +430,28 @@ class RedGymEnv(Env):
 
     @staticmethod
     def _load_lava_zones() -> list[tuple[int, int]]:
-        """Load lava zones from lava.json if it exists."""
+        """Load lava zone cells from ``zones.json`` (preferred) or legacy ``lava.json``.
+
+        The ``zones.json`` file stores typed zones; only ``"lava"``-type zones
+        are returned here so the existing lava-penalty logic is unchanged.
+        """
         try:
-            if LAVA_JSON_PATH.exists():
-                with LAVA_JSON_PATH.open("r", encoding="utf-8") as f:
-                    data = json.load(f)
+            from contextlib import suppress
+            with suppress(Exception):
+                if ZONES_JSON_PATH.exists():
+                    with open(ZONES_JSON_PATH, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    cells: list[tuple[int, int]] = []
+                    for zone in data.get("zones", []):
+                        if zone.get("type") == "lava":
+                            for c in zone.get("cells", []):
+                                cells.append((int(c[0]), int(c[1])))
+                    return cells
+            # Legacy fallback
+            with suppress(Exception):
+                if LAVA_JSON_PATH.exists():
+                    with open(LAVA_JSON_PATH, "r", encoding="utf-8") as f:
+                        data = json.load(f)
                     return [(int(z[0]), int(z[1])) for z in data.get("lava_zones", [])]
         except Exception:
             pass

@@ -1,6 +1,6 @@
 import { el, state } from './state.js';
 import { isMosaicTabActive, isInspectorTabActive, isDynamicMosaicTabActive } from './util.js';
-import { renderMap, renderStats, initMap, updateLavaToggle } from './map_tab.js';
+import { renderMap, renderStats, initMap, updateLavaToggle, renderZones } from './map_tab.js';
 import { updateMosaic, initMosaic } from './mosaic_tab.js';
 import { updateDynamicMosaic, calculateBandwidth, initDynamicMosaic } from './dynamic_mosaic.js';
 import {
@@ -27,7 +27,9 @@ function update() {
     .then(function(data) {
       if (!data || !Array.isArray(data.envs)) return;
       el.status.textContent = 'live';
+      state.zoneStats = data.zone_stats || {};
       renderMap(data);
+      renderZones(data);
       renderStats(data);
       updateInspectorSelect(data.envs);
     })

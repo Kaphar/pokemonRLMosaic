@@ -36,6 +36,9 @@ REWARD_BASELINES: dict[str, float] = {
     "key_item":            20.0,
     "breadcrumb":           0.5,
     "breadcrumb_arrival":  10.0,
+    "health_proximity":     0.5,
+    "health_arrival":      15.0,
+    "death_penalty":        -25.0,
 }
 
 REWARD_CATEGORIES: dict[str, str] = {
@@ -55,9 +58,12 @@ REWARD_CATEGORIES: dict[str, str] = {
     "key_item":           "milestone",
     "breadcrumb":         "breadcrumb",
     "breadcrumb_arrival": "breadcrumb",
+    "health_proximity":   "health",
+    "health_arrival":     "health",
+    "death_penalty":      "health",
 }
 
-CATEGORIES = ["milestone", "event", "exploration", "combat", "healing", "training", "breadcrumb"]
+CATEGORIES = ["milestone", "event", "exploration", "combat", "healing", "training", "breadcrumb", "health"]
 
 # Aliases that allow stage/profile JSONs to use legacy names.
 # Value is a tuple of JSON key names, first match wins.
@@ -70,6 +76,7 @@ REWARD_MULTIPLIER_ALIASES: dict[str, tuple[str, ...]] = {
     "healing":         ("healing_reward_multiplier", "healing_reward"),
     "training":        ("training_reward_multiplier", "level_reward_multiplier"),
     "breadcrumb":      ("breadcrumb_reward_multiplier", "breadcrumb_reward"),
+    "health":          ("health_reward_multiplier", "health_reward"),
 }
 
 

@@ -137,6 +137,7 @@ def make_config(profile: Profile, session_path: Path, args: argparse.Namespace) 
         "reward_scale": reward_scale,
         "milestone_reward": stage_config.get("milestone_reward", medium_reward),
         "healing_reward_multiplier": stage_config.get("healing_reward_multiplier", stage_config.get("healing_reward", 1.0)),
+        "speed_reward_multiplier": profile_config.get("speed_reward_multiplier", stage_config.get("speed_reward_multiplier", 1.0)),
         "events_path": str(EVENT_JSON_PATH),
         "effective_rewards": effective_rewards,
         "profile_category_multipliers": profile_category_multipliers,
@@ -765,9 +766,8 @@ def main(args: argparse.Namespace | None = None) -> None:
                     dashboard.set_mosaic_frame(mosaic._last_frame)
                     
                     # Set individual frames for dynamic mosaic
-                    for idx in range(min(env.num_envs, len(all_tiles))):
-                        if idx < len(all_tiles):
-                            dashboard.set_individual_frame(idx, all_tiles[idx])
+                    for idx in range(len(all_tiles)):
+                        dashboard.set_individual_frame(visible_indices[idx], all_tiles[idx])
 
                 if step_count % max(1, args.num_envs * 100) == 0: print(f"Progress: {step_count} steps")
                 # Save recordings periodically

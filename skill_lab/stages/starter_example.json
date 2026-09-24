@@ -10,6 +10,8 @@
   "healing_reward_multiplier": 0.0,
   "training_reward_multiplier": 0.0,
   "breadcrumb_reward_multiplier": 0.0,
+  "health_reward_multiplier": 0.0,
+  "speed_reward_multiplier": 1.0,
   "init_state": "init.state",
   "button_masks": {
     "Start": true,
@@ -19,18 +21,6 @@
   },
   "reset_on_catch": false,
   "checkpoints": [
-    {
-      "name": "Followed Oak Into Lab",
-      "event_key": "0xD747-0",
-      "reward_baseline": 1.0,
-      "description": "Enter Professor Oak's lab in Pallet Town"
-    },
-    {
-      "name": "Got Starter",
-      "event_key": "0xD74B-2",
-      "reward_baseline": 5.0,
-      "description": "Receive your starter Pokemon from Oak"
-    },
     {
       "name": "Got Pokedex",
       "event_key": "0xD74B-5",

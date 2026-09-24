@@ -34,11 +34,49 @@
               <button id="zoom-reset" title="Reset zoom">R</button>
               <button id="zoom-out" title="Zoom out (-)">-</button>
             </div>
-            <button id="toggle-lava" title="Toggle lava placement mode (L)" class="toggle-active">🔥</button>
+            <button id="toggle-lava" title="Toggle zone placement mode (L)" class="toggle-active">🔥</button>
+            <select id="zone-type-select" title="Zone type for new placements">
+              <option value="lava">Lava</option>
+              <option value="action_mask">Action Mask</option>
+            </select>
+            <button id="zone-visibility-toggle" title="Toggle zone layer visibility" class="toggle-active">👁</button>
           </div>
           <div class="status-overlay" id="status">waiting…</div>
           <div class="status-overlay" id="lava-mode-status"></div>
         </div>
+        <div class="zone-panel">
+          <div class="zone-panel-header">
+            <span>Zones</span>
+            <button id="add-zone-btn" title="Add a new zone" class="zone-btn-sm">+</button>
+          </div>
+          <div class="zone-list" id="zone-list"></div>
+          <div class="zone-detail" id="zone-detail">
+            <div class="zone-detail-hidden" id="zone-detail-content">
+              <div class="zone-detail-row">
+                <label>Type</label>
+                <span id="zone-detail-type"></span>
+              </div>
+              <div class="zone-detail-row">
+                <label>Cells</label>
+                <span id="zone-detail-cells">0</span>
+              </div>
+              <div class="zone-detail-row">
+                <label>Action</label>
+                <input type="text" id="zone-detail-action" placeholder="e.g. Down" />
+              </div>
+              <div class="zone-detail-row">
+                <label>Activate On</label>
+                <input type="text" id="zone-detail-activate-on" placeholder="checkpoint name" />
+              </div>
+              <div class="zone-detail-row">
+                <label>Deactivate On</label>
+                <input type="text" id="zone-detail-deactivate-on" placeholder="checkpoint name" />
+              </div>
+              <button id="delete-zone-btn" class="zone-btn-del">Delete Zone</button>
+            </div>
+          </div>
+        </div>
+      </div>
         <div class="meta">Scroll to zoom, drag to pan. Click map in lava placement mode to add/remove 16x16 tile zones. 🔥 toggles placement mode.</div>
       </div>
     </div>

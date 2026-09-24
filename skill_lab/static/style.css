@@ -87,6 +87,8 @@ body {
 .map-controls button:hover { background: var(--accent); color: var(--bg); border-color: var(--accent); }
 .map-controls button.toggle-active { background: var(--accent); color: var(--bg); }
 .map-controls .zoom-h { display: flex; gap: 6px; }
+.map-controls select#zone-type-select { width: 36px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.15); background: rgba(15,22,34,0.85); color: var(--text); font-size: 0.8rem; padding: 4px; cursor: pointer; }
+.map-controls select#zone-type-select:focus { outline: none; border-color: var(--accent); }
 
 .status-overlay {
   position: absolute;
@@ -104,6 +106,30 @@ body {
 
 .status-overlay#status { right: 14px; left: auto; overflow-x: auto; }
 .status-overlay#lava-mode-status { bottom: 44px; left: 14px; background: rgba(255, 107, 107, 0.85); }
+
+.zone-panel { position: absolute; bottom: 14px; right: 14px; width: 280px; max-height: 40vh; background: rgba(15, 22, 34, 0.92); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 10px; display: flex; flex-direction: column; z-index: 10; }
+.zone-panel-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); font-size: 0.85rem; font-weight: 600; color: var(--text); }
+.zone-panel-header span { color: var(--accent); }
+.zone-list { flex: 1; overflow-y: auto; padding: 4px; }
+.zone-item { padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; color: var(--text); display: flex; align-items: center; justify-content: space-between; }
+.zone-item:hover { background: rgba(255, 255, 255, 0.06); }
+.zone-item.selected { background: rgba(110, 234, 255, 0.12); border: 1px solid rgba(110, 234, 255, 0.3); }
+.zone-item .zone-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 6px; }
+.zone-item .zone-label.editing { background: rgba(255, 255, 255, 0.1); }
+.zone-item .zone-type-badge { font-size: 0.65rem; padding: 1px 6px; border-radius: 3px; opacity: 0.7; }
+.zone-item .zone-cell-count { font-size: 0.7rem; color: var(--muted); margin-left: 6px; }
+.zone-btn-sm { width: 24px; height: 24px; border-radius: 5px; border: 1px solid rgba(255, 255, 255, 0.15); background: rgba(255, 255, 255, 0.06); color: var(--accent); font-size: 0.9rem; cursor: pointer; }
+.zone-btn-sm:hover { background: rgba(255, 255, 255, 0.12); }
+.zone-btn-del { width: 100%; padding: 6px; margin-top: 4px; border-radius: 6px; border: 1px solid rgba(255, 107, 107, 0.4); background: rgba(255, 107, 107, 0.1); color: var(--danger); font-size: 0.75rem; cursor: pointer; }
+.zone-btn-del:hover { background: rgba(255, 107, 107, 0.25); }
+.zone-detail { border-top: 1px solid rgba(255, 255, 255, 0.08); max-height: 0; overflow: hidden; transition: max-height 0.2s ease; }
+.zone-detail.expanded { max-height: 260px; }
+.zone-detail-hidden { display: none; }
+.zone-detail.expanded .zone-detail-hidden { display: block; padding: 10px; }
+.zone-detail-row { display: flex; flex-direction: column; margin-bottom: 6px; }
+.zone-detail-row label { font-size: 0.7rem; color: var(--muted); margin-bottom: 2px; }
+.zone-detail-row input { background: rgba(15, 22, 34, 0.6); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 4px; padding: 3px 6px; color: var(--text); font-size: 0.75rem; }
+.zone-detail-row input:focus { outline: none; border-color: var(--accent); }
 
 .meta { color: var(--muted); font-size: 0.75rem; padding: 8px 12px; border-top: 1px solid rgba(255, 255, 255, 0.08); }
 
@@ -240,3 +266,42 @@ tbody tr:nth-child(odd) { background: rgba(255, 255, 255, 0.01); }
 
 .inspector-details-collapsed { display: none; }
 .inspector-details-expanded { display: block; }
+
+.inspector-collapsible .inspector-section-header {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+}
+.inspector-collapsible .inspector-section-header .toggle-icon {
+  font-size: 0.7rem;
+  transition: transform 0.2s ease;
+  margin-left: 6px;
+}
+.inspector-collapsible .inspector-section-header .toggle-icon.collapsed {
+  transform: rotate(-90deg);
+}
+.inspector-collapsible .inspector-section-body.collapsed {
+  display: none;
+}
+.inspector-collapsible .inspector-section-body.expanded {
+  display: block;
+}
+
+.reward-history-columns {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.reward-column {
+  flex: 1;
+  min-width: 220px;
+}
+.reward-column h4 {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  margin: 0 0 6px 0;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}

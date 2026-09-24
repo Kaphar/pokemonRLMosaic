@@ -54,6 +54,28 @@ function initInspector() {
     el.inspectorDetailsToggle.addEventListener('click', toggleInspectorDetails);
   }
 
+  // Collapsible section headers
+  if (el.inspectorDetails) {
+    el.inspectorDetails.addEventListener('click', function(e) {
+      var header = e.target.closest('.inspector-section-header');
+      if (!header) return;
+      var body = header.nextElementSibling;
+      var icon = header.querySelector('.toggle-icon');
+      if (!body || !icon) return;
+      if (body.classList.contains('expanded')) {
+        body.classList.remove('expanded');
+        body.classList.add('collapsed');
+        icon.classList.remove('expanded');
+        icon.classList.add('collapsed');
+      } else {
+        body.classList.remove('collapsed');
+        body.classList.add('expanded');
+        icon.classList.remove('collapsed');
+        icon.classList.add('expanded');
+      }
+    });
+  }
+
   state.inspectorDetailsCollapsed = true;
 
   if (el.inspectorStatus) el.inspectorStatus.textContent = 'idle';
@@ -343,10 +365,14 @@ function renderInspectorDetails(data) {
   // ---- Build collapsible details (everything else) ----
   let html = '';
 
-  // ---- Environment Directives ----
+  // ---- Environment Directives (collapsible) ----
   const directives = data.directives || {};
-  html += '<div class="inspector-section">';
-  html += '<h3>Environment Directives</h3>';
+  html += '<div class="inspector-section inspector-collapsible">';
+  html += '<div class="inspector-section-header" data-section="env-directives">';
+  html += '<h3 style="margin:0;">Environment Directives</h3>';
+  html += '<span class="toggle-icon collapsed">\u25BC</span>';
+  html += '</div>';
+  html += '<div class="inspector-section-body expanded">';
   html += '<table class="inspector-table">';
   html += '<tr><td class="inspect-label">Env Name</td><td>' + (directives.env_name || '-') + '</td></tr>';
   html += '<tr><td class="inspect-label">ROM</td><td>[' + (directives.rom_label || 'Unknown') + ']</td></tr>';
@@ -365,6 +391,26 @@ function renderInspectorDetails(data) {
   }
   html += '</table>';
   html += '</div>';
+  html += '</div>';
+
+  // ---- Trainer Info (collapsible) ----
+  const trainer = data.trainer || {};
+  if (trainer.name || trainer.money !== undefined || trainer.coins !== undefined) {
+    html += '<div class="inspector-section inspector-collapsible">';
+    html += '<div class="inspector-section-header" data-section="trainer-info">';
+    html += '<h3 style="margin:0;">Trainer Info</h3>';
+    html += '<span class="toggle-icon expanded">\u25B2</span>';
+    html += '</div>';
+    html += '<div class="inspector-section-body expanded">';
+    html += '<table class="inspector-table">';
+    html += '<tr><td class="inspect-label">Name</td><td>' + (trainer.name || '-') + '</td></tr>';
+    html += '<tr><td class="inspect-label">Money</td><td>$' + (trainer.money || 0) + '</td></tr>';
+    html += '<tr><td class="inspect-label">Coins</td><td>' + (trainer.coins || 0) + '</td></tr>';
+    html += '<tr><td class="inspect-label">Badges</td><td>' + (trainer.badge_count || 0) + '/8</td></tr>';
+    html += '</table>';
+    html += '</div>';
+    html += '</div>';
+  }
 
   // ---- Game Stats ----
   html += '<div class="inspector-section">';
@@ -384,19 +430,19 @@ function renderInspectorDetails(data) {
   html += '</table>';
   html += '</div>';
 
-  // ---- Trainer Info ----
-  const trainer = data.trainer || {};
-  if (trainer.name || trainer.money !== undefined || trainer.coins !== undefined) {
-    html += '<div class="inspector-section">';
-    html += '<h3>Trainer Info</h3>';
-    html += '<table class="inspector-table">';
-    html += '<tr><td class="inspect-label">Name</td><td>' + (trainer.name || '-') + '</td></tr>';
-    html += '<tr><td class="inspect-label">Money</td><td>$' + (trainer.money || 0) + '</td></tr>';
-    html += '<tr><td class="inspect-label">Coins</td><td>' + (trainer.coins || 0) + '</td></tr>';
-    html += '<tr><td class="inspect-label">Badges</td><td>' + (trainer.badge_count || 0) + '/8</td></tr>';
-    html += '</table>';
-    html += '</div>';
-  }
+  // ---- Zone Stats ----
+  const zoneStats = data.zone_stats || state.zoneStats || {};
+  const zoneCount = zoneStats.zone_count || 0;
+  const stepsInMask = zoneStats.steps_in_action_mask_zone || 0;
+  const zoneTypes = Array.isArray(zoneStats.zone_types) ? zoneStats.zone_types : [];
+  html += '<div class="inspector-section">';
+  html += '<h3>Zones</h3>';
+  html += '<table class="inspector-table">';
+  html += '<tr><td class="inspect-label">Total Zones</td><td>' + zoneCount + '</td></tr>';
+  html += '<tr><td class="inspect-label">Types</td><td>' + (zoneTypes.join(', ') || '-') + '</td></tr>';
+  html += '<tr><td class="inspect-label">Steps in Mask Zone</td><td>' + stepsInMask + '</td></tr>';
+  html += '</table>';
+  html += '</div>';
 
   // ---- Bag ----
   const bag = Array.isArray(data.bag) ? data.bag : [];
@@ -422,16 +468,30 @@ function renderInspectorDetails(data) {
     html += '</div>';
   }
 
-  // ---- Reward History ----
+  // ---- Reward History (two columns: all events | non-combat events) ----
   const rewardHistory = data.reward_history || {};
   const rewardCounts = rewardHistory.counts || {};
   const rewardEvents = Array.isArray(rewardHistory.events) ? rewardHistory.events : [];
   const totalFled = rewardCounts.fled_battle || 0;
+
+  // Combat-related and excluded types for the right column
+  var EXCLUDED_TYPES = ['combat_trainer', 'combat_wild', 'fled_battle', 'death_penalty', 'breadcrumb', 'pokemon_tracer'];
+  var combatEvents = rewardEvents.slice(-15).reverse();
+  var nonCombatEvents = combatEvents.filter(function(evt) {
+    return EXCLUDED_TYPES.indexOf(evt.type) === -1;
+  });
+
   html += '<div class="inspector-section">';
   html += '<h3>Reward History</h3>';
   if (rewardEvents.length === 0 && Object.keys(rewardCounts).length === 0) {
     html += '<div style="color: #8aa0c7; font-size: 0.85rem;">No rewards recorded yet</div>';
   } else {
+    html += '<div class="reward-history-columns">';
+
+    // Left column: all recent events
+    html += '<div class="reward-column">';
+    html += '<h4>All Events</h4>';
+    html += '<div class="reward-event-list">';
     html += '<table class="inspector-table">';
     html += '<tr><td class="inspect-label">Fled Battles</td><td class="' + (totalFled > 0 ? 'stat-danger' : '') + '">' + totalFled + '</td></tr>';
     html += '<tr><td class="inspect-label">Trainer Wins</td><td>' + (rewardCounts.combat_trainer || 0) + '</td></tr>';
@@ -442,26 +502,49 @@ function renderInspectorDetails(data) {
     html += '<tr><td class="inspect-label">Heals</td><td>' + (rewardCounts.healing || 0) + '</td></tr>';
     html += '<tr><td class="inspect-label">Breadcrumbs</td><td>' + (rewardCounts.breadcrumb || 0) + '</td></tr>';
     html += '</table>';
-    if (rewardEvents.length > 0) {
-      html += '<div style="margin-top: 8px; font-size: 0.75rem; color: #aaa;">Recent events:</div>';
-      html += '<div class="reward-event-list">';
-      var recent = rewardEvents.slice(-10).reverse();
-      for (var i = 0; i < recent.length; i++) {
-        var evt = recent[i];
-        var amt = evt.amount !== undefined ? evt.amount : 0;
-        var evtClass = amt < 0 ? 'reward-negative' : 'reward-positive';
-        var evtType = evt.type || '?';
-        var evtStep = evt.step !== undefined ? evt.step : 0;
-        var evtDesc = evt.description || '';
-        html += '<div class="reward-event ' + evtClass + '">';
-        html += '<span class="reward-type">' + evtType + '</span>';
-        html += '<span class="reward-amount">' + (amt >= 0 ? '+' : '') + amt.toFixed(2) + '</span>';
-        html += '<span class="reward-step">s' + evtStep + '</span>';
-        if (evtDesc) html += '<span class="reward-desc">' + evtDesc + '</span>';
-        html += '</div>';
-      }
+    html += '</div>';
+
+    for (var i = 0; i < combatEvents.length; i++) {
+      var evt = combatEvents[i];
+      var amt = evt.amount !== undefined ? evt.amount : 0;
+      var evtClass = amt < 0 ? 'reward-negative' : 'reward-positive';
+      var evtType = evt.type || '?';
+      var evtStep = evt.step !== undefined ? evt.step : 0;
+      var evtDesc = evt.description || '';
+      html += '<div class="reward-event ' + evtClass + '">';
+      html += '<span class="reward-type">' + evtType + '</span>';
+      html += '<span class="reward-amount">' + (amt >= 0 ? '+' : '') + amt.toFixed(2) + '</span>';
+      html += '<span class="reward-step">s' + evtStep + '</span>';
+      if (evtDesc) html += '<span class="reward-desc">' + evtDesc + '</span>';
       html += '</div>';
     }
+    html += '</div>';
+
+    // Right column: non-combat events only
+    html += '<div class="reward-column">';
+    html += '<h4>Non-Combat Events</h4>';
+    html += '<div class="reward-event-list">';
+    if (nonCombatEvents.length === 0) {
+      html += '<div style="color: #8aa0c7; font-size: 0.8rem;">(none)</div>';
+    }
+    for (var j = 0; j < nonCombatEvents.length; j++) {
+      var evt2 = nonCombatEvents[j];
+      var amt2 = evt2.amount !== undefined ? evt2.amount : 0;
+      var evtClass2 = amt2 < 0 ? 'reward-negative' : 'reward-positive';
+      var evtType2 = evt2.type || '?';
+      var evtStep2 = evt2.step !== undefined ? evt2.step : 0;
+      var evtDesc2 = evt2.description || '';
+      html += '<div class="reward-event ' + evtClass2 + '">';
+      html += '<span class="reward-type">' + evtType2 + '</span>';
+      html += '<span class="reward-amount">' + (amt2 >= 0 ? '+' : '') + amt2.toFixed(2) + '</span>';
+      html += '<span class="reward-step">s' + evtStep2 + '</span>';
+      if (evtDesc2) html += '<span class="reward-desc">' + evtDesc2 + '</span>';
+      html += '</div>';
+    }
+    html += '</div>';
+    html += '</div>';
+
+    html += '</div>';
   }
   html += '</div>';
 
@@ -510,8 +593,9 @@ function fetchInspectorData() {
 }
 
 function updateSelectionHighlight() {
-  document.querySelectorAll('.dynamic-mosaic-cell').forEach(function(cell, idx) {
-    if (idx === state.selectedInspectorEnv) {
+  document.querySelectorAll('.dynamic-mosaic-cell').forEach(function(cell) {
+    const envIndex = parseInt(cell.dataset.envIndex, 10);
+    if (envIndex === state.selectedInspectorEnv) {
       cell.style.borderColor = 'var(--accent)';
       cell.style.boxShadow = '0 0 12px rgba(110, 231, 255, 0.4)';
     } else {

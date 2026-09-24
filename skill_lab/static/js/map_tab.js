@@ -123,21 +123,184 @@ function hideCoordPopover() {
   }
 }
 
+function renderZones(data) {
+  const zones = data.zones || (data.lava_zones ? [{ type: 'lava', cells: data.lava_zones, label: 'Lava Zone', color: '#ff6b6b', opacity: 0.5 }] : []);
+  if (!el.zoneList) return;
+  el.zoneList.innerHTML = '';
+  zones.forEach(function(zone) {
+    const div = document.createElement('div');
+    div.className = 'zone-item' + (zone.id === state.selectedZoneId ? ' selected' : '');
+    div.dataset.zoneId = zone.id || '';
+
+    const badgeColor = zone.type === 'action_mask' ? '#4a9eff' : '#ff6b6b';
+    const badgeText = zone.type === 'action_mask' ? 'MASK' : 'LAVA';
+
+    const labelSpan = document.createElement('span');
+    labelSpan.className = 'zone-label';
+    labelSpan.textContent = zone.label || zone.type;
+    labelSpan.title = 'Double-click to rename';
+    labelSpan.dataset.zoneId = zone.id || '';
+    labelSpan.ondblclick = function(e) {
+      e.stopPropagation();
+      startRename(zone.id, zone.label || zone.type);
+    };
+
+    const cellCountSpan = document.createElement('span');
+    cellCountSpan.className = 'zone-cell-count';
+    cellCountSpan.textContent = String((zone.cells || []).length) + ' cells';
+
+    const badge = document.createElement('span');
+    badge.className = 'zone-type-badge';
+    badge.style.border = '1px solid ' + badgeColor;
+    badge.style.color = badgeColor;
+    badge.textContent = badgeText;
+
+    const leftDiv = document.createElement('div');
+    leftDiv.style.display = 'flex';
+    leftDiv.style.flex = '1';
+    leftDiv.style.minWidth = '0';
+    leftDiv.appendChild(labelSpan);
+    leftDiv.appendChild(cellCountSpan);
+
+    const rightDiv = document.createElement('div');
+    rightDiv.style.display = 'flex';
+    rightDiv.style.alignItems = 'center';
+    rightDiv.style.gap = '4px';
+    rightDiv.appendChild(badge);
+
+    div.appendChild(leftDiv);
+    div.appendChild(rightDiv);
+
+    div.onclick = function() {
+      selectZone(zone.id, zones);
+    };
+    el.zoneList.appendChild(div);
+  });
+
+  // Update detail panel
+  updateZoneDetail(state.selectedZoneId, zones);
+}
+
+function startRename(zoneId, currentLabel) {
+  const zone = state.lastState.zones ? state.lastState.zones.find(z => z.id === zoneId) : null;
+  if (!zone) return;
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = currentLabel;
+  input.style.background = 'rgba(15, 22, 34, 0.6)';
+  input.style.border = '1px solid var(--accent)';
+  input.style.borderRadius = '4px';
+  input.style.padding = '2px 6px';
+  input.style.color = 'var(--text)';
+  input.style.fontSize = '0.8rem';
+  input.style.width = '120px';
+  const labelSpan = el.zoneList.querySelector('.zone-label[data-zone-id="' + zoneId + '"]');
+  if (labelSpan) {
+    labelSpan.parentNode.replaceChild(input, labelSpan);
+    input.focus();
+    input.select();
+  }
+  input.onkeydown = function(e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      commitRename(zoneId, input.value);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      cancelRename(zoneId, currentLabel);
+    }
+  };
+  input.onblur = function() {
+    commitRename(zoneId, input.value);
+  };
+}
+
+function commitRename(zoneId, newName) {
+  if (!newName.trim()) return;
+  fetch('/api/zone-update', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ zone_id: zoneId, label: newName.trim() })
+  }).catch(function() {});
+  renderZones(state.lastState);
+}
+
+function cancelRename(zoneId, oldName) {
+  const labelSpan = document.createElement('span');
+  labelSpan.className = 'zone-label';
+  labelSpan.textContent = oldName;
+  labelSpan.title = 'Double-click to rename';
+  labelSpan.dataset.zoneId = zoneId;
+  labelSpan.ondblclick = function(e) {
+    e.stopPropagation();
+    startRename(zoneId, oldName);
+  };
+  const input = el.zoneList.querySelector('input[type="text"]');
+  if (input && input.parentNode) {
+    input.parentNode.replaceChild(labelSpan, input);
+  }
+}
+
+function selectZone(zoneId, zones) {
+  state.selectedZoneId = zoneId;
+  const type = (zones.find(z => z.id === zoneId) || {}).type || 'lava';
+  state.zonePlacingType = type;
+  if (el.zoneTypeSelect) {
+    el.zoneTypeSelect.value = type;
+  }
+  renderZones(state.lastState);
+}
+
+function updateZoneDetail(zoneId, zones) {
+  if (!el.zoneDetail || !el.zoneDetailContent) return;
+  const zone = zones.find(z => z.id === zoneId);
+  if (!zone) {
+    el.zoneDetail.classList.remove('expanded');
+    return;
+  }
+  el.zoneDetail.classList.add('expanded');
+  if (el.zoneDetailType) el.zoneDetailType.textContent = zone.type || '-';
+  if (el.zoneDetailCells) el.zoneDetailCells.textContent = String((zone.cells || []).length);
+  if (el.zoneDetailAction) el.zoneDetailAction.value = zone.action || '';
+  if (el.zoneDetailActivateOn) el.zoneDetailActivateOn.value = zone.activate_on || '';
+  if (el.zoneDetailDeactivateOn) el.zoneDetailDeactivateOn.value = zone.deactivate_on || '';
+}
+
+function saveZoneConfig(field, value) {
+  if (!state.selectedZoneId) return;
+  fetch('/api/zone-update', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ zone_id: state.selectedZoneId, field: field, value: value })
+  }).catch(function() {});
+  renderZones(state.lastState);
+}
+
 function renderMap(data) {
   state.lastState = data;
   el.envLayer.innerHTML = '';
   el.lavaLayer.innerHTML = '';
 
-  const lavaZones = data.lava_zones || [];
-  for (const zone of lavaZones) {
-    const rect = document.createElementNS(SVG_NS, 'rect');
-    rect.setAttribute('x', zone[0]);
-    rect.setAttribute('y', zone[1]);
-    rect.setAttribute('width', 16);
-    rect.setAttribute('height', 16);
-    rect.setAttribute('fill', '#ff6b6b');
-    rect.setAttribute('opacity', '0.5');
-    el.lavaLayer.appendChild(rect);
+  // Render structured zones from data.zones (preferred) or legacy data.lava_zones
+  var zones = data.zones || [];
+  if (!zones.length && data.lava_zones) {
+    zones = [{ type: 'lava', cells: data.lava_zones, label: 'Lava Zone', color: '#ff6b6b', opacity: 0.5 }];
+  }
+  for (const zone of zones) {
+    const zoneType = zone.type || 'lava';
+    if (!state.zoneVisibility[zoneType]) continue;
+    const color = zone.color || (zoneType === 'action_mask' ? '#4a9eff' : '#ff6b6b');
+    const opacity = zone.opacity != null ? zone.opacity : (zoneType === 'action_mask' ? 0.3 : 0.5);
+    const cells = zone.cells || [];
+    for (const cell of cells) {
+      const rect = document.createElementNS(SVG_NS, 'rect');
+      rect.setAttribute('x', cell[0]);
+      rect.setAttribute('y', cell[1]);
+      rect.setAttribute('width', 16);
+      rect.setAttribute('height', 16);
+      rect.setAttribute('fill', color);
+      rect.setAttribute('opacity', opacity);
+      el.lavaLayer.appendChild(rect);
+    }
   }
 
   for (const env of data.envs || []) {
@@ -197,7 +360,8 @@ function updateLavaToggle() {
   state.lavaPlacementMode = !state.lavaPlacementMode;
   el.toggleLavaBtn.classList.toggle('toggle-active', state.lavaPlacementMode);
   if (state.lavaPlacementMode) {
-    el.lavaModeStatus.textContent = 'LAVA PLACEMENT MODE - click to place/remove zones';
+    const modeText = state.zonePlacingType === 'action_mask' ? 'ACTION MASK' : 'ZONE';
+    el.lavaModeStatus.textContent = modeText + ' PLACEMENT MODE - click to place/remove zones';
     el.mapSvg.style.cursor = 'crosshair';
   } else {
     el.lavaModeStatus.textContent = '';
@@ -302,10 +466,10 @@ function initMap() {
             zones.push({ x: tx * 16, y: ty * 16 });
           }
         }
-        fetch('/api/lava', {
+        fetch('/api/zones', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ zones: zones })
+          body: JSON.stringify({ zones: zones, zone_type: state.zonePlacingType })
         }).then(function(r) { return r.json(); }).then(function(data) {
         }).catch(function() {});
       } else {
@@ -317,10 +481,10 @@ function initMap() {
         const viewBoxY = (svgY - state.panY) * invScale;
         const tileX = Math.round(viewBoxX / 16) * 16;
         const tileY = Math.round(viewBoxY / 16) * 16;
-        fetch('/api/lava', {
+        fetch('/api/zones', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ x: tileX, y: tileY })
+          body: JSON.stringify({ x: tileX, y: tileY, zone_type: state.zonePlacingType })
         }).then(function(r) { return r.json(); }).then(function() {
         }).catch(function() {});
       }
@@ -357,6 +521,67 @@ function initMap() {
   el.zoomOutBtn.addEventListener('click', function() { setZoom(0.85); });
   el.zoomResetBtn.addEventListener('click', function() { resetZoom(); });
   el.toggleLavaBtn.addEventListener('click', updateLavaToggle);
+  if (el.zoneTypeSelect) {
+    el.zoneTypeSelect.addEventListener('change', function() {
+      state.zonePlacingType = this.value;
+    });
+  }
+  if (el.zoneVisibilityToggle) {
+    el.zoneVisibilityToggle.addEventListener('click', function() {
+      const anyVisible = state.zoneVisibility.lava || state.zoneVisibility.action_mask;
+      const newVisible = !anyVisible;
+      state.zoneVisibility.lava = newVisible;
+      state.zoneVisibility.action_mask = newVisible;
+      this.classList.toggle('toggle-active', anyVisible === false);
+    });
+  }
+  if (el.addZoneBtn) {
+    el.addZoneBtn.addEventListener('click', function() {
+      const type = state.zonePlacingType || 'lava';
+      fetch('/api/zone-create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ zone_type: type })
+      }).then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (data && data.zone_id) {
+            state.selectedZoneId = data.zone_id;
+            renderZones(state.lastState);
+          }
+        })
+        .catch(function() {});
+    });
+  }
+  if (el.deleteZoneBtn) {
+    el.deleteZoneBtn.addEventListener('click', function() {
+      if (!state.selectedZoneId) return;
+      fetch('/api/zone-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ zone_id: state.selectedZoneId })
+      }).then(function(r) { return r.json(); })
+        .then(function() {
+          state.selectedZoneId = null;
+          renderZones(state.lastState);
+        })
+        .catch(function() {});
+    });
+  }
+  if (el.zoneDetailAction) {
+    el.zoneDetailAction.addEventListener('change', function() {
+      saveZoneConfig('action', this.value);
+    });
+  }
+  if (el.zoneDetailActivateOn) {
+    el.zoneDetailActivateOn.addEventListener('change', function() {
+      saveZoneConfig('activate_on', this.value || null);
+    });
+  }
+  if (el.zoneDetailDeactivateOn) {
+    el.zoneDetailDeactivateOn.addEventListener('change', function() {
+      saveZoneConfig('deactivate_on', this.value || null);
+    });
+  }
 
   const popover = document.createElement('div');
   popover.className = 'coord-popover';
@@ -383,9 +608,10 @@ function initMap() {
   });
 
   if (state.lavaPlacementMode) {
-    el.lavaModeStatus.textContent = 'LAVA PLACEMENT MODE - click to place/remove zones';
+    const modeText = state.zonePlacingType === 'action_mask' ? 'ACTION MASK' : 'ZONE';
+    el.lavaModeStatus.textContent = modeText + ' PLACEMENT MODE - click to place/remove zones';
     el.mapSvg.style.cursor = 'crosshair';
   }
 }
 
-export { renderMap, renderStats, initMap, updateLavaToggle, applyTransform, setZoom, resetZoom, clientToMapCoordinates, requestGameCoordinates, handleMapDblClick };
+export { renderMap, renderStats, initMap, updateLavaToggle, applyTransform, setZoom, resetZoom, clientToMapCoordinates, requestGameCoordinates, handleMapDblClick, renderZones };

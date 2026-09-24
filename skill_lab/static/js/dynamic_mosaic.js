@@ -31,11 +31,13 @@ function updateDynamicMosaic(envCount) {
   el.dynamicMosaicPageIndicator.textContent = 'Page ' + (state.dynamicMosaicCurrentPage + 1) + ' of ' + (maxPage + 1);
 
   const currentCells = grid.querySelectorAll('.dynamic-mosaic-cell');
-  if (currentCells.length !== visibleCount) {
+  if (currentCells.length !== visibleCount || grid._startIndex !== startIndex) {
+    grid._startIndex = startIndex;
     grid.innerHTML = '';
     for (let i = startIndex; i < endIndex; i++) {
       const cell = document.createElement('div');
       cell.className = 'dynamic-mosaic-cell';
+      cell.dataset.envIndex = String(i);
       cell.onclick = (function(idx) {
         return function() {
           selectInspectorEnv(idx);
