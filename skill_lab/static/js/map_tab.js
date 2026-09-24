@@ -182,6 +182,7 @@ function renderZones(data) {
 }
 
 function startRename(zoneId, currentLabel) {
+  state.isEditingZone = true;
   const zone = state.lastState.zones ? state.lastState.zones.find(z => z.id === zoneId) : null;
   if (!zone) return;
   const input = document.createElement('input');
@@ -215,7 +216,14 @@ function startRename(zoneId, currentLabel) {
 }
 
 function commitRename(zoneId, newName) {
+  state.isEditingZone = false;
   if (!newName.trim()) return;
+  const zones = state.lastState.zones || [];
+  const zi = zones.findIndex(z => z.id === zoneId);
+  if (zi >= 0) {
+    zones[zi] = Object.assign({}, zones[zi], { label: newName.trim() });
+    state.lastState = Object.assign({}, state.lastState, { zones: zones });
+  }
   fetch('/api/zone-update', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -225,6 +233,7 @@ function commitRename(zoneId, newName) {
 }
 
 function cancelRename(zoneId, oldName) {
+  state.isEditingZone = false;
   const labelSpan = document.createElement('span');
   labelSpan.className = 'zone-label';
   labelSpan.textContent = oldName;
@@ -250,6 +259,29 @@ function selectZone(zoneId, zones) {
   renderZones(state.lastState);
 }
 
+function _populateMilestoneOptions(selectEl, selected) {
+  if (!selectEl) return;
+  const checkpoints = state.availableCheckpoints || [];
+  let options = '<option value="">None</option>';
+  checkpoints.forEach(function(cp) {
+    const name = cp.name || cp;
+    const sel = name === selected ? ' selected' : '';
+    options += '<option value="' + name + '"' + sel + '>' + name + '</option>';
+  });
+  selectEl.innerHTML = options;
+}
+
+function _populateActionOptions(selectEl, selectedList) {
+  if (!selectEl) return;
+  const actions = state.actionNames || [];
+  let options = '';
+  actions.forEach(function(a) {
+    const sel = (selectedList || []).indexOf(a) >= 0 ? ' selected' : '';
+    options += '<option value="' + a + '"' + sel + '>' + a + '</option>';
+  });
+  selectEl.innerHTML = options;
+}
+
 function updateZoneDetail(zoneId, zones) {
   if (!el.zoneDetail || !el.zoneDetailContent) return;
   const zone = zones.find(z => z.id === zoneId);
@@ -260,9 +292,12 @@ function updateZoneDetail(zoneId, zones) {
   el.zoneDetail.classList.add('expanded');
   if (el.zoneDetailType) el.zoneDetailType.textContent = zone.type || '-';
   if (el.zoneDetailCells) el.zoneDetailCells.textContent = String((zone.cells || []).length);
-  if (el.zoneDetailAction) el.zoneDetailAction.value = zone.action || '';
-  if (el.zoneDetailActivateOn) el.zoneDetailActivateOn.value = zone.activate_on || '';
-  if (el.zoneDetailDeactivateOn) el.zoneDetailDeactivateOn.value = zone.deactivate_on || '';
+  if (el.zoneDetailColor) {
+    el.zoneDetailColor.value = (zone.color || (zone.type === 'action_mask' ? '#4a9eff' : '#ff6b6b')).replace('#', '');
+  }
+  _populateActionOptions(el.zoneDetailAction, Array.isArray(zone.action) ? zone.action : (zone.action ? [zone.action] : []));
+  _populateMilestoneOptions(el.zoneDetailActivateOn, zone.activate_on);
+  _populateMilestoneOptions(el.zoneDetailDeactivateOn, zone.deactivate_on);
 }
 
 function saveZoneConfig(field, value) {
@@ -272,7 +307,15 @@ function saveZoneConfig(field, value) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ zone_id: state.selectedZoneId, field: field, value: value })
   }).catch(function() {});
-  renderZones(state.lastState);
+  // Optimistically update local state so the detail panel reflects the change
+  // without waiting for the 500ms poll cycle.
+  const zones = state.lastState.zones || [];
+  const zi = zones.findIndex(z => z.id === state.selectedZoneId);
+  if (zi >= 0) {
+    zones[zi] = Object.assign({}, zones[zi], { [field]: value });
+    state.lastState = Object.assign({}, state.lastState, { zones: zones });
+    updateZoneDetail(state.selectedZoneId, zones);
+  }
 }
 
 function renderMap(data) {
@@ -567,9 +610,17 @@ function initMap() {
         .catch(function() {});
     });
   }
+  if (el.zoneDetailColor) {
+    el.zoneDetailColor.addEventListener('input', function() {
+      saveZoneConfig('color', '#' + this.value);
+    });
+  }
   if (el.zoneDetailAction) {
     el.zoneDetailAction.addEventListener('change', function() {
-      saveZoneConfig('action', this.value);
+      const selected = Array.from(this.selectedOptions).map(function(o) { return o.value; });
+      const zone = state.lastState.zones ? state.lastState.zones.find(z => z.id === state.selectedZoneId) : null;
+      if (!zone) return;
+      saveZoneConfig('action', selected.length === 1 ? selected[0] : selected);
     });
   }
   if (el.zoneDetailActivateOn) {
@@ -611,6 +662,14 @@ function initMap() {
     const modeText = state.zonePlacingType === 'action_mask' ? 'ACTION MASK' : 'ZONE';
     el.lavaModeStatus.textContent = modeText + ' PLACEMENT MODE - click to place/remove zones';
     el.mapSvg.style.cursor = 'crosshair';
+  } else {
+    // Smooth default zoom toward the center of the map
+    setTimeout(function() {
+      state.zoomScale = 2.0;
+      state.panX = svg_w / 2 * (1 - 1/2);
+      state.panY = svg_h / 2 * (1 - 1/2);
+      applyTransform();
+    }, 100);
   }
 }
 

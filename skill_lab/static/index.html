@@ -61,16 +61,20 @@
                 <span id="zone-detail-cells">0</span>
               </div>
               <div class="zone-detail-row">
-                <label>Action</label>
-                <input type="text" id="zone-detail-action" placeholder="e.g. Down" />
+                <label>Color</label>
+                <input type="color" id="zone-detail-color" />
+              </div>
+              <div class="zone-detail-row">
+                <label>Masks Actions (Ctrl/Cmd+click for multi-select)</label>
+                <select id="zone-detail-action" multiple size="4"></select>
               </div>
               <div class="zone-detail-row">
                 <label>Activate On</label>
-                <input type="text" id="zone-detail-activate-on" placeholder="checkpoint name" />
+                <select id="zone-detail-activate-on"><option value="">None</option></select>
               </div>
               <div class="zone-detail-row">
                 <label>Deactivate On</label>
-                <input type="text" id="zone-detail-deactivate-on" placeholder="checkpoint name" />
+                <select id="zone-detail-deactivate-on"><option value="">None</option></select>
               </div>
               <button id="delete-zone-btn" class="zone-btn-del">Delete Zone</button>
             </div>

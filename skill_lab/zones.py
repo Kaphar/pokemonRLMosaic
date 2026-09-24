@@ -40,8 +40,8 @@ ZONE_TYPE_COLORS: dict[str, str] = {
 
 #: Default display opacity per zone type (lower so overlapping zones are visible).
 ZONE_TYPE_OPACITIES: dict[str, float] = {
-    "lava": 0.5,
-    "action_mask": 0.3,
+    "lava": 0.4,
+    "action_mask": 0.25,
 }
 
 #: Checkpoint names known to the default milestone set — used to populate
@@ -323,7 +323,10 @@ class ZoneManager:
         except OSError:
             mtime = None
         if mtime is None or mtime != self._last_file_mtime:
-            self.zones = self._load_zones()
+            try:
+                self.zones = self._load_zones()
+            except Exception:
+                pass
             self._last_file_mtime = mtime
             return True
         return False

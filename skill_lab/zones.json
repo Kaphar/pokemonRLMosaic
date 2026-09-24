@@ -299,7 +299,7 @@
       ],
       "label": "Lava Zone",
       "color": "#ff6b6b",
-      "opacity": 0.5,
+      "opacity": 0.4,
       "action": null,
       "activate_on": null,
       "deactivate_on": null
@@ -4091,7 +4091,7 @@
       ],
       "label": "Action_mask",
       "color": "#4a9eff",
-      "opacity": 0.3,
+      "opacity": 0.25,
       "action": null,
       "activate_on": null,
       "deactivate_on": null
@@ -4101,8 +4101,8 @@
       "type": "action_mask",
       "cells": [],
       "label": "Action_mask",
-      "color": "#4a9eff",
-      "opacity": 0.3,
+      "color": "##34ff1a",
+      "opacity": 0.25,
       "action": null,
       "activate_on": null,
       "deactivate_on": null

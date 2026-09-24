@@ -670,7 +670,6 @@ class SkillLabWrapper(gymnasium.Wrapper):
         Delegates to ``RedGymEnv.get_game_coords`` + ``project_position`` when
         available.  Falls back to ``(nan, nan)`` if the position cannot be read.
         """
-        from v2.map_projection import project_position as _project
         unwrapped = self.env.unwrapped
         get_coords = getattr(unwrapped, "get_game_coords", None)
         project = getattr(unwrapped, "project_position", None)
@@ -690,19 +689,25 @@ class SkillLabWrapper(gymnasium.Wrapper):
         position.  Uses the wrapper's MilestoneTracker so zones respond to
         milestone progress.  Also reloads from disk if zones.json changed.
         """
-        self.zone_manager.reload()
-        px, py = self._project_agent_position()
-        if math.isnan(px) or math.isnan(py):
+        try:
+            self.zone_manager.reload()
+            px, py = self._project_agent_position()
+            if math.isnan(px) or math.isnan(py):
+                self._current_masked_actions = []
+                return
+            achieved = (
+                self.checkpoint_tracker.achieved
+                if self.checkpoint_tracker
+                else None
+            )
+            self._current_masked_actions = self.zone_manager.tick(
+                int(px), int(py), achieved
+            )
+        except Exception as _e:
+            import traceback as _tb
+            print(f"[{self.env_name}] Zone masking error: {_e}", flush=True)
+            _tb.print_exc()
             self._current_masked_actions = []
-            return
-        achieved = (
-            self.checkpoint_tracker.achieved
-            if self.checkpoint_tracker
-            else None
-        )
-        self._current_masked_actions = self.zone_manager.tick(
-            int(px), int(py), achieved
-        )
 
     @property
     def zone_stats(self) -> dict:

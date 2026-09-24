@@ -28,8 +28,12 @@ function update() {
       if (!data || !Array.isArray(data.envs)) return;
       el.status.textContent = 'live';
       state.zoneStats = data.zone_stats || {};
+      state.availableCheckpoints = data.checkpoints || state.availableCheckpoints;
+      state.lastState = data;
       renderMap(data);
-      renderZones(data);
+      if (!state.isEditingZone) {
+        renderZones(data);
+      }
       renderStats(data);
       updateInspectorSelect(data.envs);
     })

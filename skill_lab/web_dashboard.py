@@ -136,6 +136,7 @@ class BrowserMapDashboard:
             "envs": [],
             "zones": [],
             "zone_stats": {},
+            "checkpoints": list(_KNOWN_CHECKPOINTS),
             "lava_zones": [],  # legacy alias, populated from zones for backward compat
             "map_width": self.map_width,
             "map_height": self.map_height,
@@ -199,17 +200,41 @@ class BrowserMapDashboard:
         """Copy zone manager state into ``self.state`` (including legacy alias)."""
         if self._zone_manager is None:
             return
+        # Collect checkpoint names *before* acquiring the lock to avoid a
+        # re-entrant Lock deadlock (_current_env also uses self._lock).
+        checkpoint_names = self._get_checkpoint_names()
         with self._lock:
             self.state["zones"] = self._zone_manager.list_zones()
             self.state["zone_stats"] = self._zone_manager.get_stats()
             # Legacy alias for frontend backward-compat
             lava_cells = [
-                [c, r] if isinstance(c, (int, float)) and not isinstance(c, list)
-                else c
+                [c[0], c[1]] if isinstance(c, list) else [c[0], c[1]]
                 for z in self.state["zones"] if z.get("type") == "lava"
                 for c in z.get("cells", [])
             ]
             self.state["lava_zones"] = lava_cells
+            self.state["checkpoints"] = checkpoint_names
+
+    def _get_checkpoint_names(self) -> list[str]:
+        """Return checkpoint names from the connected env's MilestoneTracker."""
+        if self._zone_manager is None:
+            return _KNOWN_CHECKPOINTS
+        try:
+            from skill_lab.zones import KNOWN_CHECKPOINTS as _kc
+        except ImportError:
+            _kc = _KNOWN_CHECKPOINTS
+        env = self._current_env()
+        if env is not None and hasattr(env, "envs") and len(env.envs) > 0:
+            try:
+                obj = env.envs[0]
+                ct = getattr(obj, "checkpoint_tracker", None)
+                if ct is not None:
+                    names = getattr(ct, "checkpoint_names", None)
+                    if names:
+                        return list(names)
+            except Exception:
+                pass
+        return list(_kc)
 
     def _save_lava_zones(self) -> None:
         """Persist zones via the ZoneManager (writes zones.json)."""
