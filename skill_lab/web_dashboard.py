@@ -1340,8 +1340,10 @@ class BrowserMapDashboard:
                     zones = payload["zones"]
                     cells = [[int(z["x"]), int(z["y"])] for z in zones]
                     zone_type = payload.get("zone_type", "lava")
+                    zone_id = payload.get("zone_id")
                     if dashboard._zone_manager is not None:
-                        zone_id = dashboard._ensure_zone(zone_type)
+                        if not zone_id:
+                            zone_id = dashboard._ensure_zone(zone_type)
                         if zone_id:
                             dashboard._zone_manager.batch_toggle_cells(cells, zone_id)
                             dashboard._sync_zones_to_state()
@@ -1352,9 +1354,11 @@ class BrowserMapDashboard:
                     x = int(payload.get("x", 0))
                     y = int(payload.get("y", 0))
                     zone_type = payload.get("zone_type", "lava")
-                    print(f"[ZONE DEBUG] Toggle request: x={x}, y={y}, type={zone_type}", flush=True)
+                    zone_id = payload.get("zone_id")
+                    print(f"[ZONE DEBUG] Toggle request: x={x}, y={y}, type={zone_type}, zone_id={zone_id}", flush=True)
                     if dashboard._zone_manager is not None:
-                        zone_id = dashboard._ensure_zone(zone_type)
+                        if not zone_id:
+                            zone_id = dashboard._ensure_zone(zone_type)
                         if zone_id:
                             dashboard._zone_manager.batch_toggle_cells([[x, y]], zone_id)
                             dashboard._sync_zones_to_state()

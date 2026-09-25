@@ -253,9 +253,6 @@ function selectZone(zoneId, zones) {
   state.selectedZoneId = zoneId;
   const type = (zones.find(z => z.id === zoneId) || {}).type || 'lava';
   state.zonePlacingType = type;
-  if (el.zoneTypeSelect) {
-    el.zoneTypeSelect.value = type;
-  }
   renderZones(state.lastState);
 }
 
@@ -294,6 +291,10 @@ function updateZoneDetail(zoneId, zones) {
   if (el.zoneDetailCells) el.zoneDetailCells.textContent = String((zone.cells || []).length);
   if (el.zoneDetailColor) {
     el.zoneDetailColor.value = (zone.color || (zone.type === 'action_mask' ? '#4a9eff' : '#ff6b6b')).replace('#', '');
+  }
+  if (el.zoneDetailOpacity) {
+    var defaultOpacity = zone.type === 'action_mask' ? 0.25 : 0.5;
+    el.zoneDetailOpacity.value = zone.opacity != null ? zone.opacity : defaultOpacity;
   }
   _populateActionOptions(el.zoneDetailAction, Array.isArray(zone.action) ? zone.action : (zone.action ? [zone.action] : []));
   _populateMilestoneOptions(el.zoneDetailActivateOn, zone.activate_on);
@@ -403,7 +404,9 @@ function updateLavaToggle() {
   state.lavaPlacementMode = !state.lavaPlacementMode;
   el.toggleLavaBtn.classList.toggle('toggle-active', state.lavaPlacementMode);
   if (state.lavaPlacementMode) {
-    const modeText = state.zonePlacingType === 'action_mask' ? 'ACTION MASK' : 'ZONE';
+    var zone = state.lastState.zones ? state.lastState.zones.find(function(z) { return z.id === state.selectedZoneId; }) : null;
+    var type = (zone && zone.type) || state.zonePlacingType || 'lava';
+    var modeText = type === 'action_mask' ? 'ACTION MASK' : 'ZONE';
     el.lavaModeStatus.textContent = modeText + ' PLACEMENT MODE - click to place/remove zones';
     el.mapSvg.style.cursor = 'crosshair';
   } else {
@@ -512,7 +515,7 @@ function initMap() {
         fetch('/api/zones', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ zones: zones, zone_type: state.zonePlacingType })
+          body: JSON.stringify({ zones: zones, zone_type: state.zonePlacingType, zone_id: state.selectedZoneId })
         }).then(function(r) { return r.json(); }).then(function(data) {
         }).catch(function() {});
       } else {
@@ -527,7 +530,7 @@ function initMap() {
         fetch('/api/zones', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ x: tileX, y: tileY, zone_type: state.zonePlacingType })
+          body: JSON.stringify({ x: tileX, y: tileY, zone_type: state.zonePlacingType, zone_id: state.selectedZoneId })
         }).then(function(r) { return r.json(); }).then(function() {
         }).catch(function() {});
       }
@@ -564,11 +567,6 @@ function initMap() {
   el.zoomOutBtn.addEventListener('click', function() { setZoom(0.85); });
   el.zoomResetBtn.addEventListener('click', function() { resetZoom(); });
   el.toggleLavaBtn.addEventListener('click', updateLavaToggle);
-  if (el.zoneTypeSelect) {
-    el.zoneTypeSelect.addEventListener('change', function() {
-      state.zonePlacingType = this.value;
-    });
-  }
   if (el.zoneVisibilityToggle) {
     el.zoneVisibilityToggle.addEventListener('click', function() {
       const anyVisible = state.zoneVisibility.lava || state.zoneVisibility.action_mask;
@@ -615,6 +613,11 @@ function initMap() {
       saveZoneConfig('color', '#' + this.value);
     });
   }
+  if (el.zoneDetailOpacity) {
+    el.zoneDetailOpacity.addEventListener('input', function() {
+      saveZoneConfig('opacity', parseFloat(this.value));
+    });
+  }
   if (el.zoneDetailAction) {
     el.zoneDetailAction.addEventListener('change', function() {
       const selected = Array.from(this.selectedOptions).map(function(o) { return o.value; });
@@ -659,16 +662,19 @@ function initMap() {
   });
 
   if (state.lavaPlacementMode) {
-    const modeText = state.zonePlacingType === 'action_mask' ? 'ACTION MASK' : 'ZONE';
-    el.lavaModeStatus.textContent = modeText + ' PLACEMENT MODE - click to place/remove zones';
+    var _zone = state.lastState.zones ? state.lastState.zones.find(function(z) { return z.id === state.selectedZoneId; }) : null;
+    var _type = (_zone && _zone.type) || state.zonePlacingType || 'lava';
+    var _modeText = _type === 'action_mask' ? 'ACTION MASK' : 'ZONE';
+    el.lavaModeStatus.textContent = _modeText + ' PLACEMENT MODE - click to place/remove zones';
     el.mapSvg.style.cursor = 'crosshair';
   } else {
-    // Smooth default zoom toward the center of the map
+    // Smooth default zoom toward the focus point (1040, 3376)
     setTimeout(function() {
-      state.zoomScale = 2.0;
-      state.panX = svg_w / 2 * (1 - 1/2);
-      state.panY = svg_h / 2 * (1 - 1/2);
-      applyTransform();
+       state.zoomScale = 3.0;
+       var focusX = 1040, focusY = 3376;
+       state.panX = svg_w / 2 - state.zoomScale * focusX;
+       state.panY = svg_h / 2 - state.zoomScale * focusY;
+       applyTransform();
     }, 100);
   }
 }

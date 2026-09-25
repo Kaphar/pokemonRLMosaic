@@ -700,8 +700,9 @@ class SkillLabWrapper(gymnasium.Wrapper):
                 if self.checkpoint_tracker
                 else None
             )
+            in_battle = self.game_state.in_battle()
             self._current_masked_actions = self.zone_manager.tick(
-                int(px), int(py), achieved
+                int(px), int(py), achieved, in_battle=in_battle
             )
         except Exception as _e:
             import traceback as _tb
@@ -861,6 +862,7 @@ class SkillLabWrapper(gymnasium.Wrapper):
         prior_trainer_wins = self.env.unwrapped.trainer_wins
         prior_wild_wins = self.env.unwrapped.wild_wins
         prior_fled_battle = self.env.unwrapped.fled_battle
+        prior_fight_count = self.env.unwrapped.fight_count
 
         # Execute in real environment
         observation, reward, terminated, truncated, info = self.env.step(action)
@@ -868,6 +870,7 @@ class SkillLabWrapper(gymnasium.Wrapper):
         cur_trainer_wins = self.env.unwrapped.trainer_wins
         cur_wild_wins = self.env.unwrapped.wild_wins
         cur_fled_battle = self.env.unwrapped.fled_battle
+        cur_fight_count = self.env.unwrapped.fight_count
         if cur_trainer_wins > prior_trainer_wins:
             trainer_reward = self.effective_rewards.get("combat_trainer", 5.0)
             trainer_reward = self._diminishing_returns("combat_trainer", trainer_reward)
@@ -1146,6 +1149,7 @@ class SkillLabWrapper(gymnasium.Wrapper):
         self._prior_level_sum = 0
         self._breadcrumbs_redirected = False
         self.steps_in_action_mask_zone = 0
+        self.zone_manager.reset_stats()
         if self.checkpoint_tracker is not None:
             self.checkpoint_tracker.reset(self.game_state, self._colored_env_label())
         if self.breadcrumb_tracker is not None:

@@ -435,6 +435,10 @@ function renderInspectorDetails(data) {
   const zoneCount = zoneStats.zone_count || 0;
   const stepsInMask = zoneStats.steps_in_action_mask_zone || 0;
   const zoneTypes = Array.isArray(zoneStats.zone_types) ? zoneStats.zone_types : [];
+  const zoneStepCounts = zoneStats.zone_step_counts || {};
+  const zoneLabels = {};
+  const lastZones = state.lastState && Array.isArray(state.lastState.zones) ? state.lastState.zones : [];
+  lastZones.forEach(function(z) { zoneLabels[z.id] = z.label || z.id; });
   html += '<div class="inspector-section">';
   html += '<h3>Zones</h3>';
   html += '<table class="inspector-table">';
@@ -442,6 +446,16 @@ function renderInspectorDetails(data) {
   html += '<tr><td class="inspect-label">Types</td><td>' + (zoneTypes.join(', ') || '-') + '</td></tr>';
   html += '<tr><td class="inspect-label">Steps in Mask Zone</td><td>' + stepsInMask + '</td></tr>';
   html += '</table>';
+  var stepCountKeys = Object.keys(zoneStepCounts);
+  if (stepCountKeys.length > 0) {
+    html += '<table class="inspector-table" style="margin-top:6px;">';
+    html += '<thead><tr><th>Zone</th><th>Steps (not in combat)</th></tr></thead>';
+    html += '<tbody>';
+    stepCountKeys.forEach(function(zoneId) {
+      html += '<tr><td>' + (zoneLabels[zoneId] || zoneId) + '</td><td>' + zoneStepCounts[zoneId] + '</td></tr>';
+    });
+    html += '</tbody></table>';
+  }
   html += '</div>';
 
   // ---- Bag ----

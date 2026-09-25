@@ -50,6 +50,7 @@ ZONE_TYPE_OPACITIES: dict[str, float] = {
 KNOWN_CHECKPOINTS = [
     "Got Pokedex",
     "Party Has Starter",
+    "Fought Rival",
     "Won Rival Battle",
     "Got Oak's Parcel",
     "ITEM: Oak Parcel",
@@ -79,6 +80,7 @@ class ZoneManager:
         self.steps_in_action_mask_zone: int = 0
         self._masked_actions: list[str] = []
         self._last_file_mtime: float | None = None
+        self._zone_step_counts: dict[str, int] = {}
 
     # ------------------------------------------------------------------ #
     # Loading / saving
@@ -122,6 +124,7 @@ class ZoneManager:
                     "action": zone.get("action"),
                     "activate_on": zone.get("activate_on"),
                     "deactivate_on": zone.get("deactivate_on"),
+                    "mask_rules": zone.get("mask_rules", []),
                 }
             )
         return normalized
@@ -141,6 +144,7 @@ class ZoneManager:
             "action": kwargs.get("action"),
             "activate_on": kwargs.get("activate_on"),
             "deactivate_on": kwargs.get("deactivate_on"),
+            "mask_rules": kwargs.get("mask_rules", []),
         }
 
     def _save_zones(self) -> None:
@@ -239,7 +243,15 @@ class ZoneManager:
     def _is_zone_active(
         zone: dict[str, Any], achieved_checkpoints: set[str]
     ) -> bool:
-        """Decide whether *zone* is currently active."""
+        """Decide whether *zone* is currently active.
+
+        Zones with ``mask_rules`` are always considered active — individual
+        rules carry their own ``activate_on`` checkpoint and are evaluated
+        in :meth:`get_masked_actions`.  Zones without ``mask_rules`` use
+        the legacy single ``activate_on`` / ``deactivate_on`` fields.
+        """
+        if zone.get("mask_rules"):
+            return True
         activate_on = zone.get("activate_on")
         deactivate_on = zone.get("deactivate_on")
         if activate_on is not None and activate_on not in achieved_checkpoints:
@@ -260,14 +272,38 @@ class ZoneManager:
         py: int,
         achieved_checkpoints: set[str] | None = None,
     ) -> list[str]:
-        """Return action names masked at *(px, py)* by active action_mask zones."""
+        """Return action names masked at *(px, py)* by active action_mask zones.
+
+        Supports two zone configurations:
+
+        * **mask_rules** (preferred) — a list of ``{"action": "Down",
+          "activate_on": "Fought Rival"}`` rules.  Each rule independently
+          checks its ``activate_on`` checkpoint, so a single zone can mask
+          different actions at different milestones.
+        * **action + activate_on** (legacy) — a single action string and a
+          single activation checkpoint on the zone itself.
+        """
         if achieved_checkpoints is None:
             achieved_checkpoints = set()
         masked: list[str] = []
         for zone in self.get_active_zones(achieved_checkpoints):
-            if zone["type"] == "action_mask" and zone.get("action"):
-                if self._position_in_cells(px, py, zone["cells"]):
-                    masked.append(zone["action"])
+            if zone["type"] != "action_mask":
+                continue
+            if not self._position_in_cells(px, py, zone["cells"]):
+                continue
+            mask_rules = zone.get("mask_rules")
+            if mask_rules:
+                for rule in mask_rules:
+                    action = rule.get("action")
+                    if not action:
+                        continue
+                    activate_on = rule.get("activate_on")
+                    if activate_on is not None and activate_on not in achieved_checkpoints:
+                        continue
+                    if action not in masked:
+                        masked.append(action)
+            elif zone.get("action"):
+                masked.append(zone["action"])
         return masked
 
     @property
@@ -280,16 +316,26 @@ class ZoneManager:
         px: int,
         py: int,
         achieved_checkpoints: set[str] | None = None,
+        in_battle: bool = False,
     ) -> list[str]:
         """Called once per env step.
 
         Returns the list of masked action names (empty list if not in a zone).
         When non-empty, ``steps_in_action_mask_zone`` is incremented.
+
+        When ``in_battle`` is *False*, per-zone step counts are accumulated
+        so the inspector can display how much time the agent spent in each
+        zone outside of combat.
         """
         masked = self.get_masked_actions(px, py, achieved_checkpoints)
         self._masked_actions = masked
         if masked:
             self.steps_in_action_mask_zone += 1
+        if not in_battle:
+            for zone in self.zones:
+                if zone.get("cells") and self._position_in_cells(px, py, zone["cells"]):
+                    zone_id = zone.get("id", "unknown")
+                    self._zone_step_counts[zone_id] = self._zone_step_counts.get(zone_id, 0) + 1
         return masked
 
     # ------------------------------------------------------------------ #
@@ -308,10 +354,12 @@ class ZoneManager:
             "steps_in_action_mask_zone": self.steps_in_action_mask_zone,
             "zone_count": len(self.zones),
             "zone_types": [z["type"] for z in self.zones],
+            "zone_step_counts": dict(self._zone_step_counts),
         }
 
     def reset_stats(self) -> None:
         self.steps_in_action_mask_zone = 0
+        self._zone_step_counts.clear()
 
     def reload(self) -> bool:
         """Reload zones from disk (picks up edits made via the web UI).

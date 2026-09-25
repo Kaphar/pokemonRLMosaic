@@ -46,6 +46,12 @@
       "description": "Party contains at least one Pokemon"
     },
     {
+      "name": "Fought Rival",
+      "stat_check": {"attr": "fight_count", "op": ">=", "value": 1},
+      "reward_baseline": 10.0,
+      "description": "Enter the initial rival battle with Professor Oak's lab"
+    },
+    {
       "name": "Won Rival Battle",
       "stat_check": {"attr": "trainer_wins", "op": ">=", "value": 1},
       "reward_baseline": 15.0,

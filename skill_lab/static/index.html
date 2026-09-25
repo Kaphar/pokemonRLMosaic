@@ -35,10 +35,6 @@
               <button id="zoom-out" title="Zoom out (-)">-</button>
             </div>
             <button id="toggle-lava" title="Toggle zone placement mode (L)" class="toggle-active">🔥</button>
-            <select id="zone-type-select" title="Zone type for new placements">
-              <option value="lava">Lava</option>
-              <option value="action_mask">Action Mask</option>
-            </select>
             <button id="zone-visibility-toggle" title="Toggle zone layer visibility" class="toggle-active">👁</button>
           </div>
           <div class="status-overlay" id="status">waiting…</div>
@@ -63,6 +59,10 @@
               <div class="zone-detail-row">
                 <label>Color</label>
                 <input type="color" id="zone-detail-color" />
+              </div>
+              <div class="zone-detail-row">
+                <label>Opacity</label>
+                <input type="range" id="zone-detail-opacity" min="0" max="1" step="0.05" value="0.5" />
               </div>
               <div class="zone-detail-row">
                 <label>Masks Actions (Ctrl/Cmd+click for multi-select)</label>

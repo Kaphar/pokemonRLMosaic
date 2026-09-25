@@ -174,6 +174,7 @@ class RedGymEnv(Env):
         self.trainer_wins = 0
         self.wild_wins = 0
         self.fled_battle = 0
+        self.fight_count = 0
         self.in_battle = False
         self.battle_type = 0
         self._last_enemy_hp = None
@@ -358,6 +359,7 @@ class RedGymEnv(Env):
                 "trainer_wins": self.trainer_wins,
                 "wild_wins": self.wild_wins,
                 "fled_battle": self.fled_battle,
+                "fight_count": self.fight_count,
                 "enemy_damage_dealt": self._enemy_damage_dealt,
                 "game_minutes": game_minutes,
                 "wall_collisions": self.wall_collisions,
@@ -722,6 +724,7 @@ class RedGymEnv(Env):
             self.in_battle = True
             self.battle_type = cur_battle_type
             self._enemy_defeated = False
+            self.fight_count += 1
             # Initialize enemy HP tracking when entering battle
             enemy_hp = self.read_hp(0xCFE6)
             enemy_max_hp = self.read_hp(0xCFF4)

@@ -43,8 +43,8 @@ body {
 .tab-bar .tab-btn.active { background: var(--panel); color: var(--accent); border-bottom: 2px solid var(--accent); }
 
 .tab-content {
-  /* padding: 18px; */
-  height: calc(100vh - 60px);
+  padding: 0px;
+  /* height: calc(100vh - 60px); */
 }
 .tab-pane { display: none; height: 100%; }
 .tab-pane.active { display: block; }
@@ -87,8 +87,6 @@ body {
 .map-controls button:hover { background: var(--accent); color: var(--bg); border-color: var(--accent); }
 .map-controls button.toggle-active { background: var(--accent); color: var(--bg); }
 .map-controls .zoom-h { display: flex; gap: 6px; }
-.map-controls select#zone-type-select { width: 36px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.15); background: rgba(15,22,34,0.85); color: var(--text); font-size: 0.8rem; padding: 4px; cursor: pointer; }
-.map-controls select#zone-type-select:focus { outline: none; border-color: var(--accent); }
 
 .status-overlay {
   position: absolute;
@@ -107,7 +105,7 @@ body {
 .status-overlay#status { right: 14px; left: auto; overflow-x: auto; }
 .status-overlay#lava-mode-status { bottom: 44px; left: 14px; background: rgba(255, 107, 107, 0.85); }
 
-.zone-panel { position: absolute; bottom: 14px; right: 14px; width: 280px; max-height: 40vh; background: rgba(15, 22, 34, 0.92); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 10px; display: flex; flex-direction: column; z-index: 10; }
+.zone-panel { position: absolute; bottom: 14px; right: 14px; width: 280px; max-height: 66vh; background: rgba(15, 22, 34, 0.92); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 10px; display: flex; flex-direction: column; z-index: 10; }
 .zone-panel-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); font-size: 0.85rem; font-weight: 600; color: var(--text); }
 .zone-panel-header span { color: var(--accent); }
 .zone-list { flex: 1; overflow-y: auto; padding: 4px; }
@@ -123,7 +121,7 @@ body {
 .zone-btn-del { width: 100%; padding: 6px; margin-top: 4px; border-radius: 6px; border: 1px solid rgba(255, 107, 107, 0.4); background: rgba(255, 107, 107, 0.1); color: var(--danger); font-size: 0.75rem; cursor: pointer; }
 .zone-btn-del:hover { background: rgba(255, 107, 107, 0.25); }
 .zone-detail { border-top: 1px solid rgba(255, 255, 255, 0.08); max-height: 0; overflow: hidden; transition: max-height 0.2s ease; }
-.zone-detail.expanded { max-height: 260px; }
+.zone-detail.expanded { max-height: 500px; }
 .zone-detail-hidden { display: none; }
 .zone-detail.expanded .zone-detail-hidden { display: block; padding: 10px; }
 .zone-detail-row { display: flex; flex-direction: column; margin-bottom: 6px; }

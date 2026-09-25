@@ -302,7 +302,8 @@
       "opacity": 0.4,
       "action": null,
       "activate_on": null,
-      "deactivate_on": null
+      "deactivate_on": null,
+      "mask_rules": []
     },
     {
       "id": "zone_cba5cf0c",
@@ -2698,10 +2699,6 @@
         ],
         [
           1072,
-          2928
-        ],
-        [
-          1072,
           2944
         ],
         [
@@ -4082,10 +4079,6 @@
         ],
         [
           1264,
-          2992
-        ],
-        [
-          1552,
           2992
         ]
       ],
@@ -4094,18 +4087,166 @@
       "opacity": 0.25,
       "action": null,
       "activate_on": null,
-      "deactivate_on": null
+      "deactivate_on": null,
+      "mask_rules": [
+        {
+          "action": "Down",
+          "activate_on": "Fought Rival"
+        },
+        {
+          "action": "Up",
+          "activate_on": "ITEM: Oak Parcel"
+        }
+      ]
     },
     {
       "id": "zone_89891884",
       "type": "action_mask",
-      "cells": [],
+      "cells": [
+        [
+          1552,
+          2992
+        ]
+      ],
       "label": "Action_mask",
-      "color": "##34ff1a",
+      "color": "##ff0000",
+      "opacity": 0.6,
+      "action": [
+        "A",
+        "B"
+      ],
+      "activate_on": "Got Pokedex",
+      "deactivate_on": null,
+      "mask_rules": []
+    },
+    {
+      "id": "zone_f09fbd06",
+      "type": "action_mask",
+      "cells": [
+        [
+          752,
+          2816
+        ],
+        [
+          768,
+          2816
+        ],
+        [
+          784,
+          2816
+        ],
+        [
+          800,
+          2816
+        ],
+        [
+          816,
+          2816
+        ],
+        [
+          832,
+          2816
+        ],
+        [
+          848,
+          2816
+        ],
+        [
+          864,
+          2816
+        ],
+        [
+          880,
+          2816
+        ],
+        [
+          896,
+          2816
+        ],
+        [
+          912,
+          2816
+        ],
+        [
+          928,
+          2816
+        ],
+        [
+          944,
+          2816
+        ],
+        [
+          960,
+          2816
+        ],
+        [
+          976,
+          2816
+        ],
+        [
+          992,
+          2816
+        ],
+        [
+          1008,
+          2816
+        ],
+        [
+          1024,
+          2816
+        ],
+        [
+          1040,
+          2816
+        ],
+        [
+          1056,
+          2816
+        ],
+        [
+          1072,
+          2816
+        ],
+        [
+          1088,
+          2816
+        ],
+        [
+          1104,
+          2816
+        ],
+        [
+          1120,
+          2816
+        ],
+        [
+          1136,
+          2816
+        ],
+        [
+          1216,
+          2816
+        ],
+        [
+          1232,
+          2816
+        ],
+        [
+          1248,
+          2816
+        ],
+        [
+          1264,
+          2816
+        ]
+      ],
+      "label": "Action_mask",
+      "color": "##0b08b4",
       "opacity": 0.25,
-      "action": null,
-      "activate_on": null,
-      "deactivate_on": null
+      "action": "Up",
+      "activate_on": "Fought Rival",
+      "deactivate_on": "Oak Got Parcel",
+      "mask_rules": []
     }
   ]
 }
