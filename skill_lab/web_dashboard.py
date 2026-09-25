@@ -637,9 +637,25 @@ class BrowserMapDashboard:
         most_recent = max(zip_files, key=lambda p: p.stat().st_mtime)
         return str(most_recent)
 
+    def toggle_agent_enabled(self) -> dict[str, Any]:
+        """Toggle agent_enabled.txt in the project root for interactive mode."""
+        agent_file = PROJECT_ROOT / "agent_enabled.txt"
+        if agent_file.exists():
+            agent_file.unlink()
+            return {"ok": True, "agent_enabled": False}
+        else:
+            agent_file.write_text("yes\n", encoding="utf-8")
+            return {"ok": True, "agent_enabled": True}
+
+    def get_agent_status(self) -> dict[str, Any]:
+        """Check whether agent_enabled.txt exists."""
+        agent_file = PROJECT_ROOT / "agent_enabled.txt"
+        return {"ok": True, "agent_enabled": agent_file.exists()}
+
     def launch_dev_emulator(
         self, state_path: str, inputs_path: str, *,
         interactive: bool = False, model_path: str | None = None,
+        replay: bool = True,
     ) -> dict[str, Any]:
         """Launch ``emulator_with_debug.py`` in direct mode with the given state + replay."""
         import subprocess
@@ -677,6 +693,8 @@ class BrowserMapDashboard:
             "--replay", inputs_path,
             "--replay-speed", "auto",
         ]
+        if not replay:
+            cmd.append("--no-replay")
         if interactive:
             cmd.append("--interactive")
             if model_path:
@@ -1389,6 +1407,16 @@ class BrowserMapDashboard:
                     self.end_headers()
                     self.wfile.write(data)
                     return
+                if parsed.path == "/api/agent-status":
+                    result = dashboard.get_agent_status()
+                    data = json.dumps(result).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("Content-Length", str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+                    return
                 if parsed.path == "/api/map-coords":
                     query = parse_qs(parsed.query)
                     try:
@@ -1515,11 +1543,22 @@ class BrowserMapDashboard:
                     state_path = payload.get("state_path", "")
                     inputs_path = payload.get("inputs_path", "")
                     interactive = bool(payload.get("interactive", False))
+                    replay = bool(payload.get("replay", True))
                     model_path = payload.get("model_path")
                     result = dashboard.launch_dev_emulator(
                         state_path, inputs_path,
                         interactive=interactive, model_path=model_path,
+                        replay=replay,
                     )
+                    resp_data = json.dumps(result).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(resp_data)))
+                    self.end_headers()
+                    self.wfile.write(resp_data)
+                    return
+                if parsed.path == "/api/toggle-agent":
+                    result = dashboard.toggle_agent_enabled()
                     resp_data = json.dumps(result).encode("utf-8")
                     self.send_response(200)
                     self.send_header("Content-Type", "application/json")

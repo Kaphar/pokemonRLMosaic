@@ -71,6 +71,7 @@ class ObservationInspector:
                 *address_range(0xC026, 0xCC2F),
             ]
         )
+        self._model_enabled = True
 
     def show(self) -> None:
         if self.visible and self._window_created and self._window_alive():
@@ -406,6 +407,17 @@ class ObservationInspector:
             ry += 16
             if ry > 160:
                 break
+
+        menu_y = panel_h - 70
+        cv2.rectangle(panel, (left_panel_w, menu_y - 6), (left_panel_w + right_panel_w - 1, panel_h - 4), (50, 50, 55), 1)
+        cv2.putText(panel, "Controls: F1-F5 & game keys via the Tkinter Control window. Q=quit inspector. S=save L=load R=reset W=watch F1=model F2=save F3=load F4=reset F5=watch",
+                    (left_panel_w + 8, menu_y + 16), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (190, 210, 220), 1)
+        model_str = "ON" if self._model_enabled else "OFF"
+        model_color = (0, 255, 0) if self._model_enabled else (0, 100, 255)
+        cv2.putText(panel, f"Model: {model_str}", (left_panel_w + 8, menu_y + 36),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, model_color, 1)
+        cv2.putText(panel, f"Frame: {steps}", (left_panel_w + 180, menu_y + 36),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (150, 150, 150), 1)
 
         screen_canvas = np.full((panel_h, 320, 3), 30, dtype=np.uint8)
         screen_canvas[:screen.shape[0], :screen.shape[1]] = screen

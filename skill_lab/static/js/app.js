@@ -10,6 +10,7 @@ import {
   updateInspectorScreen,
   selectInspectorEnv,
   fetchControlState,
+  fetchAgentStatus,
 } from './inspector_tab.js';
 import { initConfig, initControlBindings } from './config_tab.js';
 
@@ -80,6 +81,7 @@ function initTabs() {
         updateInspectorScreen();
         fetchInspectorData();
         fetchControlState();
+        fetchAgentStatus();
       }
     });
   });
@@ -151,6 +153,7 @@ function startInspectorPolling() {
     if (isInspectorTabActive()) {
       updateInspectorScreen();
       fetchInspectorData();
+      fetchAgentStatus();
     }
   }, 1000);
 }

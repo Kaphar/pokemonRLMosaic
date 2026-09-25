@@ -10,6 +10,7 @@ import re
 import sys
 import time
 import uuid
+from contextlib import suppress
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog
 from datetime import datetime
@@ -124,6 +125,42 @@ ACTION_EVENTS = {
     7: (WindowEvent.PRESS_BUTTON_SELECT, WindowEvent.RELEASE_BUTTON_SELECT),
 }
 
+_VK_TO_TOKEN = {
+    0x26: "up",
+    0x28: "down",
+    0x25: "left",
+    0x27: "right",
+    0x70: "f1",
+    0x71: "f2",
+    0x72: "f3",
+    0x73: "f4",
+    0x74: "f5",
+    0x0D: "return",
+    0x09: "tab",
+    0x20: "space",
+    0x21: "pageup",
+    0x22: "pagedown",
+}
+
+
+def _cv2_key_to_token(key: int) -> str | None:
+    """Convert an OpenCV ``waitKey`` return value to an SDL-style token string.
+
+    Regular ASCII keys (0-255) are mapped to their lowercase character.
+    Special keys (arrows, F-keys) are encoded differently across OpenCV
+    versions/platforms on Windows. We check all byte positions of the
+    return value to find a matching Windows virtual-key code.
+    """
+    if key <= 0:
+        return None
+    if key < 256:
+        return chr(key).lower()
+    for shift in (0, 8, 16, 24):
+        vk = (key >> shift) & 0xFF
+        if vk in _VK_TO_TOKEN:
+            return _VK_TO_TOKEN[vk]
+    return None
+
 # SELECT events are always masked during replay: pressing SELECT does nothing.
 # This matches the ``disable_select`` directive used during training.
 SELECT_EVENTS = frozenset({
@@ -197,6 +234,8 @@ class DebugLauncher:
         self.legacy_replay_var = tk.BooleanVar(value=False)
         self.use_sdl_gamepad_var = tk.BooleanVar(value=False)
         self.debug_var = tk.BooleanVar(value=False)
+        self.interactive_var = tk.BooleanVar(value=False)
+        self.interactive_model_var = tk.StringVar(value="")
         self.controls = load_controls()
         self._build_ui()
 
@@ -264,6 +303,9 @@ class DebugLauncher:
                 "Enable \"Deterministic headless replay\" to run PyBoy with window=null so SDL event"
                 " processing never interferes with emulation — this guarantees identical RNG and DVs"
                 " to the original training run."
+                " Enable \"Interactive mode\" to load a PPO model checkpoint and toggle model control"
+                " via F1. Keyboard controls (arrows/WASD, Z/X for A/B, Enter/Start, Tab/Select) work"
+                " through the Observation inspector window when it has focus."
             ),
             fg="gray",
             wraplength=600,
@@ -290,8 +332,19 @@ class DebugLauncher:
             variable=self.debug_var,
         ).grid(row=11, column=0, columnspan=3, sticky="w", pady=(0, 4))
 
+        tk.Checkbutton(
+            frame, text="Interactive mode (F1=toggle model, F2/F3=save/load, F4=reset, F5=watch, WASD/arrow=move)",
+            variable=self.interactive_var,
+        ).grid(row=12, column=0, columnspan=3, sticky="w", pady=(0, 4))
+
+        model_frame = tk.Frame(frame)
+        model_frame.grid(row=13, column=0, columnspan=3, sticky="w", pady=(0, 8))
+        tk.Label(model_frame, text="Model checkpoint (.zip):").pack(side=tk.LEFT, padx=(0, 8))
+        tk.Entry(model_frame, textvariable=self.interactive_model_var, width=48).pack(side=tk.LEFT, padx=(0, 8))
+        tk.Button(model_frame, text="Browse...", command=self._choose_model).pack(side=tk.LEFT)
+
         button_row = tk.Frame(frame)
-        button_row.grid(row=12, column=0, columnspan=3, pady=(4, 0))
+        button_row.grid(row=14, column=0, columnspan=3, pady=(4, 0))
         tk.Button(button_row, text="Configure controls...", command=self._configure_controls).pack(side=tk.LEFT, padx=4)
         tk.Button(button_row, text="Start", width=16, command=self._start).pack(side=tk.LEFT, padx=4)
 
@@ -322,6 +375,14 @@ class DebugLauncher:
         )
         if path:
             self.replay_path_var.set(path)
+
+    def _choose_model(self) -> None:
+        path = filedialog.askopenfilename(
+            title="Choose model checkpoint", initialdir=str(PROJECT_ROOT),
+            filetypes=[("PPO checkpoints", "*.zip"), ("All files", "*.*")],
+        )
+        if path:
+            self.interactive_model_var.set(path)
 
     def _update_state_label(self) -> None:
         if self.state_var.get() == "none":
@@ -358,6 +419,8 @@ class DebugLauncher:
             use_plugin_replay=not self.legacy_replay_var.get(),
             use_sdl_gamepad=self.use_sdl_gamepad_var.get(),
             debug_mode=self.debug_var.get(),
+            interactive=self.interactive_var.get(),
+            interactive_model_path=self.interactive_model_var.get() or None,
         )
 
 
@@ -466,6 +529,142 @@ class RuntimeMenu:
             return
         self.root.update_idletasks()
         self.root.update()
+
+
+class ControlWindow(tk.Toplevel):
+    """Tkinter control window with F1-F5 shortcuts and game control buttons.
+
+    Tkinter reliably detects function keys and all keyboard input on Windows,
+    unlike OpenCV's ``waitKey`` which may not return useful codes for F-keys
+    on some configurations. This window provides both visual buttons (clickable)
+    and keyboard bindings (when the window has focus).
+    """
+
+    _TK_KEYSYM_TO_TOKEN = {
+        "f1": "f1", "f2": "f2", "f3": "f3", "f4": "f4", "f5": "f5",
+        "up": "up", "down": "down", "left": "left", "right": "right",
+        "z": "z", "x": "x", "return": "return", "tab": "tab",
+        "space": "space", "p": "p", "prior": "pageup", "next": "pagedown",
+    }
+
+    def __init__(
+        self,
+        parent: tk.Tk,
+        pyboy: PyBoy,
+        special_keys: dict[str, callable],
+        input_controller: InputController | None,
+        quit_callback: callable | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.parent = parent
+        self.pyboy = pyboy
+        self.special_keys = special_keys
+        self.input_controller = input_controller
+        self.quit_callback = quit_callback
+        self._held_keys: set[str] = set()
+        self._closed = False
+
+        self.title("Pokemon Red Controls")
+        self.resizable(False, False)
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        self._build_ui()
+        self.bind("<KeyPress>", self._on_key_press)
+        self.bind("<KeyRelease>", self._on_key_release)
+        self._key_dialog_guard = False
+        self.focus_set()
+
+    def _build_ui(self) -> None:
+        main = tk.Frame(self, padx=8, pady=8)
+        main.pack()
+
+        fkey_frame = tk.LabelFrame(main, text="Shortcuts (F1-F5)", padx=8, pady=6)
+        fkey_frame.pack(fill=tk.X, pady=(0, 8))
+        btn_labels = [
+            ("F1", "Model Toggle"),
+            ("F2", "Save State"),
+            ("F3", "Load State"),
+            ("F4", "Reset ROM"),
+            ("F5", "Toggle Watch"),
+        ]
+        for i, (fkey, label) in enumerate(btn_labels):
+            f = self.special_keys.get(fkey.lower())
+            cmd = f if f else (lambda: None)
+            btn = tk.Button(fkey_frame, text=f"{fkey} {label}", width=14, command=cmd)
+            btn.pack(side=tk.LEFT, padx=2)
+            btn.focus_set = lambda *a: None
+
+        game_frame = tk.LabelFrame(main, text="Game Controls", padx=8, pady=6)
+        game_frame.pack(fill=tk.X)
+
+        d_pad = tk.Frame(game_frame)
+        d_pad.pack(side=tk.LEFT, padx=(0, 10))
+        for name, token, row, col in [
+            ("↑", "up", 0, 1), ("↓", "down", 2, 1),
+            ("←", "left", 1, 0), ("→", "right", 1, 2),
+        ]:
+            btn = tk.Button(d_pad, text=name, width=3, height=1,
+                            command=lambda t=token: self._tap_token(t))
+            btn.grid(row=row, column=col, padx=1, pady=1)
+
+        btn_frame = tk.Frame(game_frame)
+        btn_frame.pack(side=tk.LEFT, padx=10)
+        for name, token in [("A (Z)", "z"), ("B (X)", "x"),
+                            ("Start (Enter)", "return"), ("Select (Tab)", "tab")]:
+            btn = tk.Button(btn_frame, text=name, width=10,
+                            command=lambda t=token: self._tap_token(t))
+            btn.pack(side=tk.TOP, pady=1)
+
+        quit_btn = tk.Button(main, text="Quit (Q)", width=20, command=self._on_close)
+        quit_btn.pack(pady=(8, 0))
+
+    def _on_key_press(self, event: tk.Event) -> None:
+        if self._key_dialog_guard:
+            return
+        keysym = event.keysym.lower()
+        token = self._TK_KEYSYM_TO_TOKEN.get(keysym)
+        if token is None:
+            token = keysym if keysym else None
+        if token is None:
+            return
+        if token in self.special_keys:
+            self.special_keys[token]()
+        elif self.input_controller is not None:
+            self.input_controller._set_token(token, True)
+            self._held_keys.add(token)
+
+    def _on_key_release(self, event: tk.Event) -> None:
+        if self._key_dialog_guard:
+            return
+        keysym = event.keysym.lower()
+        token = self._TK_KEYSYM_TO_TOKEN.get(keysym)
+        if token is None:
+            token = keysym if keysym else None
+        if token is not None and self.input_controller is not None:
+            self.input_controller._set_token(token, False)
+            self._held_keys.discard(token)
+
+    def _tap_token(self, token: str) -> None:
+        if self.input_controller is not None:
+            self.input_controller._set_token(token, True)
+            self.input_controller._set_token(token, False)
+
+    def _on_close(self) -> None:
+        self._closed = True
+        if self.quit_callback is not None:
+            self.quit_callback()
+
+    def update(self) -> None:
+        if self._closed:
+            return
+        try:
+            self.lift()
+            if not self.parent.grab_current():
+                self.focus_set()
+            self.parent.update_idletasks()
+            self.parent.update()
+        except tk.TclError:
+            self._closed = True
 
 
 class WatchControlPanel(tk.Toplevel):
@@ -1305,7 +1504,13 @@ def verify_recording_frame_by_frame(
 
 
 class InputController:
-    def __init__(self, pyboy: PyBoy, controls: dict[str, dict[str, str]]) -> None:
+    def __init__(
+        self,
+        pyboy: PyBoy,
+        controls: dict[str, dict[str, str]],
+        *,
+        special_keys: dict[str, callable] | None = None,
+    ) -> None:
         self.pyboy = pyboy
         self.controls = controls
         self.active: set[str] = set()
@@ -1314,6 +1519,7 @@ class InputController:
         self.emulation_speed = 1.0
         self.joysticks = []
         self.controllers = []
+        self._special_keys = special_keys or {}
         initialize_sdl_input()
         for index in range(max(0, sdl2.SDL_NumJoysticks())):
             joystick = sdl2.SDL_JoystickOpen(index)
@@ -1393,6 +1599,9 @@ class InputController:
                 self.quit_requested = True
             elif event.type == sdl2.SDL_KEYDOWN and not event.key.repeat:
                 name = sdl2.SDL_GetKeyName(event.key.keysym.sym).decode("utf-8").lower()
+                if name in self._special_keys:
+                    self._special_keys[name]()
+                    continue
                 self._set_token(name, True)
             elif event.type == sdl2.SDL_KEYUP:
                 name = sdl2.SDL_GetKeyName(event.key.keysym.sym).decode("utf-8").lower()
@@ -1728,14 +1937,18 @@ def run_player(
     interactive: bool = False,
     interactive_model_path: str | None = None,
     interactive_env_index: int = 0,
+    no_replay: bool = False,
 ) -> None:
-    actions, replay_data = load_replay(replay_path)
-    replay_action_freq = int(replay_data.get("action_freq", ACTION_FREQ))
-    replay_noop_action = int(replay_data.get("noop_action", DEFAULT_NOOP_ACTION))
+    actions: list[int] = []
+    replay_data: dict[str, Any] = {}
+    if not no_replay and replay_path is not None:
+        actions, replay_data = load_replay(replay_path)
+    replay_action_freq = int(replay_data.get("action_freq", ACTION_FREQ)) if replay_data else 24
+    replay_noop_action = int(replay_data.get("noop_action", DEFAULT_NOOP_ACTION)) if replay_data else DEFAULT_NOOP_ACTION
     if replay_action_freq < 9:
         raise ValueError(f"Replay action frequency must be at least 9, got {replay_action_freq}")
-    if state_path is None:
-        resolved_state = resolve_recording_path(replay_data.get("init_state"))
+    if state_path is None and replay_data:
+        resolved_state = resolve_recording_path(replay_data.get("original_init_state", replay_data.get("init_state")))
         if resolved_state is not None and resolved_state.is_file():
             state_path = resolved_state
         else:
@@ -1744,13 +1957,9 @@ def run_player(
             state_path = None
 
     replay_speed_value = resolve_replay_speed(replay_speed)
-    # When using plugin replay, always use headless mode for determinism.
-    # The pyBoy window=null means no SDL event processing, which guarantees
-    # identical RNG and DVs to the original training run. However, we still
-    # render frames (render=True) so that the inspector can read the screen
-    # buffer. With window="null", tick(1, True) updates the internal screen
-    # buffer without any SDL window involvement, preserving determinism.
-    force_headless = use_plugin_replay and replay_path is not None
+    force_headless = (use_plugin_replay and replay_path is not None) or (no_replay and not interactive)
+    if no_replay:
+        interactive = True
     effective_deterministic = deterministic or force_headless
     window_mode = "null" if effective_deterministic else "SDL2"
     sound_enabled = not effective_deterministic
@@ -1767,11 +1976,6 @@ def run_player(
     os.environ.setdefault("SDL_VIDEO_WINDOW_POS", "0,0")
     pyboy = PyBoy(str(rom_path), window=window_mode, sound=sound_enabled, debug=debug_mode)
     pyboy.set_emulation_speed(replay_speed_value)
-    input_controller = None
-    if not effective_deterministic and use_sdl_gamepad:
-        input_controller = InputController(pyboy, controls or load_controls())
-        print(f"SDL gamepad input enabled — {len(input_controller.joysticks)} joystick(s), "
-              f"{len(input_controller.controllers)} controller(s), {len([k for k, v in input_controller.controls['gamepad'].items() if v])} gamepad mapping(s)", flush=True)
 
     def close_emulator() -> None:
         if input_controller is not None:
@@ -1789,18 +1993,100 @@ def run_player(
         initial_state.seek(0)
         pyboy.load_state(initial_state)
         initial_state.seek(0)
-        messagebox.showinfo("Reset ROM", "ROM has been reset to initial state.", parent=runtime_menu.root)
+        print("[Dev Mode] ROM reset to initial state.", flush=True)
 
-    runtime_menu = RuntimeMenu(
-        pyboy, close_callback=close_emulator, reset_callback=reset_rom,
-        toggle_watch_callback=lambda: (
+    observer_env = _ObserverEnv(pyboy)
+    inspector = ObservationInspector()
+    inspector._model_enabled = interactive and interactive_model_path is not None
+
+    _tk_root = tk.Tk()
+    _tk_root.withdraw()
+
+    def toggle_model() -> None:
+        inspector._model_enabled = not inspector._model_enabled
+        status_str = "ON" if inspector._model_enabled else "OFF"
+        print(f"[Dev Mode] Model inputs: {status_str}", flush=True)
+        agent_file = Path("agent_enabled.txt")
+        if inspector._model_enabled:
+            agent_file.write_text("yes\n", encoding="utf-8")
+            print("[Dev Mode] Created agent_enabled.txt — model will take over.", flush=True)
+        else:
+            with suppress(FileNotFoundError):
+                agent_file.unlink()
+            print("[Dev Mode] Removed agent_enabled.txt — player control enabled.", flush=True)
+
+    def save_state_dialog() -> None:
+        DEV_STATES_DIR.mkdir(parents=True, exist_ok=True)
+        default_name = datetime.now().strftime("state_%Y-%m-%d_%H-%M-%S")
+        name = simpledialog.askstring("Save state", "State name:", initialvalue=default_name, parent=_tk_root)
+        if not name:
+            return
+        filename = re.sub(r'[<>:"/\\|?*]', "-", Path(name).name).strip(" .")
+        if not filename:
+            filename = default_name
+        if not filename.lower().endswith(".state"):
+            filename += ".state"
+        path = DEV_STATES_DIR / filename
+        try:
+            with path.open("wb") as state_file:
+                pyboy.save_state(state_file)
+            print(f"[Dev Mode] Saved state to: {path}", flush=True)
+        except Exception as error:
+            print(f"[Dev Mode] Save failed: {error}", flush=True)
+
+    def load_state_dialog() -> None:
+        path = filedialog.askopenfilename(
+            title="Load state", initialdir=str(DEV_STATES_DIR),
+            filetypes=[("PyBoy state", "*.state"), ("All files", "*.*")],
+            parent=_tk_root,
+        )
+        if not path:
+            return
+        try:
+            with Path(path).open("rb") as state_file:
+                pyboy.load_state(state_file)
+            print(f"[Dev Mode] Loaded state from: {path}", flush=True)
+        except Exception as error:
+            print(f"[Dev Mode] Load failed: {error}", flush=True)
+
+    special_keys = {
+        'f1': toggle_model,
+        'f2': save_state_dialog,
+        'f3': load_state_dialog,
+        'f4': reset_rom,
+        'f5': lambda: (
             inspector._watch_window.hide() if inspector._watch_window.visible
             else inspector._watch_window.show()
         ),
-        set_range_callback=lambda: _set_watch_range(runtime_menu.root, inspector._watch_window),
+    }
+
+    input_controller = None
+    if not effective_deterministic and use_sdl_gamepad:
+        input_controller = InputController(pyboy, controls or load_controls(), special_keys=special_keys)
+        print(f"SDL gamepad input enabled — {len(input_controller.joysticks)} joystick(s), "
+              f"{len(input_controller.controllers)} controller(s), {len([k for k, v in input_controller.controls['gamepad'].items() if v])} gamepad mapping(s)", flush=True)
+    elif interactive and (input_controller is None):
+        input_controller = InputController(pyboy, controls or load_controls(), special_keys=special_keys)
+        if not use_sdl_gamepad:
+            print("[Interactive] Keyboard control enabled (no gamepad).", flush=True)
+
+    control_window = ControlWindow(
+        _tk_root, pyboy, special_keys, input_controller,
     )
-    observer_env = _ObserverEnv(pyboy)
-    inspector = ObservationInspector()
+    control_window.geometry("+0+40")
+
+    for _key in ("f2", "f3"):
+        _orig = special_keys.get(_key)
+        if _orig:
+            def _guarded(orig=_orig):
+                def _wrapper():
+                    control_window._key_dialog_guard = True
+                    try:
+                        orig()
+                    finally:
+                        control_window._key_dialog_guard = False
+                return _wrapper
+            special_keys[_key] = _guarded()
 
     try:
         if state_path is not None:
@@ -1812,19 +2098,24 @@ def run_player(
             input_controller.emulation_speed = replay_speed_value
 
         frame_count = 0
-        replay_index = 0
-        replay_finished = len(actions) == 0
+        replay_index = 0 if not no_replay else len(actions)
+        replay_finished = len(actions) == 0 or no_replay
         dv_summary_printed = False
         interactive_env = None
         model = None
         interactive_needs_resync = False
         observer_env.envs[0].step_count = 0
 
+        if no_replay:
+            print("[Dev Mode] No-replay mode: state loaded, ready to play.", flush=True)
+            if interactive and interactive_model_path is not None:
+                toggle_model()
+
         # Plugin replay state
         plugin_input_events: list[dict[str, Any]] = []
-        if use_plugin_replay and replay_path is not None:
+        if use_plugin_replay and replay_path is not None and not no_replay:
             print(f"Playing {len(actions)} actions via plugin-style frame-exact replay...")
-            state_path_replay = resolve_recording_path(replay_data.get("init_state"))
+            state_path_replay = resolve_recording_path(replay_data.get("original_init_state", replay_data.get("init_state")))
             if state_path_replay is not None and state_path_replay.is_file():
                 with state_path_replay.open("rb") as state_file:
                     pyboy.load_state(state_file)
@@ -1871,8 +2162,6 @@ def run_player(
             model = None
 
         while True:
-            runtime_menu.update()
-
             if use_plugin_replay and replay_path is not None and frame_count < total_replay_frames:
                 # Replay one action's worth of frames, then render the inspector
                 batch = replay_action_freq
@@ -1891,13 +2180,7 @@ def run_player(
                 replay_action(pyboy, action, replay_action_freq, render=render_during_replay, noop_action=replay_noop_action)
                 frame_count += replay_action_freq
             else:
-                if effective_deterministic:
-                    # After replay finishes, keep ticking with render=True so the
-                    # inspector retains a visible screen. With window="null",
-                    # tick(1, True) updates the screen buffer without SDL events.
-                    pyboy.tick(1, True)
-                    frame_count += 1
-                elif interactive and interactive_env is not None:
+                if interactive:
                     agent_on = _check_agent_enabled()
                     if agent_on and model is not None:
                         if interactive_needs_resync:
@@ -1925,6 +2208,12 @@ def run_player(
                             break
                         frame_count += 1
                         interactive_needs_resync = True
+                elif effective_deterministic:
+                    # After replay finishes, keep ticking with render=True so the
+                    # inspector retains a visible screen. With window="null",
+                    # tick(1, True) updates the screen buffer without SDL events.
+                    pyboy.tick(1, True)
+                    frame_count += 1
                 else:
                     if input_controller is not None:
                         input_controller.poll()
@@ -1938,7 +2227,7 @@ def run_player(
 
             if replay_index >= len(actions):
                 replay_finished = True
-                if use_plugin_replay and replay_path is not None and frame_count >= total_replay_frames:
+                if not no_replay and use_plugin_replay and replay_path is not None and frame_count >= total_replay_frames:
                     if not dv_summary_printed:
                         _print_dv_summary(pyboy, replay_path)
                         dv_summary_printed = True
@@ -1946,11 +2235,15 @@ def run_player(
             observer_env.envs[0].step_count = frame_count // replay_action_freq
 
             if not inspector.render(observer_env, 0, []):
-                if not effective_deterministic and input_controller is not None:
+                if input_controller is not None:
                     input_controller.request_quit()
                 break
 
-            if effective_deterministic:
+            control_window.update()
+            if control_window._closed:
+                break
+
+            if effective_deterministic and not interactive:
                 if replay_finished:
                     key = cv2.waitKey(1)
                     if key in (ord("q"), 27):
@@ -1959,11 +2252,10 @@ def run_player(
                 else:
                     cv2.waitKey(1)
                     time.sleep(0.001)
-            else:
-                # Non-deterministic mode: SDL2 owns the event loop (PyBoy window + InputController).
-                # Calling cv2.waitKeyEx here conflicts with SDL2's message pump on Windows,
-                # causing GIL corruption (PyEval_RestoreThread fatal error).
-                # Inspector display still updates via cv2.imshow in render(); we just skip event processing.
+            elif interactive:
+                # Interactive mode: SDL2 processes PyBoy window + InputController gamepad.
+                # cv2.waitKey keeps the CV2 inspector window responsive. Keyboard shortcuts
+                # and game controls are handled by the Tkinter ControlWindow.
                 try:
                     inspector_visible = cv2.getWindowProperty(inspector.title, cv2.WND_PROP_VISIBLE) >= 1
                 except cv2.error:
@@ -1972,12 +2264,33 @@ def run_player(
                     if input_controller is not None:
                         input_controller.request_quit()
                     break
+                key = cv2.waitKey(1)
+                if key in (ord("q"), 27):
+                    break
+                time.sleep(0.001)
+            else:
+                # Non-interactive mode: SDL2 owns the event loop.
+                try:
+                    inspector_visible = cv2.getWindowProperty(inspector.title, cv2.WND_PROP_VISIBLE) >= 1
+                except cv2.error:
+                    inspector_visible = False
+                if not inspector_visible:
+                    if input_controller is not None:
+                        input_controller.request_quit()
+                    break
+                key = cv2.waitKey(1)
+                if key in (ord("q"), 27):
+                    break
                 time.sleep(0.001)
     except OSError as error:
         print(f"PyBoy stopped while closing the SDL window: {error}")
     finally:
-        runtime_menu.close_menu()
         inspector.close()
+        try:
+            control_window._closed = True
+            _tk_root.destroy()
+        except Exception:
+            pass
         if input_controller is not None:
             input_controller.close()
         if interactive_env is not None:
@@ -2008,6 +2321,7 @@ def main() -> None:
     parser.add_argument("--interactive", action="store_true", help="Enable interactive mode (model toggle via agent_enabled.txt) after replay")
     parser.add_argument("--interactive-model", type=str, default=None, help="Path to PPO checkpoint for interactive model control")
     parser.add_argument("--direct", action="store_true", help="Skip the Tkinter launcher and go directly to player mode")
+    parser.add_argument("--no-replay", action="store_true", help="Skip input replay and start directly in player mode")
     args = parser.parse_args()
 
     initialize_sdl_input()
@@ -2029,6 +2343,7 @@ def main() -> None:
             debug_mode=args.debug,
             interactive=args.interactive,
             interactive_model_path=args.interactive_model,
+            no_replay=args.no_replay,
         )
     else:
         launcher = DebugLauncher()

@@ -42,3 +42,5 @@ PokemonBlue.gb
 PokemonBlue.gb.ram
 PokemonRed.gb.ram
 skill_lab/lava.json
+agent_enabled.txt
+envs/Dev/*

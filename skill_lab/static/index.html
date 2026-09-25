@@ -128,7 +128,15 @@
                 <select id="inspector-env-select"></select>
               </div>
                <button id="inspector-control-btn" class="control-btn" title="Take control of this environment with gamepad/keyboard">Take Control</button>
-               <button id="dev-mode-btn" class="control-btn" title="Save state and launch interactive emulator for this env">Dev Mode</button>
+                <div style="display:flex; align-items:center; gap:6px; margin-left:8px;">
+                  <input type="checkbox" id="dev-replay-checkbox" checked style="accent-color: var(--accent);" />
+                  <label for="dev-replay-checkbox" style="font-size:0.8rem; color:var(--muted); cursor:pointer;">Replay</label>
+                </div>
+                <button id="dev-mode-btn" class="control-btn" title="Save state and launch interactive emulator for this env">Dev Mode</button>
+                <div style="display:flex; align-items:center; gap:6px; margin-left:8px;">
+                  <input type="checkbox" id="model-inputs-toggle" style="accent-color: var(--accent);" />
+                  <label for="model-inputs-toggle" style="font-size:0.8rem; color:var(--muted); cursor:pointer;">Model Inputs</label>
+                </div>
               <div class="world-info-bar" id="inspector-world-info">Map: -- X: -- Y: --</div>
             </div>
           </div>

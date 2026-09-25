@@ -50,8 +50,21 @@ function initInspector() {
     el.inspectorControlBtn.addEventListener('click', toggleInspectorControl);
   }
 
+  if (el.devReplayCheckbox) {
+    el.devReplayCheckbox.addEventListener('change', function() {
+      state.devReplayChecked = this.checked;
+    });
+    state.devReplayChecked = el.devReplayCheckbox.checked;
+  }
+
   if (el.devModeBtn) {
     el.devModeBtn.addEventListener('click', saveAndLaunchDev);
+  }
+
+  if (el.modelInputsToggle) {
+    el.modelInputsToggle.addEventListener('change', function() {
+      toggleModelInputs(this.checked);
+    });
   }
 
   if (el.inspectorDetailsToggle) {
@@ -244,6 +257,31 @@ function sendInput(action, pressed) {
   }).catch(function() {});
 }
 
+function fetchAgentStatus() {
+  fetch('/api/agent-status', { cache: 'no-store' })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      state.agentEnabled = data.agent_enabled;
+      if (el.modelInputsToggle) {
+        el.modelInputsToggle.checked = data.agent_enabled;
+      }
+    })
+    .catch(function() {});
+}
+
+function toggleModelInputs(checked) {
+  fetch('/api/toggle-agent', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+  })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      state.agentEnabled = data.agent_enabled;
+    })
+    .catch(function() {});
+}
+
 function toggleInspectorDetails() {
   state.inspectorDetailsCollapsed = !state.inspectorDetailsCollapsed;
   if (el.inspectorDetails) {
@@ -263,6 +301,7 @@ function toggleInspectorDetails() {
 
 function saveAndLaunchDev() {
   const envIndex = state.selectedInspectorEnv;
+  const replayChecked = state.devReplayChecked;
   if (el.devModeBtn) {
     el.devModeBtn.disabled = true;
     el.devModeBtn.textContent = 'Saving...';
@@ -287,7 +326,8 @@ function saveAndLaunchDev() {
           inputs_path: data.inputs_path,
           env_name: data.env_name,
           interactive: true,
-          model_path: data.model_path || undefined,
+          model_path: replayChecked ? (data.model_path || undefined) : undefined,
+          replay: replayChecked,
         }),
       });
     })
@@ -762,4 +802,5 @@ export {
   fetchControlState,
   toggleInspectorControl,
   sendInput,
+  fetchAgentStatus,
 };
