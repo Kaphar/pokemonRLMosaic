@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import base64
 import json
+import os
+import re
 import struct
 import threading
 from collections.abc import Callable
@@ -69,6 +71,31 @@ MAP_IMAGE_PATH = (
 LAVA_JSON_PATH = PROJECT_ROOT / "skill_lab" / "lava.json"
 ZONES_JSON_PATH = PROJECT_ROOT / "skill_lab" / "zones.json"
 CONTROLS_PATH = PROJECT_ROOT / "skill_lab" / "controls.json"
+WEB_CONTROLS_PATH = PROJECT_ROOT / "skill_lab" / "web_controls.json"
+DEV_ENVS_DIR = PROJECT_ROOT / "envs" / "Dev"
+DEFAULT_ROM = PROJECT_ROOT / "PokemonRed.gb"
+
+DEFAULT_WEB_GAMEPAD_BINDINGS: dict[str, str] = {
+    "Down": "button:13",
+    "Left": "button:14",
+    "Right": "button:15",
+    "Up": "button:12",
+    "A": "button:0",
+    "B": "button:1",
+    "Start": "button:9",
+    "Select": "button:8",
+}
+
+DEFAULT_WEB_KEY_BINDINGS: dict[str, str] = {
+    "Down": "down",
+    "Left": "left",
+    "Right": "right",
+    "Up": "up",
+    "A": "z",
+    "B": "x",
+    "Start": "return",
+    "Select": "tab",
+}
 
 ACTION_BUTTON_EVENTS: dict[str, tuple[Any, Any]] = {
     "Down": (WindowEvent.PRESS_ARROW_DOWN, WindowEvent.RELEASE_ARROW_DOWN) if _HAS_PYBOY else (None, None),
@@ -126,7 +153,10 @@ class BrowserMapDashboard:
         self._control_env_index: int = 0
         self._gamepad_bindings: dict[str, str] = {}
         self._key_bindings: dict[str, str] = {}
+        self._web_gamepad_bindings: dict[str, str] = {}
+        self._web_key_bindings: dict[str, str] = {}
         self._load_default_controls()
+        self._load_default_web_controls()
 
         self._individual_frames: dict[int, bytes] = {}  # env_index -> png bytes
         self._mosaic_stream_active = False
@@ -452,6 +482,44 @@ class BrowserMapDashboard:
                     if action in ACTION_BUTTON_EVENTS:
                         self._key_bindings[action] = token
 
+    def _load_default_web_controls(self) -> None:
+        """Load web-specific gamepad/keyboard bindings from web_controls.json.
+
+        Falls back to :data:`DEFAULT_WEB_GAMEPAD_BINDINGS` and
+        :data:`DEFAULT_WEB_KEY_BINDINGS` for any actions not present in the
+        file, then persists the merged result so the file always stays
+        complete.
+        """
+        loaded = False
+        with suppress(Exception):
+            if WEB_CONTROLS_PATH.exists():
+                saved = json.loads(WEB_CONTROLS_PATH.read_text(encoding="utf-8"))
+                loaded = True
+                for action, token in saved.get("gamepad", {}).items():
+                    if action in ACTION_BUTTON_EVENTS:
+                        self._web_gamepad_bindings[action] = token
+                for action, token in saved.get("keyboard", {}).items():
+                    if action in ACTION_BUTTON_EVENTS:
+                        self._web_key_bindings[action] = token
+        for action, token in DEFAULT_WEB_GAMEPAD_BINDINGS.items():
+            self._web_gamepad_bindings.setdefault(action, token)
+        for action, token in DEFAULT_WEB_KEY_BINDINGS.items():
+            self._web_key_bindings.setdefault(action, token)
+        if not loaded:
+            self._save_web_controls()
+
+    def _save_web_controls(self) -> None:
+        """Persist web controls to web_controls.json."""
+        with suppress(Exception):
+            WEB_CONTROLS_PATH.parent.mkdir(parents=True, exist_ok=True)
+            WEB_CONTROLS_PATH.write_text(
+                json.dumps({
+                    "gamepad": dict(self._web_gamepad_bindings),
+                    "keyboard": dict(self._web_key_bindings),
+                }, indent=2) + "\n",
+                encoding="utf-8",
+            )
+
     def send_inspector_input(self, action: str, pressed: bool, env_index: int) -> bool:
         """Send a press/release input event to the emulator for the given env."""
         if not _HAS_PYBOY or action not in ACTION_BUTTON_EVENTS:
@@ -477,6 +545,157 @@ class BrowserMapDashboard:
         except Exception:
             return False
 
+    def save_dev_state(self, env_index: int) -> dict[str, Any]:
+        """Save the state and input history of the selected env for Dev Mode.
+
+        Saves a PyBoy ``.state`` file and a JSON recording of
+        ``_episode_actions`` to ``envs/Dev``.  The state can then be loaded
+        by :func:`skill_lab.emulator_with_debug.run_player`.
+        """
+        env = self._current_env()
+        if env is None:
+            return {"ok": False, "error": "no environment connected"}
+        env_obj = self._env_object(env, env_index)
+        if env_obj is None:
+            return {"ok": False, "error": f"environment {env_index} is not available"}
+
+        base_env = getattr(env_obj, "env", env_obj)
+        unwrapped = getattr(base_env, "unwrapped", base_env)
+        pyboy = getattr(unwrapped, "pyboy", getattr(env_obj, "pyboy", None))
+        if pyboy is None:
+            return {"ok": False, "error": "pyboy not available"}
+
+        states_dir = DEV_ENVS_DIR / "states"
+        inputs_dir = DEV_ENVS_DIR / "inputs"
+        states_dir.mkdir(parents=True, exist_ok=True)
+        inputs_dir.mkdir(parents=True, exist_ok=True)
+
+        env_name = getattr(env_obj, "env_name", f"Env{env_index}")
+        safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(env_name)).strip("._") or f"env{env_index}"
+        action_freq = self._as_int(getattr(env_obj, "action_freq", None), 24) or 24
+        noop_action = self._as_int(getattr(env_obj, "noop_action_index", None), 8) or 8
+        rom_path = getattr(env_obj, "rom_path", "") or getattr(unwrapped, "rom_path", "")
+        original_init_state = getattr(env_obj, "init_state", "")
+
+        state_filename = f"{safe_name}.state"
+        state_path = states_dir / state_filename
+        try:
+            with state_path.open("wb") as state_file:
+                pyboy.save_state(state_file)
+        except Exception as error:
+            return {"ok": False, "error": f"failed to save state: {error}"}
+
+        episode_actions = getattr(env_obj, "_episode_actions", [])
+        inputs_filename = f"{safe_name}.json"
+        inputs_path = inputs_dir / inputs_filename
+        inputs_data: dict[str, Any] = {
+            "env_index": env_index,
+            "env_name": env_name,
+            "init_state": str(state_path),
+            "rom": rom_path,
+            "action_freq": action_freq,
+            "noop_action": noop_action,
+            "total_actions": len(episode_actions),
+            "actions": episode_actions,
+            "source": "dev_save",
+        }
+        if original_init_state:
+            inputs_data["original_init_state"] = str(original_init_state)
+
+        try:
+            with inputs_path.open("w", encoding="utf-8") as f:
+                json.dump(inputs_data, f, indent=2)
+        except Exception as error:
+            return {"ok": False, "error": f"failed to save inputs: {error}"}
+
+        model_path = self._find_most_recent_checkpoint()
+
+        print(
+            f"[Dev Mode] Saved env {env_index} ({env_name}) -> "
+            f"state: {state_path}, inputs: {inputs_path}, "
+            f"actions: {len(episode_actions)}",
+            flush=True,
+        )
+        return {
+            "ok": True,
+            "env_name": env_name,
+            "env_index": env_index,
+            "state_path": str(state_path),
+            "inputs_path": str(inputs_path),
+            "actions_saved": len(episode_actions),
+            "model_path": model_path,
+        }
+
+    def _find_most_recent_checkpoint(self) -> str | None:
+        """Find the most recent ``.zip`` checkpoint under ``runs/``."""
+        runs_dir = PROJECT_ROOT / "runs"
+        if not runs_dir.is_dir():
+            return None
+        zip_files = list(runs_dir.glob("*.zip"))
+        if not zip_files:
+            return None
+        most_recent = max(zip_files, key=lambda p: p.stat().st_mtime)
+        return str(most_recent)
+
+    def launch_dev_emulator(
+        self, state_path: str, inputs_path: str, *,
+        interactive: bool = False, model_path: str | None = None,
+    ) -> dict[str, Any]:
+        """Launch ``emulator_with_debug.py`` in direct mode with the given state + replay."""
+        import subprocess
+        import sys as _sys
+
+        rom_path = DEFAULT_ROM
+        rom_path_str = str(rom_path)
+        for json_path in [inputs_path, state_path]:
+            try:
+                with open(json_path, "r", encoding="utf-8") as f:
+                    meta = json.load(f)
+                resolved_rom = meta.get("rom")
+                if resolved_rom:
+                    rp = Path(resolved_rom)
+                    if rp.is_absolute() and rp.is_file():
+                        rom_path = rp
+                        rom_path_str = str(rp)
+                    elif (PROJECT_ROOT / resolved_rom).is_file():
+                        rom_path = PROJECT_ROOT / resolved_rom
+                        rom_path_str = str(rom_path)
+                    break
+            except (OSError, ValueError, json.JSONDecodeError):
+                continue
+
+        emulator_script = PROJECT_ROOT / "skill_lab" / "emulator_with_debug.py"
+        if not emulator_script.is_file():
+            return {"ok": False, "error": "emulator_with_debug.py not found"}
+
+        cmd = [
+            _sys.executable,
+            str(emulator_script),
+            "--direct",
+            "--rom", rom_path_str,
+            "--state", state_path,
+            "--replay", inputs_path,
+            "--replay-speed", "auto",
+        ]
+        if interactive:
+            cmd.append("--interactive")
+            if model_path:
+                cmd.extend(["--interactive-model", model_path])
+
+        try:
+            subprocess.Popen(
+                cmd,
+                cwd=str(PROJECT_ROOT),
+                stdout=_sys.stdout,
+                stderr=_sys.stderr,
+                creationflags=subprocess.CREATE_NEW_CONSOLE if os.name == "nt" else 0,
+            )
+        except Exception as error:
+            return {"ok": False, "error": f"failed to launch emulator: {error}"}
+
+        print(f"[Dev Mode] Launched emulator: {state_path} + {inputs_path}", flush=True)
+        return {"ok": True}
+
     def get_control_state(self) -> dict[str, Any]:
         """Return current control state and bindings."""
         with self._lock:
@@ -485,6 +704,8 @@ class BrowserMapDashboard:
                 "env_index": self._control_env_index,
                 "gamepad_bindings": dict(self._gamepad_bindings),
                 "key_bindings": dict(self._key_bindings),
+                "web_gamepad_bindings": dict(self._web_gamepad_bindings),
+                "web_key_bindings": dict(self._web_key_bindings),
             }
 
     def get_config_state(self) -> dict[str, Any]:
@@ -496,6 +717,8 @@ class BrowserMapDashboard:
                 "save_on_catch": self._config.get("save_on_catch"),
                 "gamepad_bindings": dict(self._gamepad_bindings),
                 "key_bindings": dict(self._key_bindings),
+                "web_gamepad_bindings": dict(self._web_gamepad_bindings),
+                "web_key_bindings": dict(self._web_key_bindings),
             }
 
     def take_pending_config(self) -> dict[str, Any] | None:
@@ -524,10 +747,18 @@ class BrowserMapDashboard:
                     self._gamepad_bindings.update(bindings["gamepad"])
                 if "keyboard" in bindings:
                     self._key_bindings.update(bindings["keyboard"])
+                if "web_gamepad" in bindings or "web_keyboard" in bindings:
+                    if "web_gamepad" in bindings:
+                        self._web_gamepad_bindings.update(bindings["web_gamepad"])
+                    if "web_keyboard" in bindings:
+                        self._web_key_bindings.update(bindings["web_keyboard"])
+                    self._save_web_controls()
             control_active = self._control_active
             env_index = self._control_env_index
             gamepad_bindings = dict(self._gamepad_bindings)
             key_bindings = dict(self._key_bindings)
+            web_gamepad_bindings = dict(self._web_gamepad_bindings)
+            web_key_bindings = dict(self._web_key_bindings)
         input_ok = None
         if "action" in payload and "pressed" in payload:
             action = payload["action"]
@@ -540,6 +771,8 @@ class BrowserMapDashboard:
             "env_index": env_index,
             "gamepad_bindings": gamepad_bindings,
             "key_bindings": key_bindings,
+            "web_gamepad_bindings": web_gamepad_bindings,
+            "web_key_bindings": web_key_bindings,
         }
         if input_ok is not None:
             result["input_sent"] = input_ok
@@ -1192,6 +1425,12 @@ class BrowserMapDashboard:
                             dashboard._gamepad_bindings.update(payload["gamepad_bindings"])
                         if "key_bindings" in payload:
                             dashboard._key_bindings.update(payload["key_bindings"])
+                        if "web_gamepad_bindings" in payload:
+                            dashboard._web_gamepad_bindings.update(payload["web_gamepad_bindings"])
+                            dashboard._save_web_controls()
+                        if "web_key_bindings" in payload:
+                            dashboard._web_key_bindings.update(payload["web_key_bindings"])
+                            dashboard._save_web_controls()
                     config_data = json.dumps({"ok": True, "status": "saved"}).encode("utf-8")
                     self.send_response(200)
                     self.send_header("Content-Type", "application/json")
@@ -1247,6 +1486,46 @@ class BrowserMapDashboard:
                     self.send_header("Content-Type", "application/json")
                     self.end_headers()
                     self.wfile.write(json.dumps({"ok": True}).encode("utf-8"))
+                    return
+                if parsed.path == "/api/dev-save":
+                    content_length = int(self.headers.get("Content-Length", "0"))
+                    body = self.rfile.read(content_length)
+                    try:
+                        payload = json.loads(body.decode("utf-8"))
+                    except json.JSONDecodeError:
+                        self.send_error(400, "invalid json")
+                        return
+                    env_index = int(payload.get("env", 0))
+                    result = dashboard.save_dev_state(env_index)
+                    resp_data = json.dumps(result).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(resp_data)))
+                    self.end_headers()
+                    self.wfile.write(resp_data)
+                    return
+                if parsed.path == "/api/dev-launch":
+                    content_length = int(self.headers.get("Content-Length", "0"))
+                    body = self.rfile.read(content_length)
+                    try:
+                        payload = json.loads(body.decode("utf-8"))
+                    except json.JSONDecodeError:
+                        self.send_error(400, "invalid json")
+                        return
+                    state_path = payload.get("state_path", "")
+                    inputs_path = payload.get("inputs_path", "")
+                    interactive = bool(payload.get("interactive", False))
+                    model_path = payload.get("model_path")
+                    result = dashboard.launch_dev_emulator(
+                        state_path, inputs_path,
+                        interactive=interactive, model_path=model_path,
+                    )
+                    resp_data = json.dumps(result).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(resp_data)))
+                    self.end_headers()
+                    self.wfile.write(resp_data)
                     return
                 if parsed.path == "/api/zone-create":
                     content_length = int(self.headers.get("Content-Length", "0"))

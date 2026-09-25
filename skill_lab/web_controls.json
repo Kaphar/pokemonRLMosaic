@@ -1,0 +1,22 @@
+{
+  "gamepad": {
+    "Down": "button:13",
+    "Left": "button:14",
+    "Right": "button:15",
+    "Up": "button:12",
+    "A": "button:0",
+    "B": "button:1",
+    "Start": "button:9",
+    "Select": "button:8"
+  },
+  "keyboard": {
+    "Down": "down",
+    "Left": "left",
+    "Right": "right",
+    "Up": "up",
+    "A": "z",
+    "B": "x",
+    "Start": "return",
+    "Select": "tab"
+  }
+}

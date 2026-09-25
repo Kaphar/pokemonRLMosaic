@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import argparse
 import io
 import json
 import os
 import re
 import sys
 import time
+import uuid
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog
 from datetime import datetime
@@ -1689,6 +1691,29 @@ class _ObserverEnv:
         self.envs: list[_PyBoyObserver] = [_PyBoyObserver(pyboy)]
 
 
+def _check_agent_enabled() -> bool:
+    """Read agent_enabled.txt to toggle between model and player control."""
+    try:
+        with open("agent_enabled.txt", "r") as f:
+            return f.readlines()[0].strip().startswith("yes")
+    except (OSError, IndexError):
+        return False
+
+
+def _sync_interactive_env(interactive_env: Any, pyboy: PyBoy) -> None:
+    """Re-sync the headless interactive env from the main pyboy's current state."""
+    if interactive_env is None or pyboy is None:
+        return
+    import io
+    buf = io.BytesIO()
+    try:
+        pyboy.save_state(buf)
+        buf.seek(0)
+        interactive_env.pyboy.load_state(buf)
+    except Exception:
+        pass
+
+
 def run_player(
     rom_path: Path,
     state_path: Path | None,
@@ -1700,6 +1725,9 @@ def run_player(
     use_plugin_replay: bool = False,
     use_sdl_gamepad: bool = False,
     debug_mode: bool = False,
+    interactive: bool = False,
+    interactive_model_path: str | None = None,
+    interactive_env_index: int = 0,
 ) -> None:
     actions, replay_data = load_replay(replay_path)
     replay_action_freq = int(replay_data.get("action_freq", ACTION_FREQ))
@@ -1787,6 +1815,9 @@ def run_player(
         replay_index = 0
         replay_finished = len(actions) == 0
         dv_summary_printed = False
+        interactive_env = None
+        model = None
+        interactive_needs_resync = False
         observer_env.envs[0].step_count = 0
 
         # Plugin replay state
@@ -1809,6 +1840,35 @@ def run_player(
         inspector.show()
         inspector.render(observer_env, 0, [])
         cv2.waitKey(1)
+
+        if interactive:
+            print("[Interactive] Interactive mode enabled — agent control toggles via agent_enabled.txt", flush=True)
+            if interactive_model_path:
+                try:
+                    from v2.red_gym_env_v2 import RedGymEnv
+                    model_env_config = {
+                        'headless': True, 'save_final_state': False, 'early_stop': False,
+                        'action_freq': replay_action_freq,
+                        'init_state': str(state_path) if state_path else None,
+                        'max_steps': 2 ** 23, 'print_rewards': False,
+                        'save_video': False, 'fast_video': True,
+                        'session_path': Path(f'interactive_session_{str(uuid.uuid4())[:8]}'),
+                        'gb_path': str(rom_path), 'debug': False,
+                        'sim_frame_dist': 2_000_000.0, 'extra_buttons': False,
+                    }
+                    interactive_env = RedGymEnv(model_env_config)
+                    interactive_env.reset()
+                    from stable_baselines3 import PPO
+                    model = PPO.load(interactive_model_path, env=interactive_env,
+                                     custom_objects={'lr_schedule': 0, 'clip_range': 0})
+                    print(f"[Interactive] Model loaded from {interactive_model_path}", flush=True)
+                except Exception as error:
+                    print(f"[Interactive] Failed to load model: {error}", flush=True)
+                    model = None
+            interactive_needs_resync = True
+        else:
+            interactive_env = None
+            model = None
 
         while True:
             runtime_menu.update()
@@ -1837,6 +1897,34 @@ def run_player(
                     # tick(1, True) updates the screen buffer without SDL events.
                     pyboy.tick(1, True)
                     frame_count += 1
+                elif interactive and interactive_env is not None:
+                    agent_on = _check_agent_enabled()
+                    if agent_on and model is not None:
+                        if interactive_needs_resync:
+                            _sync_interactive_env(interactive_env, pyboy)
+                            interactive_needs_resync = False
+                        try:
+                            obs = interactive_env._get_obs()
+                            action, _ = model.predict(obs, deterministic=False)
+                            action = int(action)
+                        except Exception as error:
+                            print(f"[Interactive] Model prediction error: {error}", flush=True)
+                            action = interactive_env.noop_action_index if interactive_env.noop_action_index >= 0 else 0
+                        noop = interactive_env.noop_action_index if interactive_env.noop_action_index >= 0 else replay_noop_action
+                        replay_action(pyboy, action, replay_action_freq, verbose=False, render=True, noop_action=noop)
+                        interactive_env.step(action)
+                        frame_count += replay_action_freq
+                    else:
+                        if input_controller is not None:
+                            input_controller.poll()
+                            if input_controller.quit_requested:
+                                break
+                        if not pyboy.tick(1, True):
+                            if input_controller is not None:
+                                input_controller.request_quit()
+                            break
+                        frame_count += 1
+                        interactive_needs_resync = True
                 else:
                     if input_controller is not None:
                         input_controller.poll()
@@ -1892,6 +1980,11 @@ def run_player(
         inspector.close()
         if input_controller is not None:
             input_controller.close()
+        if interactive_env is not None:
+            try:
+                interactive_env.pyboy.stop()
+            except Exception:
+                pass
         try:
             pyboy.stop()
         except OSError as error:
@@ -1900,10 +1993,47 @@ def run_player(
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Launch Pokemon Red in player mode with a live debug inspector.",
+    )
+    parser.add_argument("--rom", type=str, default=None, help="Path to the ROM file")
+    parser.add_argument("--state", type=str, default=None, help="Path to a PyBoy state file to load")
+    parser.add_argument("--replay", type=str, default=None, help="Path to a replay inputs JSON file")
+    parser.add_argument("--replay-speed", type=str, default="auto", help="Replay speed (auto, x1, x2, ...)")
+    parser.add_argument("--deterministic", action="store_true", help="Deterministic headless replay (no SDL events)")
+    parser.add_argument("--use-plugin-replay", action="store_true", help="Use frame-exact plugin replay")
+    parser.add_argument("--legacy-replay", action="store_true", help="Use action-based timing instead of frame-exact")
+    parser.add_argument("--use-sdl-gamepad", action="store_true", help="Enable SDL gamepad controller input")
+    parser.add_argument("--debug", action="store_true", help="Launch PyBoy in debug mode")
+    parser.add_argument("--interactive", action="store_true", help="Enable interactive mode (model toggle via agent_enabled.txt) after replay")
+    parser.add_argument("--interactive-model", type=str, default=None, help="Path to PPO checkpoint for interactive model control")
+    parser.add_argument("--direct", action="store_true", help="Skip the Tkinter launcher and go directly to player mode")
+    args = parser.parse_args()
+
     initialize_sdl_input()
-    launcher = DebugLauncher()
-    launcher.root.geometry("+0+0")
-    launcher.root.mainloop()
+
+    if args.direct:
+        rom_path = Path(args.rom) if args.rom else DEFAULT_ROM
+        if not rom_path.is_file():
+            print(f"ROM not found: {rom_path}", flush=True)
+            sys.exit(1)
+        state_path = Path(args.state) if args.state else None
+        replay_path = Path(args.replay) if args.replay else None
+        controls = load_controls()
+        run_player(
+            rom_path, state_path, replay_path, controls,
+            replay_speed=args.replay_speed,
+            deterministic=args.deterministic,
+            use_plugin_replay=not args.legacy_replay,
+            use_sdl_gamepad=args.use_sdl_gamepad,
+            debug_mode=args.debug,
+            interactive=args.interactive,
+            interactive_model_path=args.interactive_model,
+        )
+    else:
+        launcher = DebugLauncher()
+        launcher.root.geometry("+0+0")
+        launcher.root.mainloop()
 
 
 if __name__ == "__main__":

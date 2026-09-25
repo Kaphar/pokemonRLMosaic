@@ -237,6 +237,7 @@ tbody tr:nth-child(odd) { background: rgba(255, 255, 255, 0.01); }
 .binding-sections { margin-top: 16px; }
 .binding-section { margin-bottom: 20px; }
 .binding-section h4 { color: var(--muted); font-size: 0.8rem; font-weight: 600; margin: 0 0 8px 0; }
+.binding-section.web h4 { color: var(--accent); }
 .binding-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
 .binding-table td { padding: 6px 8px; border-bottom: 1px solid rgba(255, 255, 255, 0.04); }
 .binding-action { color: var(--muted); font-weight: 600; width: 80px; }

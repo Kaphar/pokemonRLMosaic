@@ -50,6 +50,10 @@ function initInspector() {
     el.inspectorControlBtn.addEventListener('click', toggleInspectorControl);
   }
 
+  if (el.devModeBtn) {
+    el.devModeBtn.addEventListener('click', saveAndLaunchDev);
+  }
+
   if (el.inspectorDetailsToggle) {
     el.inspectorDetailsToggle.addEventListener('click', toggleInspectorDetails);
   }
@@ -87,6 +91,8 @@ function fetchControlState() {
     .then(function(data) {
       state.gamepadBindings = data.gamepad_bindings || {};
       state.keyBindings = data.key_bindings || {};
+      state.webGamepadBindings = data.web_gamepad_bindings || {};
+      state.webKeyBindings = data.web_key_bindings || {};
       state.controlActive = data.control_active || false;
       state.controlEnvIndex = data.env_index || 0;
       updateControlButton(data.control_active || false);
@@ -104,12 +110,22 @@ function fetchControlToggle() {
   const payload = {
     toggle: state.controlActive,
     env: state.selectedInspectorEnv,
+    bindings: {
+      web_gamepad: state.webGamepadBindings,
+      web_keyboard: state.webKeyBindings,
+    },
   };
   fetch('/api/control', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
-  }).catch(function() {});
+  })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      state.webGamepadBindings = data.web_gamepad_bindings || state.webGamepadBindings;
+      state.webKeyBindings = data.web_key_bindings || state.webKeyBindings;
+    })
+    .catch(function() {});
 }
 
 function toggleInspectorControl() {
@@ -151,7 +167,7 @@ function pollGamepad() {
   const pad = gamepads[0];
   if (!pad) return;
   for (const action of ACTION_NAMES) {
-    const token = state.gamepadBindings[action];
+    const token = state.webGamepadBindings[action];
     if (!token) continue;
     const resolved = resolveGamepadToken(token);
     if (!resolved) continue;
@@ -178,7 +194,7 @@ function onKeyDown(e) {
   if (!state.controlActive) return;
   if (e.repeat) return;
   for (const action of ACTION_NAMES) {
-    const token = state.keyBindings[action];
+    const token = state.webKeyBindings[action];
     if (!token) continue;
     const code = resolveKeyToken(token);
     if (!code) continue;
@@ -193,7 +209,7 @@ function onKeyDown(e) {
 function onKeyUp(e) {
   if (!state.controlActive) return;
   for (const action of ACTION_NAMES) {
-    const token = state.keyBindings[action];
+    const token = state.webKeyBindings[action];
     if (!token) continue;
     const code = resolveKeyToken(token);
     if (!code) continue;
@@ -243,6 +259,62 @@ function toggleInspectorDetails() {
     var icon = el.inspectorDetailsToggle.querySelector('.toggle-icon');
     if (icon) icon.classList.toggle('collapsed', state.inspectorDetailsCollapsed);
   }
+}
+
+function saveAndLaunchDev() {
+  const envIndex = state.selectedInspectorEnv;
+  if (el.devModeBtn) {
+    el.devModeBtn.disabled = true;
+    el.devModeBtn.textContent = 'Saving...';
+  }
+
+  fetch('/api/dev-save', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ env: envIndex }),
+  })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (!data.ok) {
+        throw new Error(data.error || 'Save failed');
+      }
+      if (el.devModeBtn) el.devModeBtn.textContent = 'Launching...';
+      return fetch('/api/dev-launch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          state_path: data.state_path,
+          inputs_path: data.inputs_path,
+          env_name: data.env_name,
+          interactive: true,
+          model_path: data.model_path || undefined,
+        }),
+      });
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.ok) {
+        if (el.devModeBtn) el.devModeBtn.textContent = 'Launched!';
+        setTimeout(function() {
+          if (el.devModeBtn) {
+            el.devModeBtn.textContent = 'Dev Mode';
+            el.devModeBtn.disabled = false;
+          }
+        }, 2000);
+      } else {
+        throw new Error(data.error || 'Launch failed');
+      }
+    })
+    .catch(function(err) {
+      console.error('Dev Mode error:', err);
+      if (el.devModeBtn) el.devModeBtn.textContent = 'Error';
+      setTimeout(function() {
+        if (el.devModeBtn) {
+          el.devModeBtn.textContent = 'Dev Mode';
+          el.devModeBtn.disabled = false;
+        }
+      }, 2000);
+    });
 }
 
 function renderPartyTable(party, showDVs) {

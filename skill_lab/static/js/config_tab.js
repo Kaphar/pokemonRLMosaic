@@ -23,8 +23,8 @@ function initConfig() {
         max_steps: parseInt(el.maxStepsSlider.value, 10),
         extra_steps: parseInt(el.extraStepsSlider ? el.extraStepsSlider.value : 0, 10),
         save_on_catch: el.saveOnCatchCheckbox.checked,
-        gamepad_bindings: state.gamepadBindings,
-        key_bindings: state.keyBindings,
+        web_gamepad_bindings: state.webGamepadBindings,
+        web_key_bindings: state.webKeyBindings,
       };
       el.configStatus.textContent = 'saving...';
       fetch('/api/config', {
@@ -49,12 +49,14 @@ function initControlBindings() {
     .then(function(data) {
       state.gamepadBindings = data.gamepad_bindings || {};
       state.keyBindings = data.key_bindings || {};
-      renderGamepadBindings();
-      renderKeyBindings();
+      state.webGamepadBindings = data.web_gamepad_bindings || {};
+      state.webKeyBindings = data.web_key_bindings || {};
+      renderWebGamepadBindings();
+      renderWebKeyBindings();
     })
     .catch(function() {
-      renderGamepadBindings();
-      renderKeyBindings();
+      renderWebGamepadBindings();
+      renderWebKeyBindings();
     });
 
   // Load the runtime config snapshot (extra_steps, max_steps overrides, etc.)
@@ -75,121 +77,130 @@ function initControlBindings() {
     .catch(function() {});
 }
 
-function renderGamepadBindings() {
-  if (!el.gamepadBindingsBody) return;
+function renderWebGamepadBindings() {
+  if (!el.webGamepadBindingsBody) return;
   let html = '';
   for (const action of ACTION_NAMES) {
-    const binding = state.gamepadBindings[action] || '';
+    const binding = state.webGamepadBindings[action] || '';
     const display = binding || '-';
-    const isCapturing = state.captureAction === action && state.captureType === 'gamepad';
+    const isCapturing = state.captureAction === action && state.captureType === 'web_gamepad';
     html += '<tr>';
     html += '<td class="binding-action">' + action + '</td>';
     html += '<td class="binding-value">' + (isCapturing ? 'waiting...' : display) + '</td>';
-    html += '<td><button class="binding-set-btn" data-action="' + action + '" data-type="gamepad">' + (isCapturing ? 'cancel' : 'Set') + '</button></td>';
+    html += '<td><button class="binding-set-btn" data-action="' + action + '" data-type="web_gamepad">' + (isCapturing ? 'cancel' : 'Set') + '</button></td>';
     html += '</tr>';
   }
-  el.gamepadBindingsBody.innerHTML = html;
+  el.webGamepadBindingsBody.innerHTML = html;
 
-  el.gamepadBindingsBody.querySelectorAll('.binding-set-btn').forEach(function(btn) {
+  el.webGamepadBindingsBody.querySelectorAll('.binding-set-btn').forEach(function(btn) {
     btn.addEventListener('click', function() {
       const action = this.getAttribute('data-action');
       const type = this.getAttribute('data-type');
       if (state.captureAction === action && state.captureType === type) {
-        stopCapture();
+        stopWebCapture();
       } else {
-        startGamepadCapture(action);
+        startWebGamepadCapture(action);
       }
     });
   });
 }
 
-function renderKeyBindings() {
-  if (!el.keyboardBindingsBody) return;
+function renderWebKeyBindings() {
+  if (!el.webKeyboardBindingsBody) return;
   let html = '';
   for (const action of ACTION_NAMES) {
-    const binding = state.keyBindings[action] || '';
+    const binding = state.webKeyBindings[action] || '';
     const display = binding ? binding.toUpperCase() : '-';
-    const isCapturing = state.captureAction === action && state.captureType === 'keyboard';
+    const isCapturing = state.captureAction === action && state.captureType === 'web_keyboard';
     html += '<tr>';
     html += '<td class="binding-action">' + action + '</td>';
     html += '<td class="binding-value">' + (isCapturing ? 'waiting...' : display) + '</td>';
-    html += '<td><button class="binding-set-btn" data-action="' + action + '" data-type="keyboard">' + (isCapturing ? 'cancel' : 'Set') + '</button></td>';
+    html += '<td><button class="binding-set-btn" data-action="' + action + '" data-type="web_keyboard">' + (isCapturing ? 'cancel' : 'Set') + '</button></td>';
     html += '</tr>';
   }
-  el.keyboardBindingsBody.innerHTML = html;
+  el.webKeyboardBindingsBody.innerHTML = html;
 
-  el.keyboardBindingsBody.querySelectorAll('.binding-set-btn').forEach(function(btn) {
+  el.webKeyboardBindingsBody.querySelectorAll('.binding-set-btn').forEach(function(btn) {
     btn.addEventListener('click', function() {
       const action = this.getAttribute('data-action');
       const type = this.getAttribute('data-type');
       if (state.captureAction === action && state.captureType === type) {
-        stopCapture();
+        stopWebCapture();
       } else {
-        startKeyboardCapture(action);
+        startWebKeyboardCapture(action);
       }
     });
   });
 }
 
-function stopCapture() {
+function stopWebCapture() {
   state.captureAction = null;
   state.captureType = null;
-  renderGamepadBindings();
-  renderKeyBindings();
-  stopGamepadCapturePolling();
-  stopKeyboardCapture();
+  renderWebGamepadBindings();
+  renderWebKeyBindings();
+  stopWebGamepadCapturePolling();
+  stopWebKeyboardCapture();
 }
 
-function startGamepadCapture(action) {
+function startWebGamepadCapture(action) {
   state.captureAction = action;
-  state.captureType = 'gamepad';
-  renderGamepadBindings();
-  _pollForGamepadInput();
+  state.captureType = 'web_gamepad';
+  renderWebGamepadBindings();
+  pollForWebGamepadInput();
 }
 
-function _pollForGamepadInput() {
-  if (state.captureAction === null || state.captureType !== 'gamepad') return;
+function pollForWebGamepadInput() {
+  if (state.captureAction === null || state.captureType !== 'web_gamepad') return;
   const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
   const pad = gamepads[0];
   if (pad) {
     for (let i = 0; i < pad.buttons.length; i++) {
       if (pad.buttons[i].pressed) {
-        state.gamepadBindings[state.captureAction] = 'button:' + i;
-        stopCapture();
+        state.webGamepadBindings[state.captureAction] = 'button:' + i;
+        stopWebCapture();
+        return;
+      }
+    }
+    for (let i = 0; i < pad.axes.length; i++) {
+      const val = pad.axes[i];
+      if (Math.abs(val) > 0.5) {
+        const direction = val > 0 ? 'positive' : 'negative';
+        state.webGamepadBindings[state.captureAction] = 'axis:' + i + ':' + direction;
+        stopWebCapture();
         return;
       }
     }
   }
-  state._gamepadCaptureId = setTimeout(_pollForGamepadInput, 50);
+  state._webGamepadCaptureId = setTimeout(pollForWebGamepadInput, 50);
 }
 
-function stopGamepadCapturePolling() {
-  if (state._gamepadCaptureId !== undefined) {
-    clearTimeout(state._gamepadCaptureId);
-    state._gamepadCaptureId = undefined;
+function stopWebGamepadCapturePolling() {
+  if (state._webGamepadCaptureId !== undefined) {
+    clearTimeout(state._webGamepadCaptureId);
+    state._webGamepadCaptureId = undefined;
   }
 }
 
-function startKeyboardCapture(action) {
+function startWebKeyboardCapture(action) {
   state.captureAction = action;
-  state.captureType = 'keyboard';
-  renderKeyBindings();
-  document.addEventListener('keydown', _onCaptureKeyDown, true);
+  state.captureType = 'web_keyboard';
+  renderWebKeyBindings();
+  document.addEventListener('keydown', onWebCaptureKeyDown, true);
 }
 
-function _onCaptureKeyDown(e) {
-  if (state.captureAction === null || state.captureType !== 'keyboard') return;
+function stopWebKeyboardCapture() {
+  document.removeEventListener('keydown', onWebCaptureKeyDown, true);
+}
+
+function onWebCaptureKeyDown(e) {
+  if (state.captureAction === null || state.captureType !== 'web_keyboard') return;
   const code = e.code;
-  const token = _codeToSdlToken(code);
-  state.keyBindings[state.captureAction] = token;
-  stopCapture();
+  const token = codeToSdlToken(code);
+  state.webKeyBindings[state.captureAction] = token;
+  stopWebCapture();
 }
 
-function stopKeyboardCapture() {
-  document.removeEventListener('keydown', _onCaptureKeyDown, true);
-}
-
-function _codeToSdlToken(code) {
+function codeToSdlToken(code) {
   const map = {
     ArrowDown: 'down', ArrowUp: 'up', ArrowLeft: 'left', ArrowRight: 'right',
     Enter: 'return', Tab: 'tab', PageUp: 'pageup', PageDown: 'pagedown',
