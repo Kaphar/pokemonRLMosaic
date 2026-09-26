@@ -318,7 +318,7 @@ function saveAndLaunchDev() {
         throw new Error(data.error || 'Save failed');
       }
       if (el.devModeBtn) el.devModeBtn.textContent = 'Launching...';
-       fetch('/api/dev-launch', {
+      return fetch('/api/dev-launch', {
          method: 'POST',
          headers: { 'Content-Type': 'application/json' },
          body: JSON.stringify({

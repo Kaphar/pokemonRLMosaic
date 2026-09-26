@@ -383,12 +383,17 @@ def log_reward_configuration_summary(profile_name: str, profile_config: dict[str
 
 
 def _launch_dev_mode(training: bool, model: "PPO | None", model_path: str | None, args: argparse.Namespace, env: DummyVecEnv) -> None:
-    """Launch the dev emulator with interactive model control as a subprocess."""
+    """Launch the dev emulator with interactive model control as a subprocess.
+
+    Saves the *current* game state (not just the initial state) so the user
+    can continue playing from wherever the model left off.
+    """
     ckpt_path: str | None = None
     if training and model is not None:
         try:
             ckpt_path = str(args.checkpoint_dir / "mosaic_latest_dev.zip")
             model.save(ckpt_path)
+            print(f"[Dev Mode] Saved model checkpoint: {ckpt_path}", flush=True)
         except Exception as e:
             print(f"[Dev Mode] Failed to save temporary checkpoint: {e}", flush=True)
             ckpt_path = None
@@ -399,9 +404,33 @@ def _launch_dev_mode(training: bool, model: "PPO | None", model_path: str | None
     if ckpt_path is None:
         print("[Dev Mode] No model checkpoint available — cannot launch dev mode.", flush=True)
         return
+
     rom = str(args.rom)
     state = str(args.init_state)
+    # Save the current game state from the first env so the emulator starts
+    # from the current in-game position, not the initial training state.
+    saved_state_path: str | None = None
+    env_obj = env.envs[0] if env.envs else None
+    if env_obj is not None and hasattr(env_obj, "pyboy"):
+        try:
+            import io
+            from pathlib import Path
+
+            current_state_io = io.BytesIO()
+            env_obj.pyboy.save_state(current_state_io)
+            current_state_io.seek(0)
+            saved_state_path = str(args.checkpoint_dir / "mosaic_current.state")
+            Path(saved_state_path).parent.mkdir(parents=True, exist_ok=True)
+            with open(saved_state_path, "wb") as f:
+                f.write(current_state_io.read())
+            state = saved_state_path
+            print(f"[Dev Mode] Saved current game state: {state}", flush=True)
+        except Exception as e:
+            print(f"[Dev Mode] Failed to save current state, using init state: {e}", flush=True)
+            state = str(args.init_state)
+
     import subprocess
+    import sys
     print(f"[Dev Mode] Launching dev emulator with model: {ckpt_path}", flush=True)
     subprocess.Popen([
         sys.executable, "-m", "skill_lab.emulator_with_debug",

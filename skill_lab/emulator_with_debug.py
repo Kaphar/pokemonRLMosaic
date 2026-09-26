@@ -654,11 +654,43 @@ class ControlWindow(tk.Toplevel):
             self.input_controller._set_token(token, True)
             self.input_controller._set_token(token, False)
 
+    def _find_sdl_audio_device(self) -> int | None:
+        """Scan for the first SDL audio device whose status is non-zero."""
+        for dev_id in range(1, 32):
+            try:
+                if sdl2.SDL_GetAudioDeviceStatus(dev_id) != 0:
+                    return dev_id
+            except Exception:
+                continue
+        return None
+
+    def _mute_sdl_audio(self) -> None:
+        """Pause PyBoy's SDL audio device (inverted semantics: pause_on=0)."""
+        dev_id = self._find_sdl_audio_device()
+        if dev_id is not None:
+            sdl2.SDL_PauseAudioDevice(dev_id, 0)
+            print(f"[Sound] SDL audio device {dev_id} muted", flush=True)
+        else:
+            print("[Sound] No active SDL audio device found", flush=True)
+
+    def _unmute_sdl_audio(self) -> None:
+        """Resume PyBoy's SDL audio device (inverted semantics: pause_on=1)."""
+        dev_id = self._find_sdl_audio_device()
+        if dev_id is not None:
+            sdl2.SDL_PauseAudioDevice(dev_id, 1)
+            print(f"[Sound] SDL audio device {dev_id} unmuted", flush=True)
+        else:
+            print("[Sound] No active SDL audio device found", flush=True)
+
     def _toggle_sound(self) -> None:
         self._sound_on = not self._sound_on
         try:
-            sdl2.SDL_PauseAudio(0 if self._sound_on else 1)
-            print(f"[Sound] {'ON' if self._sound_on else 'OFF'}", flush=True)
+            if self._sound_on:
+                self._unmute_sdl_audio()
+                print("[Sound] ON", flush=True)
+            else:
+                self._mute_sdl_audio()
+                print("[Sound] OFF", flush=True)
         except Exception as error:
             print(f"[Sound] Toggle failed: {error}", flush=True)
 

@@ -4087,11 +4087,14 @@
       "mask_rules": [
         {
           "action": "Down",
-          "activate_on": "Fought Rival"
+          "activate_on": "Fought Rival",
+          "deactivate_on": "ITEM: Oak Parcel"
+          
         },
         {
           "action": "Up",
-          "activate_on": "ITEM: Oak Parcel"
+          "activate_on": "ITEM: Oak Parcel",
+          "deactivate_on": "Oak Got Parcel"
         }
       ]
     },
