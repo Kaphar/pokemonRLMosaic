@@ -306,7 +306,8 @@ class DebugLauncher:
                 " Enable \"Interactive mode\" to load a PPO model checkpoint and toggle model control"
                 " via F1. Keyboard controls (arrows/WASD, Z/X for A/B, Enter/Start, Tab/Select) work"
                 " through the Observation inspector window when it has focus."
-            ),
+                " A Sound button in the control window toggles audio on/off."
+                ),
             fg="gray",
             wraplength=600,
             justify=tk.LEFT,
@@ -563,6 +564,7 @@ class ControlWindow(tk.Toplevel):
         self.quit_callback = quit_callback
         self._held_keys: set[str] = set()
         self._closed = False
+        self._sound_on = True
 
         self.title("Pokemon Red Controls")
         self.resizable(False, False)
@@ -572,7 +574,6 @@ class ControlWindow(tk.Toplevel):
         self.bind("<KeyPress>", self._on_key_press)
         self.bind("<KeyRelease>", self._on_key_release)
         self._key_dialog_guard = False
-        self.focus_set()
 
     def _build_ui(self) -> None:
         main = tk.Frame(self, padx=8, pady=8)
@@ -593,6 +594,10 @@ class ControlWindow(tk.Toplevel):
             btn = tk.Button(fkey_frame, text=f"{fkey} {label}", width=14, command=cmd)
             btn.pack(side=tk.LEFT, padx=2)
             btn.focus_set = lambda *a: None
+
+        sound_btn = tk.Button(fkey_frame, text="Sound", width=14,
+                              command=self._toggle_sound)
+        sound_btn.pack(side=tk.LEFT, padx=2)
 
         game_frame = tk.LabelFrame(main, text="Game Controls", padx=8, pady=6)
         game_frame.pack(fill=tk.X)
@@ -649,6 +654,14 @@ class ControlWindow(tk.Toplevel):
             self.input_controller._set_token(token, True)
             self.input_controller._set_token(token, False)
 
+    def _toggle_sound(self) -> None:
+        self._sound_on = not self._sound_on
+        try:
+            sdl2.SDL_PauseAudio(0 if self._sound_on else 1)
+            print(f"[Sound] {'ON' if self._sound_on else 'OFF'}", flush=True)
+        except Exception as error:
+            print(f"[Sound] Toggle failed: {error}", flush=True)
+
     def _on_close(self) -> None:
         self._closed = True
         if self.quit_callback is not None:
@@ -658,9 +671,6 @@ class ControlWindow(tk.Toplevel):
         if self._closed:
             return
         try:
-            self.lift()
-            if not self.parent.grab_current():
-                self.focus_set()
             self.parent.update_idletasks()
             self.parent.update()
         except tk.TclError:
@@ -2146,6 +2156,7 @@ def run_player(
                         'session_path': Path(f'interactive_session_{str(uuid.uuid4())[:8]}'),
                         'gb_path': str(rom_path), 'debug': False,
                         'sim_frame_dist': 2_000_000.0, 'extra_buttons': False,
+                        'noop_button': True,
                     }
                     interactive_env = RedGymEnv(model_env_config)
                     interactive_env.reset()
@@ -2190,13 +2201,16 @@ def run_player(
                             obs = interactive_env._get_obs()
                             action, _ = model.predict(obs, deterministic=False)
                             action = int(action)
+                            print(f"[Model] action={action} ({ACTION_NAMES[action] if action < len(ACTION_NAMES) else 'noop'})", flush=True)
                         except Exception as error:
                             print(f"[Interactive] Model prediction error: {error}", flush=True)
-                            action = interactive_env.noop_action_index if interactive_env.noop_action_index >= 0 else 0
-                        noop = interactive_env.noop_action_index if interactive_env.noop_action_index >= 0 else replay_noop_action
+                            action = interactive_env.noop_button_index if interactive_env.noop_button_index >= 0 else 0
+                        noop = interactive_env.noop_button_index if interactive_env.noop_button_index >= 0 else replay_noop_action
                         replay_action(pyboy, action, replay_action_freq, verbose=False, render=True, noop_action=noop)
                         interactive_env.step(action)
                         frame_count += replay_action_freq
+                    elif agent_on and model is None:
+                        print("[WARNING] Model mode is ON but model is None — did you provide a model checkpoint?", flush=True)
                     else:
                         if input_controller is not None:
                             input_controller.poll()
@@ -2253,9 +2267,9 @@ def run_player(
                     cv2.waitKey(1)
                     time.sleep(0.001)
             elif interactive:
-                # Interactive mode: SDL2 processes PyBoy window + InputController gamepad.
-                # cv2.waitKey keeps the CV2 inspector window responsive. Keyboard shortcuts
-                # and game controls are handled by the Tkinter ControlWindow.
+                # Interactive mode: SDL2 processes the PyBoy window + InputController (gamepad & keyboard).
+                # cv2.waitKey keeps the CV2 inspector window responsive for Q/ESC.
+                # F1-F5 shortcuts are handled by the Tkinter ControlWindow when it has focus.
                 try:
                     inspector_visible = cv2.getWindowProperty(inspector.title, cv2.WND_PROP_VISIBLE) >= 1
                 except cv2.error:

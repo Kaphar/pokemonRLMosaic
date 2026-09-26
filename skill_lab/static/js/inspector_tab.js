@@ -318,17 +318,17 @@ function saveAndLaunchDev() {
         throw new Error(data.error || 'Save failed');
       }
       if (el.devModeBtn) el.devModeBtn.textContent = 'Launching...';
-      return fetch('/api/dev-launch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          state_path: data.state_path,
-          inputs_path: data.inputs_path,
-          env_name: data.env_name,
-          interactive: true,
-          model_path: replayChecked ? (data.model_path || undefined) : undefined,
-          replay: replayChecked,
-        }),
+       fetch('/api/dev-launch', {
+         method: 'POST',
+         headers: { 'Content-Type': 'application/json' },
+         body: JSON.stringify({
+           state_path: data.state_path,
+           inputs_path: data.inputs_path,
+           env_name: data.env_name,
+           interactive: true,
+           model_path: data.model_path || undefined,
+           replay: replayChecked,
+         }),
       });
     })
     .then(function(r) { return r.json(); })

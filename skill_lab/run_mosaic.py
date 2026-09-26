@@ -382,6 +382,35 @@ def log_reward_configuration_summary(profile_name: str, profile_config: dict[str
     print(f"{cyan}=" * 90 + f"{reset}\n")
 
 
+def _launch_dev_mode(training: bool, model: "PPO | None", model_path: str | None, args: argparse.Namespace, env: DummyVecEnv) -> None:
+    """Launch the dev emulator with interactive model control as a subprocess."""
+    ckpt_path: str | None = None
+    if training and model is not None:
+        try:
+            ckpt_path = str(args.checkpoint_dir / "mosaic_latest_dev.zip")
+            model.save(ckpt_path)
+        except Exception as e:
+            print(f"[Dev Mode] Failed to save temporary checkpoint: {e}", flush=True)
+            ckpt_path = None
+    else:
+        latest = find_latest_checkpoint(args.checkpoint_dir)
+        if latest is not None:
+            ckpt_path = str(latest)
+    if ckpt_path is None:
+        print("[Dev Mode] No model checkpoint available — cannot launch dev mode.", flush=True)
+        return
+    rom = str(args.rom)
+    state = str(args.init_state)
+    import subprocess
+    print(f"[Dev Mode] Launching dev emulator with model: {ckpt_path}", flush=True)
+    subprocess.Popen([
+        sys.executable, "-m", "skill_lab.emulator_with_debug",
+        "--direct", "--no-replay", "--interactive",
+        "--interactive-model", ckpt_path,
+        "--rom", rom, "--state", state,
+    ])
+
+
 def main(args: argparse.Namespace | None = None) -> None:
     if args is None: args = parse_args()
 
@@ -778,6 +807,9 @@ def main(args: argparse.Namespace | None = None) -> None:
                 key = mosaic.poll_key()
                 if key in (ord("q"), 27): raise KeyboardInterrupt
 
+                if key in (ord("d"), ord("D")):
+                    _launch_dev_mode(training, model, model_path, args, env)
+
                 if training and model.rollout_buffer.full:
                     with torch.no_grad():
                         obs_tensor, _ = model.policy.obs_to_tensor(_transpose_for_model(observation))
@@ -802,6 +834,14 @@ def main(args: argparse.Namespace | None = None) -> None:
     except KeyboardInterrupt: pass
     finally:
         stats_tracker.save_history()  # Save stats for next run
+        # Save the current model so training progress isn't lost on premature exit
+        if training and model is not None:
+            try:
+                last_path = args.checkpoint_dir / f"mosaic_last_model_steps.zip"
+                model.save(str(last_path))
+                print(f"[Shutdown] Saved last model to: {last_path}", flush=True)
+            except Exception as e:
+                print(f"[Shutdown] Failed to save model: {e}", flush=True)
         # Save plugin-based frame-exact input recording
         if getattr(args, "record_input_with_plugin", False):
             from skill_lab.emulator_with_debug import (

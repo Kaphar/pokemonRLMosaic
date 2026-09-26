@@ -627,11 +627,15 @@ class BrowserMapDashboard:
         }
 
     def _find_most_recent_checkpoint(self) -> str | None:
-        """Find the most recent ``.zip`` checkpoint under ``runs/``."""
-        runs_dir = PROJECT_ROOT / "runs"
-        if not runs_dir.is_dir():
-            return None
-        zip_files = list(runs_dir.glob("*.zip"))
+        """Find the most recent ``.zip`` checkpoint under ``runs/`` or ``mosaic_sessions/checkpoints/``."""
+        search_dirs = [
+            PROJECT_ROOT / "runs",
+            PROJECT_ROOT / "mosaic_sessions" / "checkpoints",
+        ]
+        zip_files = []
+        for d in search_dirs:
+            if d.is_dir():
+                zip_files.extend(d.glob("*.zip"))
         if not zip_files:
             return None
         most_recent = max(zip_files, key=lambda p: p.stat().st_mtime)
