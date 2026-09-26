@@ -56,6 +56,7 @@ KNOWN_CHECKPOINTS = [
     "ITEM: Oak Parcel",
     "Oak's Lab to give back parcel",
     "Oak Got Parcel",
+    "Parcel Delivered",
 ]
 
 

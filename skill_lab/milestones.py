@@ -157,14 +157,21 @@ class MilestoneTracker:
         """Evaluate an ``item_check`` dict against the player's bag contents.
 
         ``item_check`` keys:
-            ``item_id``      – Gen 1 internal item id (e.g. 70 for Oak's Parcel).
-            ``min_quantity`` – minimum quantity required (default 1).
+            ``item_id``         – Gen 1 internal item id (e.g. 70 for Oak's Parcel).
+            ``min_quantity``    – minimum quantity required (default 1).
+            ``require_not_item`` – if True, trigger when the player does NOT have
+                                   ``item_id`` (i.e. item was lost/removed).  Defaults
+                                   to False.
         """
         item_id = item_check.get("item_id")
         if item_id is None:
             return False
         min_quantity = int(item_check.get("min_quantity", 1))
-        return game_state.has_item(item_id)
+        require_not_item = bool(item_check.get("require_not_item", False))
+        has_item = game_state.has_item(item_id)
+        if require_not_item:
+            return not has_item
+        return has_item
 
     def _check_map_condition(
         self,

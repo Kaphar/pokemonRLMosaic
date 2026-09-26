@@ -3595,7 +3595,7 @@
       "opacity": 0.25,
       "action": "Up",
       "activate_on": "Fought Rival",
-      "deactivate_on": "Oak Got Parcel",
+      "deactivate_on": "Parcel Delivered",
       "mask_rules": []
     },
     {
@@ -3677,7 +3677,7 @@
       ],
       "label": "Action_mask",
       "color": "#4a9eff",
-      "opacity": 0.25,
+      "opacity": 0.3,
       "action": "Down",
       "activate_on": "Got Pokedex",
       "deactivate_on": null,
