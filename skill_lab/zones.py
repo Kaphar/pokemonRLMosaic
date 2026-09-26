@@ -279,7 +279,9 @@ class ZoneManager:
         * **mask_rules** (preferred) — a list of ``{"action": "Down",
           "activate_on": "Fought Rival"}`` rules.  Each rule independently
           checks its ``activate_on`` checkpoint, so a single zone can mask
-          different actions at different milestones.
+          different actions at different milestones.  A rule is also gated by
+          its ``deactivate_on`` checkpoint — once that milestone is achieved
+          the rule no longer masks its action.
         * **action + activate_on** (legacy) — a single action string and a
           single activation checkpoint on the zone itself.
         """
@@ -299,6 +301,9 @@ class ZoneManager:
                         continue
                     activate_on = rule.get("activate_on")
                     if activate_on is not None and activate_on not in achieved_checkpoints:
+                        continue
+                    deactivate_on = rule.get("deactivate_on")
+                    if deactivate_on is not None and deactivate_on in achieved_checkpoints:
                         continue
                     if action not in masked:
                         masked.append(action)
