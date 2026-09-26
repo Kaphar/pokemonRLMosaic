@@ -113,9 +113,10 @@ const state = {
    bandwidthHistory: [],
    lastBytesSent: 0,
   lastBandwidthTime: Date.now(),
-  coordPopover: null,
-  hoverTimer: null,
-  lastHoverPos: null,
+   coordPopover: null,
+   hoverTimer: null,
+   lastHoverPos: null,
+   lastMousePos: null,
 };
 
 const SVG_NS = 'http://www.w3.org/2000/svg';

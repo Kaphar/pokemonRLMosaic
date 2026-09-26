@@ -2019,6 +2019,22 @@ def run_player(
     pyboy = PyBoy(str(rom_path), window=window_mode, sound=sound_enabled, debug=debug_mode)
     pyboy.set_emulation_speed(replay_speed_value)
 
+    # The SDL2 build used here (pysdl2-dll 2.30.2) has *inverted* pause semantics:
+    # SDL_PauseAudioDevice(dev, 0) pauses and SDL_PauseAudioDevice(dev, 1) resumes.
+    # PyBoy internally calls pause(0) to start its audio, which in this build
+    # actually leaves the device paused — so no sound is heard.  We compensate by
+    # explicitly enabling playback on the audio device that PyBoy just opened.
+    if sound_enabled:
+        try:
+            for _dev_id in range(1, 32):
+                _status = sdl2.SDL_GetAudioDeviceStatus(_dev_id)
+                if _status != 0:
+                    sdl2.SDL_PauseAudioDevice(_dev_id, 1)
+                    print(f"[Sound] Started SDL audio device {_dev_id}", flush=True)
+                    break
+        except Exception as _error:
+            print(f"[Sound] Audio start failed: {_error}", flush=True)
+
     def close_emulator() -> None:
         if input_controller is not None:
             input_controller.request_quit()
@@ -2130,119 +2146,137 @@ def run_player(
                 return _wrapper
             special_keys[_key] = _guarded()
 
-    try:
-        if state_path is not None:
-            with state_path.open("rb") as state_file:
-                pyboy.load_state(state_file)
-
-        pyboy.set_emulation_speed(replay_speed_value)
-        if input_controller is not None:
-            input_controller.emulation_speed = replay_speed_value
-
-        frame_count = 0
-        replay_index = 0 if not no_replay else len(actions)
-        replay_finished = len(actions) == 0 or no_replay
-        dv_summary_printed = False
         interactive_env = None
         model = None
         interactive_needs_resync = False
-        observer_env.envs[0].step_count = 0
 
-        if no_replay:
-            print("[Dev Mode] No-replay mode: state loaded, ready to play.", flush=True)
-            if interactive and interactive_model_path is not None:
-                toggle_model()
-
-        # Plugin replay state
-        plugin_input_events: list[dict[str, Any]] = []
-        if use_plugin_replay and replay_path is not None and not no_replay:
-            print(f"Playing {len(actions)} actions via plugin-style frame-exact replay...")
-            state_path_replay = resolve_recording_path(replay_data.get("original_init_state", replay_data.get("init_state")))
-            if state_path_replay is not None and state_path_replay.is_file():
-                with state_path_replay.open("rb") as state_file:
+        try:
+            if state_path is not None:
+                with state_path.open("rb") as state_file:
                     pyboy.load_state(state_file)
-                _prime_emulator(pyboy, state_path_replay, actions, replay_action_freq, replay_noop_action, num_actions=len(actions))
-                with state_path_replay.open("rb") as state_file:
-                    pyboy.load_state(state_file)
-            elif state_path_replay is not None:
-                print(f"[WARNING] Plugin replay init_state not found: {state_path_replay}")
-            plugin_input_events = replay_data.get("input_events", [])
-            if not plugin_input_events:
-                plugin_input_events = generate_input_events(actions, replay_action_freq, replay_noop_action)
 
-        inspector.show()
-        inspector.render(observer_env, 0, [])
-        cv2.waitKey(1)
+            pyboy.set_emulation_speed(replay_speed_value)
+            if input_controller is not None:
+                input_controller.emulation_speed = replay_speed_value
 
-        if interactive:
-            print("[Interactive] Interactive mode enabled — agent control toggles via agent_enabled.txt", flush=True)
-            if interactive_model_path:
-                try:
-                    from v2.red_gym_env_v2 import RedGymEnv
-                    model_env_config = {
-                        'headless': True, 'save_final_state': False, 'early_stop': False,
-                        'action_freq': replay_action_freq,
-                        'init_state': str(state_path) if state_path else None,
-                        'max_steps': 2 ** 23, 'print_rewards': False,
-                        'save_video': False, 'fast_video': True,
-                        'session_path': Path(f'interactive_session_{str(uuid.uuid4())[:8]}'),
-                        'gb_path': str(rom_path), 'debug': False,
-                        'sim_frame_dist': 2_000_000.0, 'extra_buttons': False,
-                        'noop_button': True,
-                    }
-                    interactive_env = RedGymEnv(model_env_config)
-                    interactive_env.reset()
-                    from stable_baselines3 import PPO
-                    model = PPO.load(interactive_model_path, env=interactive_env,
-                                     custom_objects={'lr_schedule': 0, 'clip_range': 0})
-                    print(f"[Interactive] Model loaded from {interactive_model_path}", flush=True)
-                except Exception as error:
-                    print(f"[Interactive] Failed to load model: {error}", flush=True)
-                    model = None
-            interactive_needs_resync = True
-        else:
-            interactive_env = None
-            model = None
+            frame_count = 0
+            replay_index = 0 if not no_replay else len(actions)
+            replay_finished = len(actions) == 0 or no_replay
+            dv_summary_printed = False
+            observer_env.envs[0].step_count = 0
 
-        while True:
-            if use_plugin_replay and replay_path is not None and frame_count < total_replay_frames:
-                # Replay one action's worth of frames, then render the inspector
-                batch = replay_action_freq
-                start_f = frame_count
-                replayed_to = replay_frame_by_frame(
-                    pyboy, plugin_input_events, total_replay_frames,
-                    verbose=False, render=render_during_replay,
-                    start_frame=start_f, max_frames=batch,
-                )
-                frame_count = replayed_to
-                replay_index = frame_count // replay_action_freq
-            elif replay_index < len(actions):
-                action = actions[replay_index]
-                replay_index += 1
-                print(f"REPLAYING ACTION {action} ({ACTION_NAMES[action]}) with freq={replay_action_freq}")
-                replay_action(pyboy, action, replay_action_freq, render=render_during_replay, noop_action=replay_noop_action)
-                frame_count += replay_action_freq
+            if no_replay:
+                print("[Dev Mode] No-replay mode: state loaded, ready to play.", flush=True)
+                if interactive and interactive_model_path is not None:
+                    toggle_model()
+
+            # Plugin replay state
+            plugin_input_events: list[dict[str, Any]] = []
+            if use_plugin_replay and replay_path is not None and not no_replay:
+                print(f"Playing {len(actions)} actions via plugin-style frame-exact replay...")
+                state_path_replay = resolve_recording_path(replay_data.get("original_init_state", replay_data.get("init_state")))
+                if state_path_replay is not None and state_path_replay.is_file():
+                    with state_path_replay.open("rb") as state_file:
+                        pyboy.load_state(state_file)
+                    _prime_emulator(pyboy, state_path_replay, actions, replay_action_freq, replay_noop_action, num_actions=len(actions))
+                    with state_path_replay.open("rb") as state_file:
+                        pyboy.load_state(state_file)
+                elif state_path_replay is not None:
+                    print(f"[WARNING] Plugin replay init_state not found: {state_path_replay}")
+                plugin_input_events = replay_data.get("input_events", [])
+                if not plugin_input_events:
+                    plugin_input_events = generate_input_events(actions, replay_action_freq, replay_noop_action)
+
+            inspector.show()
+            inspector.render(observer_env, 0, [])
+            cv2.waitKey(1)
+
+            if interactive:
+                print("[Interactive] Interactive mode enabled — agent control toggles via agent_enabled.txt", flush=True)
+                if interactive_model_path:
+                    try:
+                        from v2.red_gym_env_v2 import RedGymEnv
+                        model_env_config = {
+                            'headless': True, 'save_final_state': False, 'early_stop': False,
+                            'action_freq': replay_action_freq,
+                            'init_state': str(state_path) if state_path else None,
+                            'max_steps': 2 ** 23, 'print_rewards': False,
+                            'save_video': False, 'fast_video': True,
+                            'session_path': Path(f'interactive_session_{str(uuid.uuid4())[:8]}'),
+                            'gb_path': str(rom_path), 'debug': False,
+                            'sim_frame_dist': 2_000_000.0, 'extra_buttons': False,
+                            'noop_button': True,
+                        }
+                        interactive_env = RedGymEnv(model_env_config)
+                        interactive_env.reset()
+                        from stable_baselines3 import PPO
+                        model = PPO.load(interactive_model_path, env=interactive_env,
+                                         custom_objects={'lr_schedule': 0, 'clip_range': 0})
+                        print(f"[Interactive] Model loaded from {interactive_model_path}", flush=True)
+                    except Exception as error:
+                        print(f"[Interactive] Failed to load model: {error}", flush=True)
+                        model = None
+                interactive_needs_resync = True
             else:
-                if interactive:
-                    agent_on = _check_agent_enabled()
-                    if agent_on and model is not None:
-                        if interactive_needs_resync:
-                            _sync_interactive_env(interactive_env, pyboy)
-                            interactive_needs_resync = False
-                        try:
-                            obs = interactive_env._get_obs()
-                            action, _ = model.predict(obs, deterministic=False)
-                            action = int(action)
-                            print(f"[Model] action={action} ({ACTION_NAMES[action] if action < len(ACTION_NAMES) else 'noop'})", flush=True)
-                        except Exception as error:
-                            print(f"[Interactive] Model prediction error: {error}", flush=True)
-                            action = interactive_env.noop_button_index if interactive_env.noop_button_index >= 0 else 0
-                        noop = interactive_env.noop_button_index if interactive_env.noop_button_index >= 0 else replay_noop_action
-                        replay_action(pyboy, action, replay_action_freq, verbose=False, render=True, noop_action=noop)
-                        interactive_env.step(action)
-                        frame_count += replay_action_freq
-                    elif agent_on and model is None:
-                        print("[WARNING] Model mode is ON but model is None — did you provide a model checkpoint?", flush=True)
+                interactive_env = None
+                model = None
+
+            while True:
+                if use_plugin_replay and replay_path is not None and frame_count < total_replay_frames:
+                    # Replay one action's worth of frames, then render the inspector
+                    batch = replay_action_freq
+                    start_f = frame_count
+                    replayed_to = replay_frame_by_frame(
+                        pyboy, plugin_input_events, total_replay_frames,
+                        verbose=False, render=render_during_replay,
+                        start_frame=start_f, max_frames=batch,
+                    )
+                    frame_count = replayed_to
+                    replay_index = frame_count // replay_action_freq
+                elif replay_index < len(actions):
+                    action = actions[replay_index]
+                    replay_index += 1
+                    print(f"REPLAYING ACTION {action} ({ACTION_NAMES[action]}) with freq={replay_action_freq}")
+                    replay_action(pyboy, action, replay_action_freq, render=render_during_replay, noop_action=replay_noop_action)
+                    frame_count += replay_action_freq
+                else:
+                    if interactive:
+                        agent_on = _check_agent_enabled()
+                        if agent_on and model is not None:
+                            if interactive_needs_resync:
+                                _sync_interactive_env(interactive_env, pyboy)
+                                interactive_needs_resync = False
+                            try:
+                                obs = interactive_env._get_obs()
+                                action, _ = model.predict(obs, deterministic=False)
+                                action = int(action)
+                                print(f"[Model] action={action} ({ACTION_NAMES[action] if action < len(ACTION_NAMES) else 'noop'})", flush=True)
+                            except Exception as error:
+                                print(f"[Interactive] Model prediction error: {error}", flush=True)
+                                action = interactive_env.noop_button_index if interactive_env.noop_button_index >= 0 else 0
+                            noop = interactive_env.noop_button_index if interactive_env.noop_button_index >= 0 else replay_noop_action
+                            replay_action(pyboy, action, replay_action_freq, verbose=False, render=True, noop_action=noop)
+                            interactive_env.step(action)
+                            frame_count += replay_action_freq
+                        elif agent_on and model is None:
+                            print("[WARNING] Model mode is ON but model is None — did you provide a model checkpoint?", flush=True)
+                        else:
+                            if input_controller is not None:
+                                input_controller.poll()
+                                if input_controller.quit_requested:
+                                    break
+                            if not pyboy.tick(1, True):
+                                if input_controller is not None:
+                                    input_controller.request_quit()
+                                break
+                            frame_count += 1
+                            interactive_needs_resync = True
+                    elif effective_deterministic:
+                        # After replay finishes, keep ticking with render=True so the
+                        # inspector retains a visible screen. With window="null",
+                        # tick(1, True) updates the screen buffer without SDL events.
+                        pyboy.tick(1, True)
+                        frame_count += 1
                     else:
                         if input_controller is not None:
                             input_controller.poll()
@@ -2253,102 +2287,85 @@ def run_player(
                                 input_controller.request_quit()
                             break
                         frame_count += 1
-                        interactive_needs_resync = True
-                elif effective_deterministic:
-                    # After replay finishes, keep ticking with render=True so the
-                    # inspector retains a visible screen. With window="null",
-                    # tick(1, True) updates the screen buffer without SDL events.
-                    pyboy.tick(1, True)
-                    frame_count += 1
-                else:
+
+                if replay_index >= len(actions):
+                    replay_finished = True
+                    if not no_replay and use_plugin_replay and replay_path is not None and frame_count >= total_replay_frames:
+                        if not dv_summary_printed:
+                            _print_dv_summary(pyboy, replay_path)
+                            dv_summary_printed = True
+
+                observer_env.envs[0].step_count = frame_count // replay_action_freq
+
+                if not inspector.render(observer_env, 0, []):
                     if input_controller is not None:
-                        input_controller.poll()
-                        if input_controller.quit_requested:
+                        input_controller.request_quit()
+                    break
+
+                control_window.update()
+                if control_window._closed:
+                    break
+
+                if effective_deterministic and not interactive:
+                    if replay_finished:
+                        key = cv2.waitKey(1)
+                        if key in (ord("q"), 27):
                             break
-                    if not pyboy.tick(1, True):
+                        time.sleep(0.001)
+                    else:
+                        cv2.waitKey(1)
+                        time.sleep(0.001)
+                elif interactive:
+                    # Interactive mode: SDL2 processes the PyBoy window + InputController (gamepad & keyboard).
+                    # cv2.waitKey keeps the CV2 inspector window responsive for Q/ESC.
+                    # F1-F5 shortcuts are handled by the Tkinter ControlWindow when it has focus.
+                    try:
+                        inspector_visible = cv2.getWindowProperty(inspector.title, cv2.WND_PROP_VISIBLE) >= 1
+                    except cv2.error:
+                        inspector_visible = False
+                    if not inspector_visible:
                         if input_controller is not None:
                             input_controller.request_quit()
                         break
-                    frame_count += 1
-
-            if replay_index >= len(actions):
-                replay_finished = True
-                if not no_replay and use_plugin_replay and replay_path is not None and frame_count >= total_replay_frames:
-                    if not dv_summary_printed:
-                        _print_dv_summary(pyboy, replay_path)
-                        dv_summary_printed = True
-
-            observer_env.envs[0].step_count = frame_count // replay_action_freq
-
-            if not inspector.render(observer_env, 0, []):
-                if input_controller is not None:
-                    input_controller.request_quit()
-                break
-
-            control_window.update()
-            if control_window._closed:
-                break
-
-            if effective_deterministic and not interactive:
-                if replay_finished:
                     key = cv2.waitKey(1)
                     if key in (ord("q"), 27):
                         break
                     time.sleep(0.001)
                 else:
-                    cv2.waitKey(1)
-                    time.sleep(0.001)
-            elif interactive:
-                # Interactive mode: SDL2 processes the PyBoy window + InputController (gamepad & keyboard).
-                # cv2.waitKey keeps the CV2 inspector window responsive for Q/ESC.
-                # F1-F5 shortcuts are handled by the Tkinter ControlWindow when it has focus.
-                try:
-                    inspector_visible = cv2.getWindowProperty(inspector.title, cv2.WND_PROP_VISIBLE) >= 1
-                except cv2.error:
-                    inspector_visible = False
-                if not inspector_visible:
-                    if input_controller is not None:
-                        input_controller.request_quit()
-                    break
-                key = cv2.waitKey(1)
-                if key in (ord("q"), 27):
-                    break
+                    # Non-interactive mode: SDL2 owns the event loop.
+                    try:
+                        inspector_visible = cv2.getWindowProperty(inspector.title, cv2.WND_PROP_VISIBLE) >= 1
+                    except cv2.error:
+                        inspector_visible = False
+                    if not inspector_visible:
+                        if input_controller is not None:
+                            input_controller.request_quit()
+                        break
+                    key = cv2.waitKey(1)
+                    if key in (ord("q"), 27):
+                        break
                 time.sleep(0.001)
-            else:
-                # Non-interactive mode: SDL2 owns the event loop.
-                try:
-                    inspector_visible = cv2.getWindowProperty(inspector.title, cv2.WND_PROP_VISIBLE) >= 1
-                except cv2.error:
-                    inspector_visible = False
-                if not inspector_visible:
-                    if input_controller is not None:
-                        input_controller.request_quit()
-                    break
-                key = cv2.waitKey(1)
-                if key in (ord("q"), 27):
-                    break
-                time.sleep(0.001)
-    except OSError as error:
-        print(f"PyBoy stopped while closing the SDL window: {error}")
-    finally:
-        inspector.close()
-        try:
-            control_window._closed = True
-            _tk_root.destroy()
-        except Exception:
-            pass
-        if input_controller is not None:
-            input_controller.close()
-        if interactive_env is not None:
+        except OSError as error:
+            print(f"PyBoy stopped while closing the SDL window: {error}")
+        finally:
+            inspector.close()
             try:
-                interactive_env.pyboy.stop()
+                control_window._closed = True
+                _tk_root.destroy()
             except Exception:
                 pass
-        try:
-            pyboy.stop()
-        except OSError as error:
-            print(f"PyBoy cleanup warning: {error}")
-        cv2.destroyAllWindows()
+            if input_controller is not None:
+                input_controller.close()
+            if interactive_env is not None:
+                try:
+                    interactive_env.pyboy.stop()
+                except Exception:
+                    pass
+            try:
+                pyboy.stop()
+            except OSError as error:
+                print(f"PyBoy cleanup warning: {error}")
+            cv2.destroyAllWindows()
 
 
 def main() -> None:

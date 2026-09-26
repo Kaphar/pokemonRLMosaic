@@ -27,7 +27,7 @@ REWARD_BASELINES: dict[str, float] = {
     "badge":               25.0,
     "level":                1.0,
     "pokedex":              1.0,
-    "heal":                 3.0,
+    "heal":                 20.0,
     "capture":             1.0,
     "combat_wild":          0.2,
     "combat_trainer":       0.6,
@@ -38,7 +38,7 @@ REWARD_BASELINES: dict[str, float] = {
     "breadcrumb_arrival":  10.0,
     "health_proximity":     0.5,
     "health_arrival":      15.0,
-    "death_penalty":        -25.0,
+    "death_penalty":        -35.0,
 }
 
 REWARD_CATEGORIES: dict[str, str] = {

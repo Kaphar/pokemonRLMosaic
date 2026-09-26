@@ -338,7 +338,7 @@ function renderMap(data) {
     for (const cell of cells) {
       const rect = document.createElementNS(SVG_NS, 'rect');
       rect.setAttribute('x', cell[0]);
-      rect.setAttribute('y', cell[1]);
+      rect.setAttribute('y', cell[1] - 8);
       rect.setAttribute('width', 16);
       rect.setAttribute('height', 16);
       rect.setAttribute('fill', color);
@@ -348,16 +348,17 @@ function renderMap(data) {
   }
 
   for (const env of data.envs || []) {
+    const halfTile = 8;
     const circle = document.createElementNS(SVG_NS, 'circle');
-    circle.setAttribute('cx', env.x);
-    circle.setAttribute('cy', env.y);
+    circle.setAttribute('cx', env.x + halfTile);
+    circle.setAttribute('cy', env.y + halfTile);
     circle.setAttribute('r', 6);
     circle.setAttribute('fill', '#67f39b');
     circle.setAttribute('stroke', '#ffffff');
     circle.setAttribute('stroke-width', 1.2);
     const label = document.createElementNS(SVG_NS, 'text');
-    label.setAttribute('x', env.x + 10);
-    label.setAttribute('y', env.y - 8);
+    label.setAttribute('x', env.x + halfTile + 10);
+    label.setAttribute('y', env.y + halfTile - 8);
     label.setAttribute('fill', '#eaf2ff');
     label.setAttribute('font-size', '12');
     label.textContent = 'E' + (env.env_index + 1);
@@ -484,7 +485,7 @@ function initMap() {
       const tileX = Math.round(viewBoxX / 16) * 16;
       const tileY = Math.round(viewBoxY / 16) * 16;
       state.lavaHighlight.setAttribute('x', tileX);
-      state.lavaHighlight.setAttribute('y', tileY);
+      state.lavaHighlight.setAttribute('y', tileY - 8);
       state.lavaHighlight.style.display = 'block';
     }
   });
@@ -560,6 +561,41 @@ function initMap() {
     if (isMapTabActive() && event.key === 'r' && (event.ctrlKey || event.metaKey)) {
       event.preventDefault();
       resetZoom();
+    }
+    console.log(event)
+    if (event.key === 'c') {
+      event.preventDefault();
+      if (state.lastMousePos) {
+        const coords = clientToMapCoordinates(state.lastMousePos.x, state.lastMousePos.y);
+        const tileX = Math.round(coords.mapX / 16) * 16;
+        const tileY = Math.round(coords.mapY / 16) * 16;
+        let logMsg = 'Map XY: ' + Math.round(coords.mapX) + ', ' + Math.round(coords.mapY) +
+          ' | Tile: ' + tileX + ', ' + tileY;
+        if (state.lavaHighlight && state.lavaHighlight.style.display !== 'none') {
+          const hlX = parseInt(state.lavaHighlight.getAttribute('x'), 10);
+          const hlY = parseInt(state.lavaHighlight.getAttribute('y'), 10);
+          logMsg += ' | Highlight: ' + hlX + ', ' + hlY + ' (rendered rect)';
+        }
+        if (state.lavaPlacementMode) {
+          logMsg += ' | Placement mode: ' + (state.zonePlacingType || 'lava');
+        }
+        requestGameCoordinates(coords.mapX, coords.mapY).then(function(data) {
+          if (data) {
+            const mapIdHex = data.map_id.toString(16).toUpperCase().padStart(2, '0');
+            const fullMsg = logMsg +
+              ' | Game: map=0x' + mapIdHex + ' (' + data.map_name +
+              '), x=' + data.x + ', y=' + data.y;
+            console.log(fullMsg);
+            navigator.clipboard.writeText(fullMsg).catch(function() {});
+          } else {
+            const fullMsg = logMsg + ' | Game: (server unreachable)';
+            console.log(fullMsg);
+            navigator.clipboard.writeText(fullMsg).catch(function() {});
+          }
+        });
+      } else {
+        console.log('No mouse position available on map');
+      }
     }
   });
 
@@ -655,6 +691,9 @@ function initMap() {
   state.coordPopover = popover;
 
   el.mapSvg.addEventListener('mousemove', startHoverCheck);
+  el.mapSvg.addEventListener('mousemove', function(event) {
+    state.lastMousePos = { x: event.clientX, y: event.clientY };
+  });
   el.mapSvg.addEventListener('mouseleave', hideCoordPopover);
   el.mapSvg.addEventListener('dblclick', handleMapDblClick);
   el.mapSvg.addEventListener('mousedown', function() {
