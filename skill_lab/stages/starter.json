@@ -71,10 +71,8 @@
     }
   ],
   "breadcrumbs": [
-    {"target_x": 4, "target_y": 11, "target_map": 0, "label": "Oak's Lab entrance"},
-    {"target_x": 5, "target_y": 10, "target_map": 0, "label": "First poke ball"},
-    {"target_x": 5, "target_y": 9, "target_map": 0, "label": "Second poke ball"},
-    {"target_x": 5, "target_y": 8, "target_map": 0, "label": "Third poke ball"}
+    {"target_x": 23, "target_y": 26, "target_map": 1, "label": "Viridian City PC"},
+    {"target_x": 5, "target_y": 3, "target_map": 40, "label": "Oak's Lab"}
   ],
   "target_milestones": [
     "0xD747-0",

@@ -15,17 +15,21 @@ except ImportError:
 class BreadcrumbTracker:
     """Track navigation progress toward a sequence of waypoint destinations.
 
-    Awards a small proximity reward every time the agent gets strictly closer
-    to its current destination (one reward per improvement, no diminishing
-    return), and a larger ``breadcrumb_arrival`` reward when within
+    Awards a **proportional** proximity reward every step the agent closes
+    the tile-distance gap to its current destination (``base * delta_tiles``),
+    so that the reward scales with how many tiles were traversed toward the
+    target.  A larger ``breadcrumb_arrival`` reward fires when within
     :attr:`ARRIVAL_THRESHOLD` tiles.
 
     The tracker projects local game coordinates to global map coordinates
     (via ``v2.map_projection.project_position``) so that waypoints defined in
-    stage JSON are compared consistently.
+    stage JSON are compared consistently in a shared pixel/tile space.
     """
 
     ARRIVAL_THRESHOLD = 3  # tiles
+
+    PIXELS_PER_TILE = 16
+    """Conversion factor from projected pixel distance to tile distance."""
 
     def __init__(
         self,
@@ -35,6 +39,7 @@ class BreadcrumbTracker:
         self.waypoints: list[dict[str, Any]] = list(waypoints or [])
         self.effective_rewards = effective_rewards or {}
         self._closest_reached: float | None = None
+        self._prev_distance: float | None = None
         self._current_waypoint_idx = 0
         self.total_reward: float = 0.0
 
@@ -74,6 +79,7 @@ class BreadcrumbTracker:
     def reset(self) -> None:
         """Reset tracker state for a new episode."""
         self._closest_reached = None
+        self._prev_distance = None
         self._current_waypoint_idx = 0
         self.total_reward = 0.0
 
@@ -100,11 +106,11 @@ class BreadcrumbTracker:
     def update(self, x: int, y: int, map_id: int, env_label: str = "") -> float:
         """Process a new position and return any reward earned.
 
-        Awards a small proximity reward **every time** the agent's distance
-        to the current waypoint drops to a new integer-floor level (i.e. a
-        decrease of at least one full tile in projected space), so that
-        sub-tile jitter does not trigger repeated rewards.  A larger
-        ``breadcrumb_arrival`` reward is given when within
+        Awards a **proportional** proximity reward every step that the agent
+        closes the tile-distance gap to the current waypoint:
+        ``reward = base * delta_tiles``.  This gives a continuous gradient
+        signal — every step toward the target yields a commensurate reward.
+        A larger ``breadcrumb_arrival`` reward is given when within
         :attr:`ARRIVAL_THRESHOLD` tiles.
         """
         if not self.waypoints:
@@ -118,36 +124,47 @@ class BreadcrumbTracker:
 
         wp = self.waypoints[self._current_waypoint_idx]
 
-        distance = self._distance(x, y, map_id, wp)
+        distance_px = self._distance(x, y, map_id, wp)
+        distance_tiles = distance_px / self.PIXELS_PER_TILE
         label = env_label or ""
         base_reward = self.effective_rewards.get("breadcrumb", 0.5)
 
+        wp_label = wp.get("label", f"Waypoint {self._current_waypoint_idx + 1}")
+        wp_map = int(wp.get("target_map", 0))
+        wp_x = int(wp.get("target_x", 0))
+        wp_y = int(wp.get("target_y", 0))
+
         # Check arrival
-        if distance <= self.ARRIVAL_THRESHOLD:
+        if distance_tiles <= self.ARRIVAL_THRESHOLD:
             arrival_reward = self.effective_rewards.get("breadcrumb_arrival", 10.0)
             reward += arrival_reward
             self.total_reward += arrival_reward
-            wp_label = wp.get("label", f"Waypoint {self._current_waypoint_idx + 1}")
-            print(f"{label} >> Arrived at: {wp_label} (+{arrival_reward:.2f})", flush=True)
+            print(f"{label} >> Arrived at: {wp_label} "
+                  f"(wp=map:0x{wp_map:02X}/x={wp_x}/y={wp_y} "
+                  f"player=map:0x{map_id:02X}/x={x}/y={y} "
+                  f"dist={distance_tiles:.1f}t) (+{arrival_reward:.2f})",
+                  flush=True)
             self._current_waypoint_idx += 1
+            self._prev_distance = None
             self._closest_reached = None
             return reward
 
-        # Proximity: fixed reward only when the integer-floor of the
-        # distance strictly decreases — avoids rewarding sub-tile jitter
-        # at the same or similar distance level.
-        level = math.floor(distance)
-        if self._closest_reached is None:
-            self._closest_reached = level
-        elif level < self._closest_reached:
-            proximity_reward = base_reward
-            reward += proximity_reward
-            self.total_reward += proximity_reward
-            self._closest_reached = level
-            wp_label = wp.get("label", f"Waypoint {self._current_waypoint_idx + 1}")
-            print(f"{label} >> Closer to '{wp_label}': dist={distance:.1f} "
-                  f"(+{proximity_reward:.2f})", flush=True)
+        # Proportional proximity: reward every step that reduces distance,
+        # scaled by the number of tiles closed.
+        if self._prev_distance is not None:
+            delta = self._prev_distance - distance_tiles
+            if delta > 0:
+                proximity_reward = base_reward * delta
+                reward += proximity_reward
+                self.total_reward += proximity_reward
+                self._closest_reached = distance_tiles
+                print(f"{label} >> Closer to '{wp_label}': "
+                      f"wp=map:0x{wp_map:02X}/x={wp_x}/y={wp_y} "
+                      f"player=map:0x{map_id:02X}/x={x}/y={y} "
+                      f"dist={distance_tiles:.1f}t (was {self._prev_distance:.1f}t) "
+                      f"(+{proximity_reward:.2f})", flush=True)
 
+        self._prev_distance = distance_tiles
         return reward
 
     def get_progress(self) -> dict[str, Any]:
@@ -156,6 +173,7 @@ class BreadcrumbTracker:
             "total_waypoints": len(self.waypoints),
             "current_target_index": self._current_waypoint_idx,
             "closest_reached": self._closest_reached,
+            "prev_distance": self._prev_distance,
             "total_reward": self.total_reward,
             "waypoint_labels": [wp.get("label", f"wp_{i}") for i, wp in enumerate(self.waypoints)],
         }
@@ -175,26 +193,30 @@ class PokemonCenterTracker:
     :attr:`HEALTH_THRESHOLD` (and the party is non-empty), so the tracker
     does not interfere with normal exploration when health is healthy.
 
-    Each call to :meth:`update` that shows the player has gotten **strictly
-    closer** to the nearest center (in Manhattan projected distance) awards a
-    small fixed ``health_proximity`` reward scaled by urgency
-    (``1 - hp_fraction``).  There is no diminishing-return decay — once the
-    closest distance is updated, a further improvement of even 1 pixel
-    triggers another reward so the agent sees every step of progress.
+    Rewards are **proportional** to the distance reduction in tile units
+    (not a flat per-step amount), so every step toward the center generates
+    a commensurate reward.  A larger ``health_arrival`` reward fires when
+    the agent reaches the center.
     """
 
-    ARRIVAL_THRESHOLD = 8
-    """Pixel distance (in projected space) within which the agent is
+    ARRIVAL_THRESHOLD = 3
+    """Distance in *tiles* (projected space) within which the agent is
     considered to have reached the Pokemon Center."""
 
-    HEALTH_THRESHOLD = 0.5
+    HEALTH_THRESHOLD = 0.7
     """HP fraction below which health-proximity rewards are enabled."""
 
+    PIXELS_PER_TILE = 16
+    """Conversion factor from projected pixel distance to tile distance."""
+
     POKEMON_CENTERS: list[dict[str, Any]] = [
-        {"map_id": 41, "x": 4, "y": 2, "label": "Viridian City"},
+        {"map_id": 41, "x": 23, "y": 26, "label": "Viridian City"},
         {"map_id": 58, "x": 4, "y": 2, "label": "Pewter City"},
         {"map_id": 68, "x": 4, "y": 2, "label": "Route 4"},
     ]
+    # map=0x02 (Pewter City), x=13, y=26 # this is the location of the tile under the door of the pkmn center in pewter city.
+    # careful : they are also in the starter.json.
+
 
     def __init__(
         self,
@@ -202,6 +224,7 @@ class PokemonCenterTracker:
     ) -> None:
         self.effective_rewards = effective_rewards or {}
         self._closest_reached: float | None = None
+        self._prev_distance: float | None = None
         self._current_center_idx: int | None = None
         self._health_enabled: bool = False
         self._death_count: int = 0
@@ -228,6 +251,7 @@ class PokemonCenterTracker:
 
     def reset(self) -> None:
         self._closest_reached = None
+        self._prev_distance = None
         self._current_center_idx = None
         self._health_enabled = False
         self._death_count = 0
@@ -250,14 +274,14 @@ class PokemonCenterTracker:
         Returns ``(proximity_reward, death_penalty)``.
         ``death_penalty`` is non-zero only on the step where the blackout
         is first detected.  Proximity rewards are suppressed while in battle
-        and only fire on actual movement toward the target (not merely on
-        an HP drop).
+        (the player cannot move toward a center and HP changes come from
+        combat — the death penalty still fires).
 
-        Proximity rewards fire **every time** the player's Manhattan distance
-        to the nearest Pokemon Center strictly decreases — one reward per
-        improvement, no diminishing return.  The reward is a small fixed
-        amount scaled by health urgency (``1 - hp_fraction``) so that lower
-        HP makes each improvement worth more.
+        Proximity reward is **proportional** to the tile-distance reduction
+        toward the nearest center: ``reward = k * delta_tiles * urgency``
+        where ``urgency = 1 - hp_fraction``.  Every step that reduces
+        distance yields a proportional reward, providing continuous gradient
+        signal rather than a sparse binary improvement flag.
         """
         reward = 0.0
         death_penalty = 0.0
@@ -284,10 +308,10 @@ class PokemonCenterTracker:
             0.0 < hp_fraction < self.HEALTH_THRESHOLD
         )
         if not self._health_enabled:
-            self._last_position = None
+            self._prev_distance: float | None = None
             return reward, death_penalty
 
-        center_idx, distance = self._nearest_center(px, py)
+        center_idx, distance_px = self._nearest_center(px, py)
 
         # Track position to avoid rewarding HP-only changes.
         current_pos = (px, py, map_id)
@@ -296,46 +320,48 @@ class PokemonCenterTracker:
         self._last_position = current_pos
 
         if center_idx != self._current_center_idx:
+            self._prev_distance = None
             self._closest_reached = None
             self._current_center_idx = center_idx
 
-        # When the tracker first becomes active (HP just dropped below
-        # threshold) or switches to a new nearest center, seed
-        # _closest_reached without rewarding — the agent hasn't moved yet.
-        if self._closest_reached is None:
-            self._closest_reached = math.floor(distance)
-            return reward, death_penalty
-
         center = self.POKEMON_CENTERS[center_idx]
         urgency = 1.0 - hp_fraction  # 0 at HEALTH_THRESHOLD, approaching 1 at 0 HP
+        distance_tiles = distance_px / self.PIXELS_PER_TILE
 
         # Arrival reward (scaled by urgency)
-        if distance <= self.ARRIVAL_THRESHOLD:
+        if distance_tiles <= self.ARRIVAL_THRESHOLD:
             arrival_reward = self.effective_rewards.get("health_arrival", 15.0) * urgency
             reward += arrival_reward
             self.total_reward += arrival_reward
             pc_label = center["label"]
             print(f"{label} [PC] Arrived at Pokemon Center ({pc_label}) "
-                  f"HP={hp_fraction:.0%} urgency x{urgency:.2f} (+{arrival_reward:.2f})",
+                  f"map=0x{center['map_id']:02X} x={center['x']} y={center['y']} "
+                  f"player_map=0x{map_id:02X} player_x={x} player_y={y} "
+                  f"dist={distance_tiles:.1f}t HP={hp_fraction:.0%} "
+                  f"urgency x{urgency:.2f} (+{arrival_reward:.2f})",
                   flush=True)
-            self._closest_reached = None
+            self._prev_distance = None
             return reward, death_penalty
 
-        # Proximity: fixed reward only when the integer-floor of the
-        # distance strictly decreases — avoids rewarding sub-tile jitter
-        # at the same or similar distance level.
-        level = math.floor(distance)
-        if level < self._closest_reached:
-            base = self.effective_rewards.get("health_proximity", 0.5)
-            proximity_reward = base * urgency
-            reward += proximity_reward
-            self.total_reward += proximity_reward
-            self._closest_reached = level
-            pc_label = center["label"]
-            print(f"{label} [PC] Closer to {pc_label}: dist={distance:.0f} "
-                  f"HP={hp_fraction:.0%} urgency x{urgency:.2f} "
-                  f"(+{proximity_reward:.2f})", flush=True)
+        # Proportional proximity reward:
+        # Scale by tile-distance reduction * urgency so every step that
+        # closes the gap yields a proportional reward.
+        if self._prev_distance is not None:
+            delta = self._prev_distance - distance_tiles
+            if delta > 0:
+                base = self.effective_rewards.get("health_proximity", 0.5)
+                proximity_reward = base * delta * urgency
+                reward += proximity_reward
+                self.total_reward += proximity_reward
+                self._closest_reached = distance_tiles
+                pc_label = center["label"]
+                print(f"{label} [PC] Closer to {pc_label} ({center['x']},{center['y']}): map=0x{map_id:02X} "
+                      f"{x}/{y}"
+                      f"dist={self._prev_distance:.1f}t > {distance_tiles:.1f}t"
+                      f"HP={hp_fraction:.0%} urgency x{urgency:.2f} "
+                      f"(+{proximity_reward:.2f})", flush=True)
 
+        self._prev_distance = distance_tiles
         return reward, death_penalty
 
     def get_progress(self) -> dict[str, Any]:
@@ -344,6 +370,7 @@ class PokemonCenterTracker:
             "death_count": self._death_count,
             "health_enabled": self._health_enabled,
             "closest_reached": self._closest_reached,
+            "prev_distance": self._prev_distance,
             "current_center": self.POKEMON_CENTERS[self._current_center_idx]["label"]
             if self._current_center_idx is not None
             and self._current_center_idx < len(self.POKEMON_CENTERS)

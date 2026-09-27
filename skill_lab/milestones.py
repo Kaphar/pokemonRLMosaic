@@ -281,9 +281,18 @@ class MilestoneTracker:
             self.achieved.add(name)
             self.achieved_steps[name] = int(step_count)
             cp_reward = self._reward_for(cp)
+            # Compute segment steps (steps since last achievement)
+            all_steps = list(self.achieved_steps.values())
+            if len(all_steps) >= 2:
+                sorted_steps = sorted(all_steps)
+                segment_steps = step_count - sorted_steps[-2]
+            else:
+                segment_steps = int(step_count)
             reward += cp_reward
             self.total_reward += cp_reward
-            print(f"{env_label}[Checkpoint] ACHIEVED: {name} at step {step_count} (reward +{cp_reward:.2f})")
+            print(f"{env_label}[Checkpoint] ACHIEVED: {name} at step {step_count} "
+                  f"(reward +{cp_reward:.2f} | segment={segment_steps} steps)",
+                  flush=True)
 
         return reward
 

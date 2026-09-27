@@ -358,6 +358,7 @@ class ObservationInspector:
                 ("speed_bonus", "SpeedBonus:"),
                 ("health_proximity", "HealthNav:"),
                 ("death_penalty", "Deaths:"),
+                ("stagnation_penalty", "StagPen:"),
             ]:
                 cv2.putText(panel, f"{rlabel} {reward_counts.get(rtype, 0)}", (party_x, reward_y),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1)

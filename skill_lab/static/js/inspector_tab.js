@@ -627,6 +627,8 @@ function renderInspectorDetails(data) {
     html += '<tr><td class="inspect-label">Map Discovers</td><td>' + (rewardCounts.map_discovery || 0) + '</td></tr>';
     html += '<tr><td class="inspect-label">Heals</td><td>' + (rewardCounts.healing || 0) + '</td></tr>';
     html += '<tr><td class="inspect-label">Breadcrumbs</td><td>' + (rewardCounts.breadcrumb || 0) + '</td></tr>';
+    html += '<tr><td class="inspect-label">Stagnation Penalties</td><td>' + (rewardCounts.stagnation_penalty || 0) + '</td></tr>';
+    html += '<tr><td class="inspect-label">Speed Bonuses</td><td>' + (rewardCounts.speed_bonus || 0) + '</td></tr>';
     html += '</table>';
     html += '</div>';
 
@@ -669,6 +671,99 @@ function renderInspectorDetails(data) {
     }
     html += '</div>';
     html += '</div>';
+
+    // --- Speed Bonus Stats detail ---
+    var speedStats = data.speed_bonus_stats || {};
+    if (speedStats.available) {
+      html += '<div class="inspector-section">';
+      html += '<h3>Speed Bonus Stats</h3>';
+      var mult = speedStats.speed_reward_multiplier || 1.0;
+      var lastSeg = speedStats.last_segment || 0;
+      var lastMult = speedStats.last_multiplier || 1.0;
+      html += '<table class="inspector-table">';
+      html += '<tr><td class="inspect-label">Reward Multiplier</td><td>' + mult.toFixed(2) + 'x</td></tr>';
+      html += '<tr><td class="inspect-label">Last Segment</td><td>' + lastSeg + ' steps</td></tr>';
+      html += '<tr><td class="inspect-label">Last Bonus</td><td>' + lastMult.toFixed(2) + 'x</td></tr>';
+      var fallback = speedStats.fallback || {};
+      if (fallback.FALLBACK_MAX !== undefined) {
+        html += '<tr><td class="inspect-label">Max Fallback</td><td>' + fallback.FALLBACK_MAX.toFixed(1) + 'x</td></tr>';
+      }
+      if (fallback.MAX_BONUS !== undefined) {
+        html += '<tr><td class="inspect-label">Cap</td><td>' + fallback.MAX_BONUS.toFixed(1) + 'x</td></tr>';
+      }
+      html += '</table>';
+
+      var bestSteps = speedStats.best_steps || {};
+      var bestKeys = Object.keys(bestSteps);
+      if (bestKeys.length > 0) {
+        html += '<h4 style="margin-top: 8px;">Per-Milestone Best Steps</h4>';
+        html += '<table class="inspector-table">';
+        html += '<tr><th>Achievement</th><th>Best Steps</th></tr>';
+        bestKeys.sort(function(a, b) { return bestSteps[a] - bestSteps[b]; });
+        bestKeys.forEach(function(name) {
+          var label = name.length > 28 ? name.substring(0, 27) + '…' : name;
+          html += '<tr><td>' + label + '</td><td>' + bestSteps[name] + '</td></tr>';
+        });
+        html += '</table>';
+      }
+
+      var currentRun = speedStats.current_run || [];
+      if (currentRun.length > 0) {
+        html += '<h4 style="margin-top: 8px;">This Episode</h4>';
+        html += '<table class="inspector-table">';
+        html += '<tr><th>Achievement</th><th>Segment</th><th>Bonus</th><th>Best?</th></tr>';
+        currentRun.slice(-20).reverse().forEach(function(entry) {
+          var ename = entry.name || '?';
+          var elabel = ename.length > 28 ? ename.substring(0, 27) + '…' : ename;
+          html += '<tr><td>' + elabel + '</td><td>' + (entry.segment_steps || 0) + '</td><td>' + (entry.bonus || 1).toFixed(2) + 'x</td><td>' + (entry.is_new_best ? '✓' : '—') + '</td></tr>';
+        });
+        html += '</table>';
+      }
+      html += '</div>';
+    }
+
+    // --- Combat Speed Bonus Stats detail ---
+    var combatStats = data.speed_bonus_combat || {};
+    if (combatStats.available) {
+      html += '<div class="inspector-section">';
+      html += '<h3>Combat Speed Bonus Stats</h3>';
+      var cmult = combatStats.speed_reward_multiplier || 1.0;
+      var clastSeg = combatStats.last_segment || 0;
+      var clastMult = combatStats.last_multiplier || 1.0;
+      html += '<table class="inspector-table">';
+      html += '<tr><td class="inspect-label">Reward Multiplier</td><td>' + cmult.toFixed(2) + 'x</td></tr>';
+      html += '<tr><td class="inspect-label">Last Fight Steps</td><td>' + clastSeg + ' steps</td></tr>';
+      html += '<tr><td class="inspect-label">Last Fight Bonus</td><td>' + clastMult.toFixed(2) + 'x</td></tr>';
+      html += '</table>';
+
+      var combatBest = combatStats.best_steps || {};
+      var combatKeys = Object.keys(combatBest);
+      if (combatKeys.length > 0) {
+        html += '<h4 style="margin-top: 8px;">Per-Fight Best Steps</h4>';
+        html += '<table class="inspector-table">';
+        html += '<tr><th>Fight</th><th>Best Steps</th></tr>';
+        combatKeys.sort(function(a, b) { return combatBest[a] - combatBest[b]; });
+        combatKeys.forEach(function(name) {
+          var clabel = name.length > 28 ? name.substring(0, 27) + '…' : name;
+          html += '<tr><td>' + clabel + '</td><td>' + combatBest[name] + '</td></tr>';
+        });
+        html += '</table>';
+      }
+
+      var combatRun = combatStats.current_run || [];
+      if (combatRun.length > 0) {
+        html += '<h4 style="margin-top: 8px;">This Episode</h4>';
+        html += '<table class="inspector-table">';
+        html += '<tr><th>Fight</th><th>Steps</th><th>Bonus</th><th>Best?</th></tr>';
+        combatRun.slice(-20).reverse().forEach(function(entry) {
+          var ename = entry.name || '?';
+          var elabel = ename.length > 28 ? ename.substring(0, 27) + '…' : ename;
+          html += '<tr><td>' + elabel + '</td><td>' + (entry.segment_steps || 0) + '</td><td>' + (entry.bonus || 1).toFixed(2) + 'x</td><td>' + (entry.is_new_best ? '✓' : '—') + '</td></tr>';
+        });
+        html += '</table>';
+      }
+      html += '</div>';
+    }
 
     html += '</div>';
   }

@@ -131,7 +131,16 @@ class EventTracker:
                 total_reward += reward
                 self.total_reward += reward
                 display_name = name if name else key
-                print(f"{env_label}[Event] ACHIEVED: {display_name} ({key}) at step {step_count} (reward +{reward:.2f})")
+                # Compute segment steps (steps since last achievement)
+                all_steps = list(self.achieved_steps.values())
+                if len(all_steps) >= 2:
+                    sorted_steps = sorted(all_steps)
+                    segment_steps = step_count - sorted_steps[-2]
+                else:
+                    segment_steps = int(step_count)
+                print(f"{env_label}[Event] ACHIEVED: {display_name} ({key}) at step {step_count} "
+                      f"(reward +{reward:.2f} | segment={segment_steps} steps)",
+                      flush=True)
 
         return total_reward
 

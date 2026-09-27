@@ -38,7 +38,7 @@ REWARD_BASELINES: dict[str, float] = {
     "breadcrumb_arrival":  10.0,
     "health_proximity":     0.5,
     "health_arrival":      15.0,
-    "death_penalty":        -35.0,
+    "death_penalty":        -30.0,
 }
 
 REWARD_CATEGORIES: dict[str, str] = {

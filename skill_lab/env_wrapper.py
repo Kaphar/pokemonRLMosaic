@@ -26,6 +26,7 @@ from skill_lab.breadcrumb import BreadcrumbTracker, PokemonCenterTracker
 from skill_lab.milestones import MilestoneTracker
 from skill_lab.ram_map import GameState
 from skill_lab.speed_bonus import SpeedBonusTracker
+from skill_lab.stagnation import StagnationTracker
 from skill_lab.zones import ZoneManager, ACTION_NAMES as ZONE_ACTION_NAMES
 
 
@@ -151,6 +152,20 @@ class SkillLabWrapper(gymnasium.Wrapper):
             speed_reward_multiplier=self.speed_reward_multiplier,
             persist_path=persist_path,
         )
+
+        # Separate tracker for combat speed bonuses, so that "Fast Trainer Win #N"
+        # and "Fast Wild Win #N" give multipliers based on steps-per-fight rather
+        # than steps-between-milestones.
+        combat_persist = persist_path.with_name("combat_speed_stats.json") if persist_path else None
+        self.combat_speed_tracker = SpeedBonusTracker(
+            speed_reward_multiplier=self.speed_reward_multiplier,
+            persist_path=combat_persist,
+        )
+        self._current_fight_steps: int | None = None
+
+        # --- Stagnation Tracker (position + A-spam penalties) ---
+        self.stagnation_enabled = config.get("stagnation_penalty", True)
+        self.stagnation_tracker = StagnationTracker()
 
         # --- Diminishing returns tracker ---
         self._reward_counts: dict[str, int] = {}
@@ -864,6 +879,12 @@ class SkillLabWrapper(gymnasium.Wrapper):
         prior_fled_battle = self.env.unwrapped.fled_battle
         prior_fight_count = self.env.unwrapped.fight_count
 
+        # Track combat start: record the step when a battle begins
+        cur_step = self.env.unwrapped.step_count
+        if self.speed_bonus_enabled and self._current_fight_steps is None:
+            if self.game_state.in_battle():
+                self._current_fight_steps = cur_step
+
         # Execute in real environment
         observation, reward, terminated, truncated, info = self.env.step(action)
 
@@ -874,6 +895,18 @@ class SkillLabWrapper(gymnasium.Wrapper):
         if cur_trainer_wins > prior_trainer_wins:
             trainer_reward = self.effective_rewards.get("combat_trainer", 5.0)
             trainer_reward = self._diminishing_returns("combat_trainer", trainer_reward)
+            # Apply combat speed bonus: faster trainer wins get higher multiplier
+            if self.speed_bonus_enabled and self._current_fight_steps is not None:
+                fight_steps = cur_step - self._current_fight_steps
+                self._current_fight_steps = None
+                speed_key = f"Trainer Win #{cur_trainer_wins}"
+                speed_mult = self.combat_speed_tracker.record_achievement(
+                    speed_key, cur_step, segment_steps=fight_steps
+                )
+                trainer_reward = trainer_reward * speed_mult
+                print(f"{self._colored_env_label()} Combat speed bonus! {speed_key} -> "
+                      f"x{speed_mult:.2f} [fight={fight_steps} steps]",
+                      flush=True)
             self._log_reward("combat_trainer", trainer_reward,
                              f"Trainer win #{cur_trainer_wins}")
             reward += trainer_reward
@@ -882,6 +915,18 @@ class SkillLabWrapper(gymnasium.Wrapper):
         if cur_wild_wins > prior_wild_wins:
             wild_reward = self.effective_rewards.get("combat_wild", 2.0)
             wild_reward = self._diminishing_returns("combat_wild", wild_reward)
+            # Apply combat speed bonus: faster wild wins get higher multiplier
+            if self.speed_bonus_enabled and self._current_fight_steps is not None:
+                fight_steps = cur_step - self._current_fight_steps
+                self._current_fight_steps = None
+                speed_key = f"Wild Win #{cur_wild_wins}"
+                speed_mult = self.combat_speed_tracker.record_achievement(
+                    speed_key, cur_step, segment_steps=fight_steps
+                )
+                wild_reward = wild_reward * speed_mult
+                print(f"{self._colored_env_label()} Combat speed bonus! {speed_key} -> "
+                      f"x{speed_mult:.2f} [fight={fight_steps} steps]",
+                      flush=True)
             self._log_reward("combat_wild", wild_reward,
                              f"Wild win #{cur_wild_wins}")
             reward += wild_reward
@@ -920,13 +965,26 @@ class SkillLabWrapper(gymnasium.Wrapper):
                             key=lambda n: self.checkpoint_tracker.achieved_steps.get(n, 0),
                         )
                         cp_name = sorted_new[0]
-                        speed_mult = self.speed_bonus_tracker.record_achievement(cp_name, current_step)
-                        if speed_mult > 1.0:
-                            milestone_reward = checkpoint_reward * speed_mult
-                            speed_bonus_amount = milestone_reward - checkpoint_reward
-                            print(f"{self._colored_env_label()} Speed bonus! {cp_name} -> x{speed_mult:.1f} (+{speed_bonus_amount:.2f})")
+                        cp_step = self.checkpoint_tracker.achieved_steps.get(cp_name, 0)
+                        prev_steps = sorted(
+                            self.checkpoint_tracker.achieved_steps.get(n, 0)
+                            for n in self.checkpoint_tracker.achieved
+                            if n != cp_name and n in prior_cp_achieved
+                        ) or [0]
+                        cp_segment = cp_step - prev_steps[-1] if prev_steps else cp_step
+                        speed_mult = self.speed_bonus_tracker.record_achievement(
+                            cp_name, current_step, segment_steps=cp_segment
+                        )
+                        milestone_reward = checkpoint_reward * speed_mult
+                        speed_bonus_amount = milestone_reward - checkpoint_reward
+                        print(f"{self._colored_env_label()} Speed bonus! {cp_name} -> "
+                              f"x{speed_mult:.2f} (+{speed_bonus_amount:.2f}) "
+                              f"[segment={cp_segment} steps]",
+                              flush=True)
+                        if speed_bonus_amount > 0:
                             self._log_reward("speed_bonus", speed_bonus_amount,
-                                             f"Speed bonus: {cp_name}", current_step)
+                                             f"Speed bonus: {cp_name} x{speed_mult:.2f}",
+                                             current_step)
                 reward += milestone_reward
                 self.total_milestone_reward += milestone_reward
                 self.last_milestone_step = self.env.unwrapped.step_count
@@ -954,14 +1012,26 @@ class SkillLabWrapper(gymnasium.Wrapper):
                         )
                         event_key = sorted_new[0]
                         event_name = self.event_tracker.event_names.get(event_key, event_key)
-                        speed_mult = self.speed_bonus_tracker.record_achievement(event_name, current_step)
-                        if speed_mult > 1.0:
-                            final_event_reward = event_reward * speed_mult
-                            speed_bonus_amount = final_event_reward - event_reward
-                            event_reward = final_event_reward
-                            print(f"{self._colored_env_label()} Speed bonus! {event_name} -> x{speed_mult:.1f} (+{speed_bonus_amount:.2f})")
+                        event_step = self.event_tracker.achieved_steps.get(event_key, 0)
+                        prior_steps = sorted(
+                            self.event_tracker.achieved_steps.get(k, 0)
+                            for k in self.event_tracker.achieved
+                            if k != event_key and k in prior_ev_achieved
+                        ) or [0]
+                        ev_segment = event_step - prior_steps[-1] if prior_steps else event_step
+                        speed_mult = self.speed_bonus_tracker.record_achievement(
+                            event_name, current_step, segment_steps=ev_segment
+                        )
+                        final_event_reward = event_reward * speed_mult
+                        speed_bonus_amount = final_event_reward - event_reward
+                        event_reward = final_event_reward
+                        print(f"{self._colored_env_label()} Speed bonus! {event_name} -> "
+                              f"x{speed_mult:.2f} (+{speed_bonus_amount:.2f}) "
+                              f"[segment={ev_segment} steps]",
+                              flush=True)
+                        if speed_bonus_amount > 0:
                             self._log_reward("speed_bonus", speed_bonus_amount,
-                                             f"Speed bonus: {event_name}", current_step)
+                                             f"Speed bonus: {event_name} x{speed_mult:.2f}", current_step)
                 reward += event_reward
                 self._log_reward("event", event_reward, "Event flag achieved")
                 info["event_reward"] = event_reward
@@ -984,16 +1054,16 @@ class SkillLabWrapper(gymnasium.Wrapper):
 
         self._prior_level_sum = current_level_sum
 
-        # --- Breadcrumb navigation reward (temporarily disabled) ---
-        # if self.breadcrumb_tracker is not None:
-        #     x_pos, y_pos = self.env.unwrapped.get_game_coords()[:2]
-        #     breadcrumb_reward = self.breadcrumb_tracker.update(
-        #         x_pos, y_pos, current_map_id, env_label=self._colored_env_label()
-        #     )
-        #     if breadcrumb_reward > 0:
-        #         reward += breadcrumb_reward
-        #         self._log_reward("breadcrumb", breadcrumb_reward, "Navigation waypoint reached")
-        #         info["breadcrumb_reward"] = breadcrumb_reward
+        # --- Breadcrumb navigation reward ---
+        if self.breadcrumb_tracker is not None:
+            x_pos, y_pos = self.env.unwrapped.get_game_coords()[:2]
+            breadcrumb_reward = self.breadcrumb_tracker.update(
+                x_pos, y_pos, current_map_id, env_label=self._colored_env_label()
+            )
+            if breadcrumb_reward > 0:
+                reward += breadcrumb_reward
+                self._log_reward("breadcrumb", breadcrumb_reward, "Navigation waypoint reached")
+                info["breadcrumb_reward"] = breadcrumb_reward
 
         level_up = current_level_sum > prior_level_sum
         if self.healing_reward_multiplier > 0.0 and progress_signal and hp_gain > 0.05 and 0 < prior_hp <= 0.9:
@@ -1047,6 +1117,28 @@ class SkillLabWrapper(gymnasium.Wrapper):
                 self._log_reward("death_penalty", death_penalty,
                                  "Party blacked out", self.env.unwrapped.step_count)
                 info["death_penalty"] = death_penalty
+
+        # --- Stagnation penalty (position + A-spam) ---
+        if self.stagnation_enabled:
+            x_pos, y_pos = self.env.unwrapped.get_game_coords()[:2]
+            in_battle = self.game_state.in_battle()
+            pressed_a = (original_action == 4)  # PRESS_BUTTON_A index in valid_actions
+            stag_penalty = self.stagnation_tracker.step(
+                x_pos, y_pos, current_map_id,
+                in_battle=in_battle,
+                pressed_a=pressed_a,
+                current_step=self.env.unwrapped.step_count,
+            )
+            if stag_penalty < 0:
+                reward += stag_penalty
+                self._log_reward("stagnation_penalty", stag_penalty,
+                                 "Stagnation detected (low displacement / A-spam)",
+                                 self.env.unwrapped.step_count)
+                info["stagnation_penalty"] = stag_penalty
+                print(f"{self._colored_env_label()} [STAG] "
+                      f"Stagnation penalty {stag_penalty:.2f} "
+                      f"(stats: {self.stagnation_tracker.get_stats()})",
+                      flush=True)
 
         # ========================================
         # EARLY TERMINATION: Check starter status
@@ -1156,7 +1248,10 @@ class SkillLabWrapper(gymnasium.Wrapper):
             self.breadcrumb_tracker.reset()
         if self.pokemon_center_tracker is not None:
             self.pokemon_center_tracker.reset()
+        self.stagnation_tracker.reset()
         self.speed_bonus_tracker.reset(current_step=int(getattr(self.env.unwrapped, "step_count", 0)))
+        self.combat_speed_tracker.reset(current_step=int(getattr(self.env.unwrapped, "step_count", 0)))
+        self._current_fight_steps = None
 
         # The standalone plugin replay loads the recording's state before
         # priming. Do the same instead of relying on per-environment defaults.

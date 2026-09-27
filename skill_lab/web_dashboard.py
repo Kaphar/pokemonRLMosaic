@@ -1053,6 +1053,14 @@ class BrowserMapDashboard:
                     ),
                     "fled_battle": self._as_int(getattr(env_obj, "fled_battle", 0), 0) or 0,
                 },
+                "speed_bonus_stats": self._safe_call(
+                    lambda: self._inspector_speed_bonus(env_obj),
+                    {"available": False},
+                ),
+                "speed_bonus_combat": self._safe_call(
+                    lambda: self._inspector_speed_bonus_combat(env_obj),
+                    {"available": False},
+                ),
             }
         )
 
@@ -1115,6 +1123,44 @@ class BrowserMapDashboard:
         if tracker is None:
             return {"available": False}
         return self._safe_call(lambda: tracker.get_progress(), {"available": False})
+
+    def _inspector_speed_bonus(self, env_obj: Any) -> dict[str, Any]:
+        """Collect speed-bonus statistics from the wrapper's SpeedBonusTracker."""
+        tracker = getattr(env_obj, "speed_bonus_tracker", None)
+        if tracker is None:
+            return {"available": False}
+        stats = self._safe_call(lambda: tracker.get_stats(), {})
+        best_steps = stats.get("best_steps", {})
+        current_run = stats.get("current_run", {})
+        return {
+            "available": True,
+            "speed_reward_multiplier": stats.get("speed_reward_multiplier", 1.0),
+            "best_steps": best_steps,
+            "current_run": current_run,
+            "last_segment": stats.get("last_segment", 0),
+            "last_multiplier": stats.get("last_multiplier", 1.0),
+            "fallback": {
+                "FALLBACK_MAX": stats.get("fallback", {}).get("FALLBACK_MAX", 3.0),
+                "MAX_BONUS": stats.get("fallback", {}).get("MAX_BONUS", 3.0),
+                "FALLBACK_HALF_LIFE": stats.get("fallback", {}).get("FALLBACK_HALF_LIFE", 500),
+            },
+        }
+
+    def _inspector_speed_bonus_combat(self, env_obj: Any) -> dict[str, Any]:
+        """Collect combat speed-bonus statistics from the wrapper's combat tracker."""
+        tracker = getattr(env_obj, "combat_speed_tracker", None)
+        if tracker is None:
+            return {"available": False}
+        stats = self._safe_call(lambda: tracker.get_stats(), {})
+        return {
+            "available": True,
+            "speed_reward_multiplier": stats.get("speed_reward_multiplier", 1.0),
+            "best_steps": stats.get("best_steps", {}),
+            "current_run": stats.get("current_run", []),
+            "last_segment": stats.get("last_segment", 0),
+            "last_multiplier": stats.get("last_multiplier", 1.0),
+            "fallback": stats.get("fallback", {}),
+        }
 
     def _inspector_memory_watch(self, memory: Any) -> list[dict[str, Any]]:
         if memory is None:

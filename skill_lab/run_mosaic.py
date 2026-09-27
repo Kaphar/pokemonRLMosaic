@@ -663,13 +663,16 @@ def main(args: argparse.Namespace | None = None) -> None:
         while True:
             while step_count < (batch_number + 1) * args.total_timesteps:
                 all_tiles = []
+                _replayed_indices: set[int] = set()
                 if model is None:
                     actions = np.random.randint(0, env.action_space.n, size=env.num_envs)
+                    _original_actions = None
                 else:
                     if training:
                         with torch.no_grad():
                             obs_tensor, _ = model.policy.obs_to_tensor(_transpose_for_model(observation))
                             actions, values, log_probs = model.policy(obs_tensor)
+                        _original_actions = actions.detach().cpu().numpy().copy()
                         actions = actions.detach().cpu().numpy()
                         values = values.detach()
                         log_probs = log_probs.detach()
@@ -677,6 +680,7 @@ def main(args: argparse.Namespace | None = None) -> None:
                         with torch.no_grad():
                             obs_tensor, _ = model.policy.obs_to_tensor(_transpose_for_model(observation))
                             actions, _, _ = model.policy(obs_tensor)
+                        _original_actions = None
                         actions = actions.detach().cpu().numpy()
 
                 for local_index in range(env.num_envs):
@@ -700,6 +704,12 @@ def main(args: argparse.Namespace | None = None) -> None:
                     _replay_action = env.envs[local_index].consume_replay_action()
                     if _replay_action is not None:
                         actions[local_index] = _replay_action
+                        # Mark this step as replayed — the model did not choose
+                        # this action, so we must NOT store the model's original
+                        # action/log_probs in the rollout buffer.  Doing so would
+                        # add a mismatched (action, log_prob, reward) tuple that
+                        # corrupts the policy gradient.
+                        _replayed_indices.add(local_index)
                     # REMOVED: boundary.apply() - Environment handles masking now
 
 
@@ -741,6 +751,17 @@ def main(args: argparse.Namespace | None = None) -> None:
                 if training:
                     dones = np.zeros(env.num_envs, dtype=np.bool_)
                     modified_rewards = raw_rewards + np.array(reward_modifiers, dtype=np.float32)
+                    # When input replay overrides model actions, the model did
+                    # not choose those actions — storing the replay action
+                    # with the model's original log_probs would corrupt the
+                    # policy gradient.  For replayed indices we restore the
+                    # model's original action (so action/log_prob match) and
+                    # zero the reward so the replay sequence contributes no
+                    # learning signal.
+                    if _replayed_indices and _original_actions is not None:
+                        for idx in _replayed_indices:
+                            actions[idx] = _original_actions[idx]
+                            modified_rewards[idx] = 0.0
                     model.rollout_buffer.add(
                         _transpose_for_model(observation), actions, modified_rewards,
                         dones, values, log_probs,
@@ -871,35 +892,35 @@ def main(args: argparse.Namespace | None = None) -> None:
                 print(f"[Shutdown] Saved last model to: {last_path}", flush=True)
             except Exception as e:
                 print(f"[Shutdown] Failed to save model: {e}", flush=True)
-        # Save plugin-based frame-exact input recording
-        if getattr(args, "record_input_with_plugin", False):
-            from skill_lab.emulator_with_debug import (
-                _plugin_recording_registry,
-                finalize_input_recording,
-            )
-            save_paths = []
-            for env_obj in env.envs:
-                pyboy = env_obj.pyboy
-                pid = id(pyboy)
-                entry = _plugin_recording_registry.get(pid)
-                if entry and entry["events"]:
-                    output_path = Path(config["record_input_path"]).parent / f"plugin_inputs_env{env_obj.env_index}.json"
-                    effective_actions = [
-                        int(action["action"])
-                        for action in getattr(env_obj, "_episode_actions", [])
-                    ]
-                    finalize_input_recording(
-                        pyboy,
-                        output_path,
-                        actions=effective_actions,
-                        action_freq=int(entry["action_freq"]),
-                        noop_action=int(entry["noop_action"]),
-                        rom_path=Path(args.rom),
-                        init_state_path=Path(env_obj.init_state),
-                    )
-                    save_paths.append(output_path)
-            if save_paths:
-                print(f"[Plugin Recorder] Saved input recordings to: {save_paths}")
+        # # Save plugin-based frame-exact input recording
+        # if getattr(args, "record_input_with_plugin", False):
+        #     from skill_lab.emulator_with_debug import (
+        #         _plugin_recording_registry,
+        #         finalize_input_recording,
+        #     )
+        #     save_paths = []
+        #     for env_obj in env.envs:
+        #         pyboy = env_obj.pyboy
+        #         pid = id(pyboy)
+        #         entry = _plugin_recording_registry.get(pid)
+        #         if entry and entry["events"]:
+        #             output_path = Path(config["record_input_path"]).parent / f"plugin_inputs_env{env_obj.env_index}.json"
+        #             effective_actions = [
+        #                 int(action["action"])
+        #                 for action in getattr(env_obj, "_episode_actions", [])
+        #             ]
+        #             finalize_input_recording(
+        #                 pyboy,
+        #                 output_path,
+        #                 actions=effective_actions,
+        #                 action_freq=int(entry["action_freq"]),
+        #                 noop_action=int(entry["noop_action"]),
+        #                 rom_path=Path(args.rom),
+        #                 init_state_path=Path(env_obj.init_state),
+        #             )
+        #             save_paths.append(output_path)
+        #     if save_paths:
+        #         print(f"[Plugin Recorder] Saved input recordings to: {save_paths}")
         env.close()
         inspector.close()
         map_window.close()
