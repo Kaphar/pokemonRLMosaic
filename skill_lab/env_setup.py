@@ -189,7 +189,7 @@ def _resolve_init_state(
 
 def setup_envs(
     num_envs: int,
-    stage: str = "starter",
+    stage: str = "progress",
     rom_path: Path | None = None,
     init_state: Path | None = None,
     mosaic_rows: int = GRID_ROWS,
@@ -472,7 +472,7 @@ def setup_envs(
 def expand_envs(
     current_num_envs: int,
     new_num_envs: int,
-    stage: str = "starter",
+    stage: str = "progress",
     rom_path: Path | None = None,
     init_state: Path | None = None,
 ) -> list[dict[str, Any]]:
@@ -661,8 +661,8 @@ def ensure_env_exists(
         
         # Determine stage config
         if is_trainer:
-            # Named trainers use their specific stage (starter for now)
-            stage_config_name = "starter"
+            # Named trainers use their specific stage (progress for now)
+            stage_config_name = "progress"
         else:
             # Workers use autostage - they train whatever stage the launcher selects
             stage_config_name = "autostage"

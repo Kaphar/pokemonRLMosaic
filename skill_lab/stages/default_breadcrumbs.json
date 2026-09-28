@@ -1,0 +1,22 @@
+{
+  "name": "default_breadcrumbs",
+  "description": "Default breadcrumb/waypoint settings for full-playthrough mode. Waypoints are activated and deactivated based on milestone progression. When a stage JSON defines its own 'breadcrumbs' array, those take precedence; otherwise this default file is loaded instead.",
+  "breadcrumbs": [
+    { 
+      "target_x": 29,
+      "target_y": 20,
+      "target_map": 1,
+      "label": "SHOP1",
+      "activate_on": "Fought Rival",
+      "deactivate_on": "ITEM: Oak Parcel"
+    },
+    {
+      "target_x": 12,
+      "target_y": 12,
+      "target_map": 0,
+      "label": "Oak's Lab (return with parcel)",
+      "activate_on": "ITEM: Oak Parcel",
+      "deactivate_on": "Parcel Delivered"
+    }
+  ]
+}

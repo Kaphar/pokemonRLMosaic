@@ -79,6 +79,16 @@ REWARD_MULTIPLIER_ALIASES: dict[str, tuple[str, ...]] = {
     "health":          ("health_reward_multiplier", "health_reward"),
 }
 
+# inside Stagnation :
+# position_penalty_per_step: float = -0.005,
+# a_spam_penalty_per_press: float = -0.001,
+
+# UNIMPORTANT_MAP_IDS = [
+#         0x27, # rival's house, actually there might be the map there, I don't know if it will be useful to us.   
+#     ]
+OUTDOOR_MAP_IDS = [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+                    0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F]
+# check the values but the firsts ones seem correct.
 
 def normalize_reward_multipliers(config: dict | None) -> dict[str, float | None]:
     """Normalize stage/profile config to canonical category multiplier names.

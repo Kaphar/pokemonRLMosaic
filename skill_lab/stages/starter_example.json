@@ -52,17 +52,86 @@
       "description": "Obtain the Oak's Parcel from the guard on Route 1"
     },
     {
-      "name": "Oak Got Parcel",
+      "name": "Parcel Delivered",
       "event_key": "0xD74E-0",
+      "required_milestone": "Got Oak's Parcel",
       "reward_baseline": 20.0,
       "description": "Deliver Oak's Parcel to Professor Oak in Pallet Lab"
     }
   ],
-  "breadcrumbs": [
-    {"target_x": 4, "target_y": 11, "target_map": 0, "label": "Oak's Lab entrance"},
-    {"target_x": 5, "target_y": 10, "target_map": 0, "label": "First poke ball"},
-    {"target_x": 5, "target_y": 9, "target_map": 0, "label": "Second poke ball"},
-    {"target_x": 5, "target_y": 8, "target_map": 0, "label": "Third poke ball"}
+ "breadcrumbs": [
+    {
+      "target_x": 5,
+      "target_y": 3,
+      "target_map": 40,
+      "label": "Oak's Lab",
+      "activate_on": "Followed Oak Into Lab",
+      "deactivate_on": "Got Pokedex"
+    },
+    {
+      "target_x": 4,
+      "target_y": 11,
+      "target_map": 0,
+      "label": "Oak's Lab entrance",
+      "activate_on": null,
+      "deactivate_on": null
+    },
+    {
+      "target_x": 5,
+      "target_y": 10,
+      "target_map": 0,
+      "label": "First poke ball",
+      "activate_on": "Followed Oak Into Lab",
+      "deactivate_on": "Got Starter"
+    },
+    {
+      "target_x": 5,
+      "target_y": 9,
+      "target_map": 0,
+      "label": "Second poke ball",
+      "activate_on": "Followed Oak Into Lab",
+      "deactivate_on": "Got Starter"
+    },
+    {
+      "target_x": 5,
+      "target_y": 8,
+      "target_map": 0,
+      "label": "Third poke ball",
+      "activate_on": "Followed Oak Into Lab",
+      "deactivate_on": "Got Starter"
+    },
+    {
+      "target_x": 23,
+      "target_y": 26,
+      "target_map": 1,
+      "label": "Viridian City PC",
+      "activate_on": "Fought Rival",
+      "deactivate_on": "Got Oak's Parcel"
+    },
+    {
+      "target_x": 20,
+      "target_y": 50,
+      "target_map": 4,
+      "label": "Viridian City gate",
+      "activate_on": "Fought Rival",
+      "deactivate_on": "Got Oak's Parcel"
+    },
+    {
+      "target_x": 5,
+      "target_y": 3,
+      "target_map": 40,
+      "label": "Oak's Lab (return with parcel)",
+      "activate_on": "Got Oak's Parcel",
+      "deactivate_on": "Oak Got Parcel"
+    },
+    {
+      "target_x": 20,
+      "target_y": 50,
+      "target_map": 4,
+      "label": "Route 1 center path",
+      "activate_on": "Oak Got Parcel",
+      "deactivate_on": null
+    }
   ],
   "target_milestones": [
     "0xD747-0",

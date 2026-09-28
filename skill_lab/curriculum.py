@@ -98,6 +98,19 @@ STAGES: dict[str, Stage] = {
         max_steps=14400,
     ),
 
+    "full_progress": Stage(
+        name="full_progress",
+        description="Full playthrough. Uses default_milestones.json (Pallet through Elite Four) "
+                    "and default_breadcrumbs.json for waypoint progression.",
+        disable_start=True,
+        disable_select=True,
+        milestone_reward=big_reward,
+        exploration_reward=small_reward,
+        combat_reward=medium_reward,
+        init_state="v2/state/init.state",
+        max_steps=14400,
+    ),
+
     "starter": Stage(
         name="starter",
         description="Get a starter Pokemon. Short episodes for fast learning.",

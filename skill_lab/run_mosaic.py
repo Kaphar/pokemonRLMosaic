@@ -235,7 +235,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true", help="Run random actions, no training")
     parser.add_argument("--rom", type=Path, default=DEFAULT_ROM)
     parser.add_argument("--init-state", type=Path, default=DEFAULT_INIT_STATE)
-    parser.add_argument("--stage", type=str, default="starter")
+    parser.add_argument("--stage", type=str, default="progress")
     parser.add_argument("--max-steps", type=int, default=DEFAULT_MAX_STEPS)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--foreground", action="store_true", help="Keep the mosaic window above other windows")

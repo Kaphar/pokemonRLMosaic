@@ -355,7 +355,7 @@ class Launcher:
 
         self.mode_var = tk.StringVar(value="new" if not self.checkpoints else "train")
         self.model_var = tk.StringVar()
-        self.stage_var = tk.StringVar(value="starter")
+        self.stage_var = tk.StringVar(value="progress")
         self.training_mode_var = tk.StringVar(value="segment")  # NEW
         self.override_trainer_stage_var = tk.BooleanVar(value=False)  # NEW
         self.override_trainer_steps_var = tk.BooleanVar(value=False)  # NEW: override reset steps

@@ -24,6 +24,12 @@ Two checkpoint subtypes are supported:
   to hold a specific item (by internal item id) at the time of entry, so
   milestones like "return to Oak's Lab with the Parcel" can be expressed
   as a single checkpoint.
+
+Checkpoints may also declare ``"required_milestone"``: the name of another
+checkpoint that must already be in ``self.achieved`` before this one can fire.
+This prevents negative- or "absence"-based milestones from triggering on a
+fresh new game (e.g. "Parcel Delivered" should only fire after "ITEM: Oak
+Parcel" was already obtained, not simply because the bag is empty).
 """
 
 from __future__ import annotations
@@ -53,9 +59,12 @@ class MilestoneTracker:
         List of dicts, each with keys: ``name``, and either ``event_key``
         (an ``events.json`` key like ``"0xD74B-5"``), ``stat_check``
         (a dict with ``attr``, ``op``, ``value``), ``item_check``
-        (a dict with ``item_id`` and optional ``min_quantity``), or
-        ``map_check`` (a dict with ``map_id`` and optional ``require_item``).
-        Optional keys: ``reward_baseline`` (defaults to 1.0), ``description``.
+        (a dict with ``item_id`` and optional ``min_quantity`` /
+        ``require_not_item``), or ``map_check`` (a dict with ``map_id``
+        and optional ``require_item``).  Optional keys:
+        ``reward_baseline`` (defaults to 1.0), ``description``, and
+        ``required_milestone`` (name of another checkpoint that must be
+        already achieved before this one can fire).
     effective_rewards
         Dict produced by :func:`skill_lab.rewards.check_baseline_rewards`.
         Must contain ``"milestone"`` key for the default reward value.
@@ -221,13 +230,19 @@ class MilestoneTracker:
             return
 
         for cp in self.checkpoints:
+            required = cp.get("required_milestone")
+            if required is not None and required not in self.achieved:
+                continue
+
             key = cp.get("event_key")
             if key and self._event_is_set(game_state, key):
                 self.achieved.add(cp["name"])
+                continue
 
             item_check = cp.get("item_check")
             if item_check and self._check_item_condition(game_state, item_check):
                 self.achieved.add(cp["name"])
+                continue
 
             map_check = cp.get("map_check")
             if map_check and self._check_map_condition(game_state, map_check):
@@ -255,6 +270,10 @@ class MilestoneTracker:
         for cp in self.checkpoints:
             name = cp["name"]
             if name in self.achieved:
+                continue
+
+            required = cp.get("required_milestone")
+            if required is not None and required not in self.achieved:
                 continue
 
             achieved = False

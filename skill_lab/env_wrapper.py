@@ -129,7 +129,8 @@ class SkillLabWrapper(gymnasium.Wrapper):
 
         # --- Breadcrumb Tracker (navigation rewards) ---
         self.breadcrumb_tracker = BreadcrumbTracker.from_stage_config(
-            config.get("stage_config", {}), self.effective_rewards
+            config.get("stage_config", {}), self.effective_rewards,
+            reward_logger=lambda rtype, amount, desc: self._log_reward(rtype, amount, desc),
         )
 
         # --- Pokemon Center Health Tracker (health-scaled proximity rewards) ---
@@ -828,13 +829,27 @@ class SkillLabWrapper(gymnasium.Wrapper):
     def _update_breadcrumb_after_milestone(self, current_map_id: int) -> None:
         """After a major story milestone, refresh BreadcrumbTracker waypoints.
 
-        Triggers when the "Got Oak's Parcel" checkpoint (event ``0xD74E-1``)
-        is achieved — the player now holds the parcel and must navigate back to
-        Pallet Town to deliver it to Oak.  Redirect navigation toward Oak's
-        Lab (map 40) so the breadcrumb rewards guide the agent the right way.
+        Previously this hardcoded a redirect to Oak's Lab when the Oak's Parcel
+        was obtained.  Now that waypoints support ``activate_on`` /
+        ``deactivate_on`` milestone fields, that transition is handled natively
+        by :class:`BreadcrumbTracker.update`.  This method is retained as a
+        fallback for stages that use plain breadcrumb lists without the
+        activation system.
         """
         if getattr(self, "_breadcrumbs_redirected", False):
             return
+        # Check if any waypoint has activate_on/deactivate_on fields — if so,
+        # the native activation system handles progression and we skip the
+        # hardcoded redirect.
+        if self.breadcrumb_tracker is not None and self.breadcrumb_tracker.waypoints:
+            has_activation = any(
+                wp.get("activate_on") is not None or wp.get("deactivate_on") is not None
+                for wp in self.breadcrumb_tracker.waypoints
+            )
+            if has_activation:
+                return
+
+        # Fallback: no activation fields — use the original hardcoded redirect
         try:
             oak_parcel_held = self.game_state.event_flag(0xD74E, 1)
         except Exception:
@@ -1058,11 +1073,12 @@ class SkillLabWrapper(gymnasium.Wrapper):
         if self.breadcrumb_tracker is not None:
             x_pos, y_pos = self.env.unwrapped.get_game_coords()[:2]
             breadcrumb_reward = self.breadcrumb_tracker.update(
-                x_pos, y_pos, current_map_id, env_label=self._colored_env_label()
+                x_pos, y_pos, current_map_id,
+                env_label=self._colored_env_label(),
+                achieved=self.checkpoint_tracker.achieved if self.checkpoint_tracker else None,
             )
             if breadcrumb_reward > 0:
                 reward += breadcrumb_reward
-                self._log_reward("breadcrumb", breadcrumb_reward, "Navigation waypoint reached")
                 info["breadcrumb_reward"] = breadcrumb_reward
 
         level_up = current_level_sum > prior_level_sum
@@ -1245,7 +1261,7 @@ class SkillLabWrapper(gymnasium.Wrapper):
         if self.checkpoint_tracker is not None:
             self.checkpoint_tracker.reset(self.game_state, self._colored_env_label())
         if self.breadcrumb_tracker is not None:
-            self.breadcrumb_tracker.reset()
+            self.breadcrumb_tracker.reset(achieved=self.checkpoint_tracker.achieved if self.checkpoint_tracker else None)
         if self.pokemon_center_tracker is not None:
             self.pokemon_center_tracker.reset()
         self.stagnation_tracker.reset()

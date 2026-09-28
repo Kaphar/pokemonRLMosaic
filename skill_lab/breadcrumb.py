@@ -1,7 +1,8 @@
 ﻿"""Breadcrumb navigation reward system."""
 from __future__ import annotations
 
-import math
+import json
+from pathlib import Path
 from typing import Any
 
 try:
@@ -24,6 +25,15 @@ class BreadcrumbTracker:
     The tracker projects local game coordinates to global map coordinates
     (via ``v2.map_projection.project_position``) so that waypoints defined in
     stage JSON are compared consistently in a shared pixel/tile space.
+
+    Breadcrumbs may declare ``activate_on`` and/or ``deactivate_on`` fields whose
+    values are the **names** of milestones.  A waypoint only awards rewards
+    after its ``activate_on`` milestone has been achieved, and stops rewarding
+    (if ``deactivate_on`` is set) once that milestone is achieved too.  This
+    lets the breadcrumb navigation path shift as story progression unfolds.
+
+    Waypoints without ``activate_on``/``deactivate_on`` are always active (unless
+    a deactivation milestone has been reached).
     """
 
     ARRIVAL_THRESHOLD = 3  # tiles
@@ -31,13 +41,19 @@ class BreadcrumbTracker:
     PIXELS_PER_TILE = 16
     """Conversion factor from projected pixel distance to tile distance."""
 
+    DEFAULT_BREADCRUMBS_PATH = (
+        Path(__file__).resolve().parent / "stages" / "default_breadcrumbs.json"
+    )
+
     def __init__(
         self,
         waypoints: list[dict[str, Any]] | None = None,
         effective_rewards: dict[str, float] | None = None,
+        reward_logger=None,
     ) -> None:
         self.waypoints: list[dict[str, Any]] = list(waypoints or [])
         self.effective_rewards = effective_rewards or {}
+        self._reward_logger = reward_logger
         self._closest_reached: float | None = None
         self._prev_distance: float | None = None
         self._current_waypoint_idx = 0
@@ -48,14 +64,34 @@ class BreadcrumbTracker:
         cls,
         stage_config: dict[str, Any] | None,
         effective_rewards: dict[str, float] | None = None,
+        reward_logger=None,
     ) -> "BreadcrumbTracker | None":
         """Build a tracker from a stage config's ``breadcrumbs`` array.
-        Returns None if no breadcrumbs are defined."""
+
+        Returns a tracker using the stage's breadcrumbs if defined.  If the
+        stage provides no ``breadcrumbs`` array, falls back to
+        ``stages/default_breadcrumbs.json`` so full-playthrough stages get
+        sensible waypoint progression automatically.  Returns ``None`` only if
+        neither source provides any breadcrumbs.
+        """
         stage_config = stage_config or {}
         breadcrumbs = stage_config.get("breadcrumbs", [])
+
+        if not breadcrumbs:
+            default_path = cls.DEFAULT_BREADCRUMBS_PATH
+            if default_path.exists():
+                try:
+                    with open(default_path, "r", encoding="utf-8") as f:
+                        default_data = json.load(f)
+                    breadcrumbs = default_data.get("breadcrumbs", [])
+                    if breadcrumbs:
+                        print(f"[BreadcrumbTracker] Loaded {len(breadcrumbs)} default breadcrumbs from {default_path.name}", flush=True)
+                except Exception as e:
+                    print(f"[BreadcrumbTracker] Failed to load default breadcrumbs: {e}", flush=True)
+
         if not breadcrumbs:
             return None
-        return cls(waypoints=breadcrumbs, effective_rewards=effective_rewards)
+        return cls(waypoints=breadcrumbs, effective_rewards=effective_rewards, reward_logger=reward_logger)
 
     def _project(self, x: int, y: int, map_id: int) -> tuple[int, int]:
         """Project local game coords to global coords for distance comparison."""
@@ -76,11 +112,46 @@ class BreadcrumbTracker:
             wg = (wpx, wpy)
         return abs(gx - wg[0]) + abs(gy - wg[1])
 
-    def reset(self) -> None:
-        """Reset tracker state for a new episode."""
+    def _is_waypoint_active(self, wp: dict[str, Any], achieved: set[str] | None) -> bool:
+        """Check if a waypoint is currently active based on milestone progress.
+
+        A waypoint is active if:
+        - ``activate_on`` is None (or the milestone is in ``achieved``), AND
+        - ``deactivate_on`` is None (or the milestone is NOT in ``achieved``).
+        """
+        achieved = achieved or set()
+        activate_on = wp.get("activate_on")
+        if activate_on is not None and activate_on not in achieved:
+            return False
+        deactivate_on = wp.get("deactivate_on")
+        if deactivate_on is not None and deactivate_on in achieved:
+            return False
+        return True
+
+    def _next_active_waypoint(self, achieved: set[str] | None, start_idx: int | None = None) -> int | None:
+        """Find the index of the next active waypoint at or after ``start_idx``.
+
+        Skips over waypoints that are not yet active.  Returns None if no
+        active waypoint remains.
+        """
+        achieved = achieved or set()
+        idx = start_idx if start_idx is not None else 0
+        while idx < len(self.waypoints):
+            if self._is_waypoint_active(self.waypoints[idx], achieved):
+                return idx
+            idx += 1
+        return None
+
+    def reset(self, achieved: set[str] | None = None) -> None:
+        """Reset tracker state for a new episode.
+
+        Optionally accepts the current set of achieved milestone names so
+        that the active waypointer starts at the correct position in the
+        progression.
+        """
         self._closest_reached = None
         self._prev_distance = None
-        self._current_waypoint_idx = 0
+        self._current_waypoint_idx = self._next_active_waypoint(achieved) or 0
         self.total_reward = 0.0
 
     def set_waypoints(self, waypoints: list[dict[str, Any]]) -> None:
@@ -97,13 +168,30 @@ class BreadcrumbTracker:
             print(f"[BreadcrumbTracker] Waypoints set ({len(self.waypoints)}): "
                   f"{', '.join(wp_labels)}", flush=True)
             for i, wp in enumerate(self.waypoints):
+                wp_label = wp.get('label', f'wp_{i}')
+                activate = wp.get('activate_on', 'always')
+                deactivate = wp.get('deactivate_on', 'never')
                 print(f"[BreadcrumbTracker]   [{i+1}/{len(self.waypoints)}] "
-                      f"{wp.get('label', f'wp_{i}')}  "
+                      f"{wp_label}  "
                       f"map={wp.get('target_map', '?')}  "
-                      f"x={wp.get('target_x', '?')}  y={wp.get('target_y', '?')}",
+                      f"x={wp.get('target_x', '?')}  y={wp.get('target_y', '?')}  "
+                      f"activate_on={activate}  deactivate_on={deactivate}",
                       flush=True)
 
-    def update(self, x: int, y: int, map_id: int, env_label: str = "") -> float:
+    def _log_reward(self, reward_type: str, amount: float, description: str) -> None:
+        """Log a breadcrumb reward event via the reward logger if available.
+
+        Mirrors the logging pattern used by :class:`PokemonCenterTracker`
+        in ``env_wrapper.py._log_reward``.
+        """
+        if self._reward_logger is not None:
+            try:
+                self._reward_logger(reward_type, amount, description)
+            except Exception:
+                pass
+
+    def update(self, x: int, y: int, map_id: int, env_label: str = "",
+               achieved: set[str] | None = None) -> float:
         """Process a new position and return any reward earned.
 
         Awards a **proportional** proximity reward every step that the agent
@@ -112,9 +200,29 @@ class BreadcrumbTracker:
         signal — every step toward the target yields a commensurate reward.
         A larger ``breadcrumb_arrival`` reward is given when within
         :attr:`ARRIVAL_THRESHOLD` tiles.
+
+        Breadcrumbs with ``activate_on``/``deactivate_on`` fields are only
+        active when the corresponding milestones have/haven't been reached.
+        The ``achieved`` set (from the milestone tracker) drives this logic.
         """
         if not self.waypoints:
             return 0.0
+
+        # Skip to the next active waypoint if the current one is no longer active.
+        if not self._is_waypoint_active(self.waypoints[self._current_waypoint_idx], achieved):
+            next_idx = self._next_active_waypoint(achieved, start_idx=self._current_waypoint_idx)
+            if next_idx is None:
+                return 0.0
+            self._current_waypoint_idx = next_idx
+            self._prev_distance = None
+            self._closest_reached = None
+            wp = self.waypoints[self._current_waypoint_idx]
+            wp_map = int(wp.get("target_map", 0))
+            wp_x = int(wp.get("target_x", 0))
+            wp_y = int(wp.get("target_y", 0))
+            wp_label = wp.get("label", f"Waypoint {self._current_waypoint_idx + 1}")
+            print(f"{env_label} >> Breadcrumb activated: {wp_label} "
+                  f"(map=0x{wp_map:02X}/x={wp_x}/y={wp_y})", flush=True)
 
         reward = 0.0
 
@@ -123,6 +231,16 @@ class BreadcrumbTracker:
             return 0.0
 
         wp = self.waypoints[self._current_waypoint_idx]
+
+        # If the current waypoint became inactive mid-progress, advance
+        if not self._is_waypoint_active(wp, achieved):
+            next_idx = self._next_active_waypoint(achieved, start_idx=self._current_waypoint_idx + 1)
+            if next_idx is None:
+                return 0.0
+            self._current_waypoint_idx = next_idx
+            self._prev_distance = None
+            self._closest_reached = None
+            wp = self.waypoints[self._current_waypoint_idx]
 
         distance_px = self._distance(x, y, map_id, wp)
         distance_tiles = distance_px / self.PIXELS_PER_TILE
@@ -144,6 +262,7 @@ class BreadcrumbTracker:
                   f"player=map:0x{map_id:02X}/x={x}/y={y} "
                   f"dist={distance_tiles:.1f}t) (+{arrival_reward:.2f})",
                   flush=True)
+            self._log_reward("breadcrumb_arrival", arrival_reward, f"Arrived at waypoint: {wp_label}")
             self._current_waypoint_idx += 1
             self._prev_distance = None
             self._closest_reached = None
@@ -163,14 +282,21 @@ class BreadcrumbTracker:
                       f"player=map:0x{map_id:02X}/x={x}/y={y} "
                       f"dist={distance_tiles:.1f}t (was {self._prev_distance:.1f}t) "
                       f"(+{proximity_reward:.2f})", flush=True)
+                self._log_reward("breadcrumb", proximity_reward,
+                                 f"Navigated toward waypoint: {wp_label}")
 
         self._prev_distance = distance_tiles
         return reward
 
-    def get_progress(self) -> dict[str, Any]:
+    def get_progress(self, achieved: set[str] | None = None) -> dict[str, Any]:
         """Return a serializable progress summary."""
+        achieved = achieved or set()
         return {
             "total_waypoints": len(self.waypoints),
+            "active_waypoints": [
+                i for i, wp in enumerate(self.waypoints)
+                if self._is_waypoint_active(wp, achieved)
+            ],
             "current_target_index": self._current_waypoint_idx,
             "closest_reached": self._closest_reached,
             "prev_distance": self._prev_distance,
