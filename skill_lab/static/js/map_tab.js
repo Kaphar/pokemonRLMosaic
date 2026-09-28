@@ -123,6 +123,27 @@ function hideCoordPopover() {
   }
 }
 
+ // EDIT HERE: Ghost selection preview — renders semi-transparent 16x16 rects
+ // for each tile within the selection rectangle, using the same +8 Y offset as
+ // zone cells to compensate for the map stitching coordinate offset.
+ function renderSelectGhost(startX, startY, endX, endY) {
+  state.selectGhost.innerHTML = '';
+  for (let tx = Math.floor(startX / 16); tx <= Math.floor(endX / 16); tx++) {
+    for (let ty = Math.floor(startY / 16); ty <= Math.floor(endY / 16); ty++) {
+      const rect = document.createElementNS(SVG_NS, 'rect');
+      rect.setAttribute('x', tx * 16);
+      rect.setAttribute('y', ty * 16 - 8);
+      rect.setAttribute('width', 16);
+      rect.setAttribute('height', 16);
+      rect.setAttribute('fill', '#ff6b6b');
+      rect.setAttribute('opacity', '0.25');
+      rect.setAttribute('stroke', '#ff6b6b');
+      rect.setAttribute('stroke-width', '0.5');
+      state.selectGhost.appendChild(rect);
+    }
+  }
+}
+
 function renderZones(data) {
   const zones = data.zones || (data.lava_zones ? [{ type: 'lava', cells: data.lava_zones, label: 'Lava Zone', color: '#ff6b6b', opacity: 0.5 }] : []);
   if (!el.zoneList) return;
@@ -337,8 +358,12 @@ function renderMap(data) {
     const cells = zone.cells || [];
     for (const cell of cells) {
       const rect = document.createElementNS(SVG_NS, 'rect');
+      // EDIT HERE: +8 Y offset compensates for map stitching coordinate offset.
+      //  // check this, this is weird, it might lead to find out why we have an offset.
+      // Cells are stored as 16-aligned tile positions; the +8 aligns them with
+      // env circles (env.y + halfTile) on the stitched map image.
       rect.setAttribute('x', cell[0]);
-      rect.setAttribute('y', cell[1] - 8);
+      rect.setAttribute('y', cell[1] + 8);
       rect.setAttribute('width', 16);
       rect.setAttribute('height', 16);
       rect.setAttribute('fill', color);
@@ -399,6 +424,10 @@ function initHighlightElements() {
   state.selectRect.setAttribute('pointer-events', 'none');
   el.highlightLayer.appendChild(state.selectRect);
   state.selectRect.style.display = 'none';
+
+  // EDIT HERE: Ghost group element for selection preview
+  state.selectGhost = document.createElementNS(SVG_NS, 'g');
+  el.highlightLayer.appendChild(state.selectGhost);
 }
 
 function updateLavaToggle() {
@@ -454,16 +483,20 @@ function initMap() {
       const startSvgY = ((state.dragStart.y - startRect.top) / startRect.height) * svg_h;
       const startViewX = (startSvgX - state.panX) * invScale;
       const startViewY = (startSvgY - state.panY) * invScale;
-      const startX = Math.min(startViewX, viewBoxX);
-      const startY = Math.min(startViewY, viewBoxY);
-      const endX = Math.max(startViewX, viewBoxX);
-      const endY = Math.max(startViewY, viewBoxY);
-      state.selectRect.setAttribute('x', startX);
-      state.selectRect.setAttribute('y', startY);
+      // EDIT HERE: Snap selection to 16px tile grid using Math.floor on both
+      // start and end so only tiles fully within the drag range are included.
+      // +8 Y offset matches cell rendering offset.
+      const startX = Math.floor(Math.min(startViewX, viewBoxX) / 16) * 16;
+      const startY = Math.floor(Math.min(startViewY, viewBoxY) / 16) * 16;
+      const endX = Math.floor(Math.max(startViewX, viewBoxX) / 16) * 16;
+      const endY = Math.floor(Math.max(startViewY, viewBoxY) / 16) * 16;
+      state.selectRect.setAttribute('x', startX + 8);
+      state.selectRect.setAttribute('y', startY - 8);
       state.selectRect.setAttribute('width', endX - startX);
       state.selectRect.setAttribute('height', endY - startY);
       state.selectRect.style.display = 'block';
       state.lavaHighlight.style.display = 'none';
+      renderSelectGhost(startX, startY, endX, endY);
       return;
     }
     if (!state.isPanning && !state.lavaPlacementMode) return;
@@ -483,9 +516,11 @@ function initMap() {
       const viewBoxX = (svgX - state.panX) * invScale;
       const viewBoxY = (svgY - state.panY) * invScale;
       const tileX = Math.round(viewBoxX / 16) * 16;
-      const tileY = Math.round(viewBoxY / 16) * 16;
+      // EDIT HERE: Math.floor on Y prevents selecting the tile below when mouse
+      // is near the bottom edge of a tile. +8 Y offset matches cell rendering.
+      const tileY = Math.floor(viewBoxY / 16) * 16;
       state.lavaHighlight.setAttribute('x', tileX);
-      state.lavaHighlight.setAttribute('y', tileY - 8);
+      state.lavaHighlight.setAttribute('y', tileY + 8); // with -8 here it highlights closer to the mouse. but then the actual selection selects another cell than highlighted.
       state.lavaHighlight.style.display = 'block';
     }
   });
@@ -503,10 +538,12 @@ function initMap() {
         const endSvgY = ((event.clientY - rect.top) / rect.height) * svg_h;
         const endViewX = (endSvgX - state.panX) * invScale;
         const endViewY = (endSvgY - state.panY) * invScale;
-        const startX = Math.min(startViewX, endViewX);
-        const startY = Math.min(startViewY, endViewY);
-        const endX = Math.max(startViewX, endViewX);
-        const endY = Math.max(startViewY, endViewY);
+        // EDIT HERE: Same snapping as mousemove handler — Math.floor on both
+        // start and end to include only tiles whose top-left is within range.
+        const startX = Math.floor(Math.min(startViewX, endViewX) / 16) * 16;
+        const startY = Math.floor(Math.min(startViewY, endViewY) / 16) * 16 - 8;
+        const endX = Math.floor(Math.max(startViewX, endViewX) / 16) * 16;
+        const endY = Math.floor(Math.max(startViewY, endViewY) / 16) * 16;
         const zones = [];
         for (let tx = Math.floor(startX / 16); tx <= Math.floor(endX / 16); tx++) {
           for (let ty = Math.floor(startY / 16); ty <= Math.floor(endY / 16); ty++) {
@@ -537,6 +574,7 @@ function initMap() {
       }
       state.dragStart = null;
       state.selectRect.style.display = 'none';
+      if (state.selectGhost) state.selectGhost.innerHTML = '';
       return;
     }
     if (!state.isPanning) return;
@@ -709,7 +747,7 @@ function initMap() {
   } else {
     // Smooth default zoom toward the focus point (1040, 3376)
     setTimeout(function() {
-       state.zoomScale = 3.0;
+       state.zoomScale = 4.0;
        var focusX = 1040, focusY = 3376;
        state.panX = svg_w / 2 - state.zoomScale * focusX;
        state.panY = svg_h / 2 - state.zoomScale * focusY;
