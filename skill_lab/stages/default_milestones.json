@@ -53,6 +53,7 @@
     {
       "name": "Parcel Delivered",
       "item_check": {"item_id": 70, "require_not_item": true},
+      "required_milestone": "ITEM: Oak Parcel",
       "reward_baseline": 20.0,
       "description": "Deliver Oak's Parcel to Professor Oak in Pallet Lab"
     }

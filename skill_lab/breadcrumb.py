@@ -12,6 +12,12 @@ except ImportError:
     _HAS_PROJECTION = False
     project_position = None
 
+try:
+    from skill_lab.rewards import OUTDOOR_MAP_IDS
+    _OUTDOOR_SET = frozenset(OUTDOOR_MAP_IDS)
+except ImportError:
+    _OUTDOOR_SET = frozenset()
+
 
 class BreadcrumbTracker:
     """Track navigation progress toward a sequence of waypoint destinations.
@@ -56,6 +62,7 @@ class BreadcrumbTracker:
         self._reward_logger = reward_logger
         self._closest_reached: float | None = None
         self._prev_distance: float | None = None
+        self._was_indoors: bool = False
         self._current_waypoint_idx = 0
         self.total_reward: float = 0.0
 
@@ -99,6 +106,10 @@ class BreadcrumbTracker:
             result = project_position(x, y, map_id)
             return (result.pixel_x, result.pixel_y)
         return (x, y)
+
+    def _is_outdoor(self, map_id: int) -> bool:
+        """Return True if the player is on an outdoor map."""
+        return map_id in _OUTDOOR_SET
 
     def _distance(self, x: int, y: int, map_id: int, wp: dict[str, Any]) -> float:
         """Manhattan distance from player position to a waypoint."""
@@ -151,6 +162,7 @@ class BreadcrumbTracker:
         """
         self._closest_reached = None
         self._prev_distance = None
+        self._was_indoors = False
         self._current_waypoint_idx = self._next_active_waypoint(achieved) or 0
         self.total_reward = 0.0
 
@@ -207,6 +219,23 @@ class BreadcrumbTracker:
         """
         if not self.waypoints:
             return 0.0
+
+        # Skip navigation rewards when the player is indoors (houses, caves, etc.)
+        # unless a waypoint explicitly opts out via ``outdoor_only: false``.
+        # Track indoor state so we can invalidate the stale ``_prev_distance``
+        # on the return to outdoors — otherwise a teleport in/out of a building
+        # creates a huge fake distance delta and a reward hack.
+        wp = self.waypoints[self._current_waypoint_idx]
+        is_outdoor = self._is_outdoor(map_id)
+        if wp.get("outdoor_only", True) and not is_outdoor:
+            self._was_indoors = True
+            return 0.0
+
+        if self._was_indoors and is_outdoor:
+            # Transitioning back outdoors — discard the stale prev_distance
+            # so the first step outside doesn't fire a fake proximity reward.
+            self._was_indoors = False
+            self._prev_distance = None
 
         # Skip to the next active waypoint if the current one is no longer active.
         if not self._is_waypoint_active(self.waypoints[self._current_waypoint_idx], achieved):
@@ -356,6 +385,7 @@ class PokemonCenterTracker:
         self._death_count: int = 0
         self._prior_all_fainted: bool = False
         self._last_position: tuple[int, int, int] | None = None
+        self._was_indoors: bool = False
         self.total_reward: float = 0.0
 
     def _project(self, x: int, y: int, map_id: int) -> tuple[int, int]:
@@ -363,6 +393,10 @@ class PokemonCenterTracker:
             result = project_position(x, y, map_id)
             return (result.pixel_x, result.pixel_y)
         return (x, y)
+
+    def _is_outdoor(self, map_id: int) -> bool:
+        """Return True if the player is on an outdoor map."""
+        return map_id in _OUTDOOR_SET
 
     def _nearest_center(self, px: int, py: int) -> tuple[int, float]:
         best_dist: float = float("inf")
@@ -383,6 +417,7 @@ class PokemonCenterTracker:
         self._death_count = 0
         self._prior_all_fainted = False
         self._last_position = None
+        self._was_indoors = False
         self.total_reward = 0.0
 
     def update(
@@ -426,6 +461,20 @@ class PokemonCenterTracker:
         # can't move toward a center and HP changes come from combat.
         if in_battle:
             return reward, death_penalty
+
+        # Skip health-scaled proximity rewards when indoors.  Pokemon Centers
+        # are outdoor destinations — no need to navigate toward them while
+        # the player is inside a house, cave, or other indoor map.  Track
+        # indoor state so we invalidate the stale ``_prev_distance`` on the
+        # return to outdoors — otherwise a teleport in/out of a building
+        # creates a huge fake distance delta and a reward hack.
+        if not self._is_outdoor(map_id):
+            self._was_indoors = True
+            return reward, death_penalty
+
+        if self._was_indoors:
+            self._was_indoors = False
+            self._prev_distance = None
 
         px, py = self._project(x, y, map_id)
 
