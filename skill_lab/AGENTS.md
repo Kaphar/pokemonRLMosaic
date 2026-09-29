@@ -1,0 +1,1 @@
+# let's add informations about how the squelette and flow of the scripts and its caveats as we go:
