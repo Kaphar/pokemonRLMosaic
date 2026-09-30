@@ -22,10 +22,12 @@ except ImportError:
 class BreadcrumbTracker:
     """Track navigation progress toward a sequence of waypoint destinations.
 
-    Awards a **proportional** proximity reward every step the agent closes
-    the tile-distance gap to its current destination (``base * delta_tiles``),
-    so that the reward scales with how many tiles were traversed toward the
-    target.  A larger ``breadcrumb_arrival`` reward fires when within
+    Awards a **proportional** proximity reward when the agent closes
+    the tile-distance gap to its current destination by at least
+    :attr:`PROXIMITY_REWARD_THRESHOLD` tiles, so that the reward scales
+    with how many tiles were traversed toward the target without
+    rewarding step-by-step micro-movements.  A larger
+    ``breadcrumb_arrival`` reward fires when within
     :attr:`ARRIVAL_THRESHOLD` tiles.
 
     The tracker projects local game coordinates to global map coordinates
@@ -43,6 +45,8 @@ class BreadcrumbTracker:
     """
 
     ARRIVAL_THRESHOLD = 3  # tiles
+
+    PROXIMITY_REWARD_THRESHOLD = 10  # tiles — reward once per this-distance band closed
 
     PIXELS_PER_TILE = 16
     """Conversion factor from projected pixel distance to tile distance."""
@@ -62,6 +66,7 @@ class BreadcrumbTracker:
         self._reward_logger = reward_logger
         self._closest_reached: float | None = None
         self._prev_distance: float | None = None
+        self._last_rewarded_distance: float | None = None
         self._was_indoors: bool = False
         self._current_waypoint_idx = 0
         self.total_reward: float = 0.0
@@ -162,6 +167,7 @@ class BreadcrumbTracker:
         """
         self._closest_reached = None
         self._prev_distance = None
+        self._last_rewarded_distance = None
         self._was_indoors = False
         self._current_waypoint_idx = self._next_active_waypoint(achieved) or 0
         self.total_reward = 0.0
@@ -206,11 +212,13 @@ class BreadcrumbTracker:
                achieved: set[str] | None = None) -> float:
         """Process a new position and return any reward earned.
 
-        Awards a **proportional** proximity reward every step that the agent
-        closes the tile-distance gap to the current waypoint:
-        ``reward = base * delta_tiles``.  This gives a continuous gradient
-        signal — every step toward the target yields a commensurate reward.
-        A larger ``breadcrumb_arrival`` reward is given when within
+        Awards a **proportional** proximity reward when the agent's distance
+        to the current waypoint drops below the previously-closest distance by
+        at least ``PROXIMITY_REWARD_THRESHOLD`` tiles:
+        ``reward = base * delta_tiles``.  This gives a gradient signal —
+        meaningful progress toward the target yields a commensurate reward,
+        without rewarding step-by-step micro-movements.  A larger
+        ``breadcrumb_arrival`` reward is given when within
         :attr:`ARRIVAL_THRESHOLD` tiles.
 
         Breadcrumbs with ``activate_on``/``deactivate_on`` fields are only
@@ -218,6 +226,10 @@ class BreadcrumbTracker:
         The ``achieved`` set (from the milestone tracker) drives this logic.
         """
         if not self.waypoints:
+            return 0.0
+
+        # Clamp to valid waypoint range
+        if self._current_waypoint_idx >= len(self.waypoints):
             return 0.0
 
         # Skip navigation rewards when the player is indoors (houses, caves, etc.)
@@ -245,6 +257,7 @@ class BreadcrumbTracker:
             self._current_waypoint_idx = next_idx
             self._prev_distance = None
             self._closest_reached = None
+            self._last_rewarded_distance = None
             wp = self.waypoints[self._current_waypoint_idx]
             wp_map = int(wp.get("target_map", 0))
             wp_x = int(wp.get("target_x", 0))
@@ -255,12 +268,6 @@ class BreadcrumbTracker:
 
         reward = 0.0
 
-        # Clamp to valid waypoint range
-        if self._current_waypoint_idx >= len(self.waypoints):
-            return 0.0
-
-        wp = self.waypoints[self._current_waypoint_idx]
-
         # If the current waypoint became inactive mid-progress, advance
         if not self._is_waypoint_active(wp, achieved):
             next_idx = self._next_active_waypoint(achieved, start_idx=self._current_waypoint_idx + 1)
@@ -269,6 +276,7 @@ class BreadcrumbTracker:
             self._current_waypoint_idx = next_idx
             self._prev_distance = None
             self._closest_reached = None
+            self._last_rewarded_distance = None
             wp = self.waypoints[self._current_waypoint_idx]
 
         distance_px = self._distance(x, y, map_id, wp)
@@ -295,24 +303,37 @@ class BreadcrumbTracker:
             self._current_waypoint_idx += 1
             self._prev_distance = None
             self._closest_reached = None
+            self._last_rewarded_distance = None
             return reward
 
-        # Proportional proximity: reward every step that reduces distance,
-        # scaled by the number of tiles closed.
-        if self._prev_distance is not None:
-            delta = self._prev_distance - distance_tiles
-            if delta > 0:
+        # Proportional proximity: reward only when the agent enters a new
+        # closest-distance *band* — i.e. floor(distance / threshold) decreases.
+        # This ensures at most one proximity reward per threshold-tile band,
+        # preventing step-by-step reward spam regardless of how far the agent
+        # moves in a single step.  The reward scales with the full band-width
+        # (delta from the last rewarded distance), not just the single step.
+        threshold = self.PROXIMITY_REWARD_THRESHOLD
+        if self._closest_reached is None:
+            self._closest_reached = distance_tiles
+            self._last_rewarded_distance = distance_tiles
+        else:
+            current_band = int(distance_tiles // threshold)
+            last_band = int(self._last_rewarded_distance // threshold) if self._last_rewarded_distance is not None else current_band
+            if distance_tiles < self._closest_reached:
+                self._closest_reached = distance_tiles
+            if current_band < last_band:
+                delta = self._last_rewarded_distance - distance_tiles
                 proximity_reward = base_reward * delta
                 reward += proximity_reward
                 self.total_reward += proximity_reward
-                self._closest_reached = distance_tiles
                 print(f"{label} >> Closer to '{wp_label}': "
                       f"wp=map:0x{wp_map:02X}/x={wp_x}/y={wp_y} "
                       f"player=map:0x{map_id:02X}/x={x}/y={y} "
-                      f"dist={distance_tiles:.1f}t (was {self._prev_distance:.1f}t) "
+                      f"dist={distance_tiles:.1f}t (was {self._last_rewarded_distance:.1f}t) "
                       f"(+{proximity_reward:.2f})", flush=True)
                 self._log_reward("breadcrumb", proximity_reward,
                                  f"Navigated toward waypoint: {wp_label}")
+                self._last_rewarded_distance = distance_tiles
 
         self._prev_distance = distance_tiles
         return reward
@@ -349,14 +370,16 @@ class PokemonCenterTracker:
     does not interfere with normal exploration when health is healthy.
 
     Rewards are **proportional** to the distance reduction in tile units
-    (not a flat per-step amount), so every step toward the center generates
-    a commensurate reward.  A larger ``health_arrival`` reward fires when
-    the agent reaches the center.
+    (not a flat per-step amount), so each milestone band that the agent
+    closes yields a commensurate reward.  A larger ``health_arrival``
+    reward fires when the agent reaches the center.
     """
 
     ARRIVAL_THRESHOLD = 3
     """Distance in *tiles* (projected space) within which the agent is
     considered to have reached the Pokemon Center."""
+
+    PROXIMITY_REWARD_THRESHOLD = 10  # tiles — reward once per this-distance band closed
 
     HEALTH_THRESHOLD = 0.7
     """HP fraction below which health-proximity rewards are enabled."""
@@ -386,6 +409,7 @@ class PokemonCenterTracker:
         self._prior_all_fainted: bool = False
         self._last_position: tuple[int, int, int] | None = None
         self._was_indoors: bool = False
+        self._last_rewarded_distance: float | None = None
         self.total_reward: float = 0.0
 
     def _project(self, x: int, y: int, map_id: int) -> tuple[int, int]:
@@ -418,6 +442,7 @@ class PokemonCenterTracker:
         self._prior_all_fainted = False
         self._last_position = None
         self._was_indoors = False
+        self._last_rewarded_distance = None
         self.total_reward = 0.0
 
     def update(
@@ -440,9 +465,10 @@ class PokemonCenterTracker:
 
         Proximity reward is **proportional** to the tile-distance reduction
         toward the nearest center: ``reward = k * delta_tiles * urgency``
-        where ``urgency = 1 - hp_fraction``.  Every step that reduces
-        distance yields a proportional reward, providing continuous gradient
-        signal rather than a sparse binary improvement flag.
+        where ``urgency = 1 - hp_fraction``.  Rewards fire only when the
+        agent reaches a new closest-distance milestone (drops below the
+        previous closest by at least ``PROXIMITY_REWARD_THRESHOLD`` tiles),
+        providing gradient signal without per-step spam.
         """
         reward = 0.0
         death_penalty = 0.0
@@ -497,6 +523,7 @@ class PokemonCenterTracker:
         if center_idx != self._current_center_idx:
             self._prev_distance = None
             self._closest_reached = None
+            self._last_rewarded_distance = None
             self._current_center_idx = center_idx
 
         center = self.POKEMON_CENTERS[center_idx]
@@ -519,22 +546,33 @@ class PokemonCenterTracker:
             return reward, death_penalty
 
         # Proportional proximity reward:
-        # Scale by tile-distance reduction * urgency so every step that
-        # closes the gap yields a proportional reward.
-        if self._prev_distance is not None:
-            delta = self._prev_distance - distance_tiles
-            if delta > 0:
+        # Reward only when the agent enters a new closest-distance *band* —
+        # i.e. floor(distance / threshold) decreases.  This ensures at most
+        # one proximity reward per threshold-tile band, preventing
+        # step-by-step reward spam regardless of step size.  The reward scales
+        # with the full band-width (delta from the last rewarded distance).
+        threshold = self.PROXIMITY_REWARD_THRESHOLD
+        if self._closest_reached is None:
+            self._closest_reached = distance_tiles
+            self._last_rewarded_distance = distance_tiles
+        else:
+            current_band = int(distance_tiles // threshold)
+            last_band = int(self._last_rewarded_distance // threshold) if self._last_rewarded_distance is not None else current_band
+            if distance_tiles < self._closest_reached:
+                self._closest_reached = distance_tiles
+            if current_band < last_band:
+                delta = self._last_rewarded_distance - distance_tiles
                 base = self.effective_rewards.get("health_proximity", 0.5)
                 proximity_reward = base * delta * urgency
                 reward += proximity_reward
                 self.total_reward += proximity_reward
-                self._closest_reached = distance_tiles
                 pc_label = center["label"]
                 print(f"{label} [PC] Closer to {pc_label} ({center['x']},{center['y']}): map=0x{map_id:02X} "
                       f"{x}/{y}"
-                      f"dist={self._prev_distance:.1f}t > {distance_tiles:.1f}t"
+                      f"dist={distance_tiles:.1f}t (was {self._last_rewarded_distance:.1f}t) "
                       f"HP={hp_fraction:.0%} urgency x{urgency:.2f} "
                       f"(+{proximity_reward:.2f})", flush=True)
+                self._last_rewarded_distance = distance_tiles
 
         self._prev_distance = distance_tiles
         return reward, death_penalty
