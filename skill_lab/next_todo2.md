@@ -1,7 +1,5 @@
-In recent changes we weren't successful in determining how to be able to have/ turn on and toggle (check the audio flags ?).
-There is always this duality between the python app and the web app, through the web app with the dev mode button it is working, we can control the dev emulator, it can go in interactive mode, but i couldn't have the sound. In the python Observation Inspector, we had the sound but our input weren't considered. it would be nice to fix everything but ultimately if I am moving after refactoring to a mostly web experience, we might not need to take care of everything. still leaving a note for later, I am not even sure why I am pushing this change.
-ARE WE BLOCKED MASKED ACTION FOR DOWN AFTER GETTING OAK Parcel ?
 
+there is a reward hacking for the pokemon center tracker i think, so there must be with the breadcrumb tracker as well, check the reward history.
 
 fix breadcrumb tracker
 fix pokemon center tracker
@@ -15,7 +13,7 @@ so we need to design a way => maybe I need to ask for more insight.
 
 * investigate : bench/tune up the speed. Why is it that our emulator_with_debug in interactive mode is faster than the mosaic ? does it mean we are doing thing inefficiently with our mosaic and we could actually train faster ? or in interactive mode the model is not training ? we need to analyze why it's slower, because maybe we can improve our training speed.
 
-* make sure the events milestones are flagged achieved, they are triggered in the events.json handling, but it seems that those type of milestone don't register properly.
+* make sure the events milestones are flagged achieved, they are triggered in the events from the json, but it seems that those type of milestone don't register properly.
 
 
 # later 

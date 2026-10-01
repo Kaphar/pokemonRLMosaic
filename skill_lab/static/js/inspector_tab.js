@@ -3,6 +3,13 @@ import { isInspectorTabActive } from './util.js';
 
 const ACTION_NAMES = ['Down', 'Left', 'Right', 'Up', 'A', 'B', 'Start', 'Select'];
 
+function formatTime(hours, minutes, seconds) {
+  const h = parseInt(hours) || 0;
+  const m = parseInt(minutes) || 0;
+  const s = parseInt(seconds) || 0;
+  return h + 'h ' + m + 'm ' + s + 's';
+}
+
 const SDL_TO_CODE_MAP = {
   'down': 'ArrowDown',
   'up': 'ArrowUp',
@@ -518,8 +525,9 @@ function renderInspectorDetails(data) {
     html += '<tr><td class="inspect-label">Name</td><td>' + (trainer.name || '-') + '</td></tr>';
     html += '<tr><td class="inspect-label">Money</td><td>$' + (trainer.money || 0) + '</td></tr>';
     html += '<tr><td class="inspect-label">Coins</td><td>' + (trainer.coins || 0) + '</td></tr>';
-    html += '<tr><td class="inspect-label">Badges</td><td>' + (trainer.badge_count || 0) + '/8</td></tr>';
-    html += '</table>';
+     html += '<tr><td class="inspect-label">Badges</td><td>' + (trainer.badge_count || 0) + '/8</td></tr>';
+     html += '<tr><td class="inspect-label">Time Played</td><td>' + formatTime(trainer.hours, trainer.minutes, trainer.seconds) + '</td></tr>';
+     html += '</table>';
     html += '</div>';
     html += '</div>';
   }
@@ -770,6 +778,56 @@ function renderInspectorDetails(data) {
   html += '</div>';
 
   el.inspectorDetails.innerHTML = html;
+
+  // ---- Bottom panel: Safari Balls and Frames ----
+  if (el.inspectorBottomPanel) {
+    const bottomStats = data.bottom_panel || {};
+    let bottomHtml = '';
+    bottomHtml += '<div class="inspector-section">';
+    bottomHtml += '<h3>Bottom Panel</h3>';
+    bottomHtml += '<table class="inspector-table">';
+    bottomHtml += '<tr><td class="inspect-label">Safari Balls</td><td>' + (bottomStats.safari_balls !== undefined ? bottomStats.safari_balls : '-') + '</td></tr>';
+    bottomHtml += '<tr><td class="inspect-label">Frames</td><td>' + (bottomStats.frames !== undefined ? bottomStats.frames : '-') + '</td></tr>';
+    bottomHtml += '</table>';
+    bottomHtml += '</div>';
+    el.inspectorBottomPanel.innerHTML = bottomHtml;
+  }
+
+  // ---- Menu Debug ----
+  if (el.inspectorMenuDebug) {
+    const menuDebug = data.menu_debug || {};
+    let menuHtml = '';
+    menuHtml += '<div class="inspector-section">';
+    menuHtml += '<h3>Menu Debug</h3>';
+    menuHtml += '<table class="inspector-table">';
+    menuHtml += '<tr><td class="inspect-label">Cursor Y (CC24)</td><td>' + formatHex(menuDebug.cursor_y) + '</td></tr>';
+    menuHtml += '<tr><td class="inspect-label">Cursor X (CC25)</td><td>' + formatHex(menuDebug.cursor_x) + '</td></tr>';
+    menuHtml += '<tr><td class="inspect-label">Selected Item (CC26)</td><td>' + formatHex(menuDebug.selected_item) + '</td></tr>';
+    menuHtml += '<tr><td class="inspect-label">Hidden Tile (CC27)</td><td>' + formatHex(menuDebug.hidden_tile) + '</td></tr>';
+    menuHtml += '<tr><td class="inspect-label">Last Item ID (CC28)</td><td>' + formatHex(menuDebug.last_item_id) + '</td></tr>';
+    menuHtml += '<tr><td class="inspect-label">Key Port Bitmask (CC29)</td><td>' + formatHex(menuDebug.key_port_bitmask) + '</td></tr>';
+    menuHtml += '<tr><td class="inspect-label">Previous Item (CC2A)</td><td>' + formatHex(menuDebug.previous_item) + '</td></tr>';
+    menuHtml += '<tr><td class="inspect-label">Party Cursor Pos (CC2B)</td><td>' + formatHex(menuDebug.cursor_party_pos) + '</td></tr>';
+    menuHtml += '<tr><td class="inspect-label">Item Cursor Pos (CC2C)</td><td>' + formatHex(menuDebug.cursor_item_pos) + '</td></tr>';
+    menuHtml += '<tr><td class="inspect-label">Start/Battle Menu Pos (CC2D)</td><td>' + formatHex(menuDebug.cursor_start_battle_pos) + '</td></tr>';
+    menuHtml += '<tr><td class="inspect-label">Sent Out Pokemon (CC2F)</td><td>' + formatHex(menuDebug.sent_out_pokemon) + '</td></tr>';
+    menuHtml += '<tr><td class="inspect-label">Cursor Tile Ptr (CC30)</td><td>0x' + formatHexLow(menuDebug.cursor_tile_ptr_1) + formatHexLow(menuDebug.cursor_tile_ptr_2) + '</td></tr>';
+    menuHtml += '<tr><td class="inspect-label">First Displayed Item (CC36)</td><td>' + formatHex(menuDebug.first_displayed_item) + '</td></tr>';
+    menuHtml += '<tr><td class="inspect-label">Select Highlighted Item (CC35)</td><td>' + formatHex(menuDebug.select_highlighted_item) + '</td></tr>';
+    menuHtml += '</table>';
+    menuHtml += '</div>';
+    el.inspectorMenuDebug.innerHTML = menuHtml;
+  }
+}
+
+function formatHex(value) {
+  if (value === undefined || value === null) return '-';
+  return '0x' + (parseInt(value) || 0).toString(16).toUpperCase().padStart(2, '0');
+}
+
+function formatHexLow(value) {
+  if (value === undefined || value === null) return '00';
+  return (parseInt(value) || 0).toString(16).toUpperCase().padStart(2, '0');
 }
 
 function renderInspectorMemoryWatch(data) {

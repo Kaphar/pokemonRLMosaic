@@ -616,7 +616,6 @@ class RedGymEnv(Env):
             self.map_frame_writer.close()
 
     def read_m(self, addr):
-        #return self.pyboy.get_memory_value(addr)
         return self.pyboy.memory[addr]
 
     def read_bit(self, addr, bit: int) -> bool:
