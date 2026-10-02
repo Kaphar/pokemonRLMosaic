@@ -376,14 +376,14 @@ function renderMap(data) {
     const halfTile = 8;
     const circle = document.createElementNS(SVG_NS, 'circle');
     circle.setAttribute('cx', env.x + halfTile);
-    circle.setAttribute('cy', env.y + halfTile);
+       circle.setAttribute('cy', env.y + halfTile + state.gridOffsetY);
     circle.setAttribute('r', 6);
     circle.setAttribute('fill', '#67f39b');
     circle.setAttribute('stroke', '#ffffff');
     circle.setAttribute('stroke-width', 1.2);
     const label = document.createElementNS(SVG_NS, 'text');
     label.setAttribute('x', env.x + halfTile + 10);
-    label.setAttribute('y', env.y + halfTile - 8);
+    label.setAttribute('y', env.y + halfTile - 8 + state.gridOffsetY);
     label.setAttribute('fill', '#eaf2ff');
     label.setAttribute('font-size', '12');
     label.textContent = 'E' + (env.env_index + 1);
