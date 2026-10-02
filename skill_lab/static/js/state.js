@@ -85,7 +85,7 @@ const state = {
   selectedZoneId: null,
   isEditingZone: false,
   yOffset: 0,
-  gridOffsetY: 0,
+  gridOffsetY: 4,
   availableCheckpoints: [],
   actionNames: ['Down', 'Left', 'Right', 'Up', 'A', 'B', 'Start', 'Select'],
   clickStart: null,

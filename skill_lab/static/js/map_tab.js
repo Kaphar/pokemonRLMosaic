@@ -124,10 +124,14 @@ function hideCoordPopover() {
 }
 
   // Render selection ghost cells for tiles intersecting a rectangle.
-  function renderSelectGhost(startX, startY, endX, endY) {
+function renderSelectGhost(startX, startY, endX, endY) {
     state.selectGhost.innerHTML = '';
-    for (let tx = Math.floor(startX / 16); tx <= Math.floor(endX / 16); tx++) {
-      for (let ty = Math.floor((startY - state.gridOffsetY) / 16); ty <= Math.floor((endY - state.gridOffsetY) / 16); ty++) {
+    const tileStartX = Math.floor(startX / 16);
+    const tileEndX = Math.floor(endX / 16);
+    const tileStartY = Math.floor((startY - state.gridOffsetY) / 16);
+    const tileEndY = Math.floor((endY - state.gridOffsetY) / 16);
+    for (let tx = tileStartX; tx <= tileEndX; tx++) {
+      for (let ty = tileStartY; ty <= tileEndY; ty++) {
         const rect = document.createElementNS(SVG_NS, 'rect');
         rect.setAttribute('x', tx * 16);
         rect.setAttribute('y', ty * 16 + state.yOffset + state.gridOffsetY);
@@ -516,28 +520,9 @@ function initMap() {
       state.selectRect.setAttribute('y', startY);
       state.selectRect.setAttribute('width', endX - startX);
       state.selectRect.setAttribute('height', endY - startY);
-      state.selectRect.style.display = 'block';
+       state.selectRect.style.display = 'block';
       if (state.lavaHighlight) state.lavaHighlight.style.display = 'none';
-      // Render ghost cells for tiles that *intersect* the selection rectangle.
-      state.selectGhost.innerHTML = '';
-      const tileStartX = Math.floor(startX / 16);
-      const tileStartY = Math.floor(startY / 16);
-      const tileEndX = Math.ceil(endX / 16);
-      const tileEndY = Math.ceil(endY / 16);
-      for (let tx = tileStartX; tx < tileEndX; tx++) {
-        for (let ty = Math.floor(tileStartY / 16); ty < Math.floor(tileEndY / 16); ty++) {
-          const rect2 = document.createElementNS(SVG_NS, 'rect');
-          rect2.setAttribute('x', tx * 16);
-          rect2.setAttribute('y', ty * 16 + state.yOffset);
-          rect2.setAttribute('width', 16);
-          rect2.setAttribute('height', 16);
-          rect2.setAttribute('fill', '#ff6b6b');
-          rect2.setAttribute('opacity', '0.25');
-          rect2.setAttribute('stroke', '#ff6b6b');
-          rect2.setAttribute('stroke-width', '0.5');
-          state.selectGhost.appendChild(rect2);
-        }
-      }
+      renderSelectGhost(startX, startY, endX, endY);
     }
     if (!state.isPanning && !state.lavaPlacementMode) return;
     if (state.isPanning) {
@@ -595,17 +580,17 @@ function initMap() {
         const startY = Math.min(startViewY, endViewY);
         const endX = Math.max(startViewX, endViewX);
         const endY = Math.max(startViewY, endViewY);
-        // Tile grid for ghost preview (snapped to projection grid).
+         // Tile grid for ghost preview (snapped to projection grid).
         const tileStartX = Math.floor(startX / 16);
-        const tileStartY = Math.floor((startY - state.gridOffsetY) / 16) + state.gridOffsetY;
-        const tileEndX = Math.ceil(endX / 16);
-        const tileEndY = Math.ceil((endY - state.gridOffsetY) / 16) + state.gridOffsetY;
+        const tileEndX = Math.floor(endX / 16);
+        const tileStartY = Math.floor((startY - state.gridOffsetY) / 16);
+        const tileEndY = Math.floor((endY - state.gridOffsetY) / 16);
         const zones = [];
-        for (let tx = tileStartX; tx < tileEndX; tx++) {
-          for (let ty = Math.floor(tileStartY / 16); ty < Math.floor(tileEndY / 16); ty++) {
+        for (let tx = tileStartX; tx <= tileEndX; tx++) {
+          for (let ty = tileStartY; ty <= tileEndY; ty++) {
             // Send the tile center so the server's unproject_position
             // maps to the correct game tile.
-            zones.push({ x: tx * 16 + 8, y: ty * 16 + 8 });
+            zones.push({ x: tx * 16 + 8, y: ty * 16 + state.yOffset + state.gridOffsetY + 8 });
           }
         }
         fetch('/api/zones', {
