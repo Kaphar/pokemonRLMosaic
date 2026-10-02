@@ -1352,5 +1352,15 @@ class SkillLabWrapper(gymnasium.Wrapper):
     def pyboy(self):
         return self.env.unwrapped.pyboy
 
+    @property
+    def pokeball_count(self):
+        """Total Pokeballs in the bag (delegate to GameState)."""
+        return self.game_state.pokeball_count()
+
+    @property
+    def badge_count(self):
+        """Number of badges obtained (delegate to GameState)."""
+        return self.game_state.badge_count()
+
     def save_recording(self, actions, output_path):
         return self.env.unwrapped.save_recording(actions, output_path)

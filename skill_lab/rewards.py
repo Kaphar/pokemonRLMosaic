@@ -86,9 +86,12 @@ REWARD_MULTIPLIER_ALIASES: dict[str, tuple[str, ...]] = {
 # UNIMPORTANT_MAP_IDS = [
 #         0x27, # rival's house, actually there might be the map there, I don't know if it will be useful to us.   
 #     ]
+# OUTDOOR_MAP_IDS covers the main outdoor overworld maps (0x00-0x0F) plus
+# Viridian Forest (map_id 51 = 0x33), which is a long outdoor area where
+# breadcrumb navigation rewards should remain active.
 OUTDOOR_MAP_IDS = [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-                    0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F]
-# check the values but the firsts ones seem correct.
+                    0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
+                    51]  # Viridian Forest (0x33)
 
 def normalize_reward_multipliers(config: dict | None) -> dict[str, float | None]:
     """Normalize stage/profile config to canonical category multiplier names.

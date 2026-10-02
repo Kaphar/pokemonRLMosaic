@@ -134,7 +134,7 @@ function renderSelectGhost(startX, startY, endX, endY) {
       for (let ty = tileStartY; ty <= tileEndY; ty++) {
         const rect = document.createElementNS(SVG_NS, 'rect');
         rect.setAttribute('x', tx * 16);
-        rect.setAttribute('y', ty * 16 + state.yOffset + state.gridOffsetY);
+        rect.setAttribute('y', ty * 16 + state.yPixelOffset + state.gridOffsetY);
         rect.setAttribute('width', 16);
         rect.setAttribute('height', 16);
         rect.setAttribute('fill', '#ff6b6b');
@@ -361,7 +361,7 @@ function renderMap(data) {
     for (const cell of cells) {
       const rect = document.createElementNS(SVG_NS, 'rect');
       const px = cell.px !== undefined ? cell.px : cell[0];
-      const py = cell.py !== undefined ? cell.py + state.yOffset : (cell[1] + state.yOffset);
+      const py = cell.py !== undefined ? cell.py + state.yPixelOffset : (cell[1] + state.yPixelOffset);
       rect.setAttribute('x', px);
       rect.setAttribute('y', py);
       rect.setAttribute('width', 16);
@@ -376,14 +376,14 @@ function renderMap(data) {
     const halfTile = 8;
     const circle = document.createElementNS(SVG_NS, 'circle');
     circle.setAttribute('cx', env.x + halfTile);
-       circle.setAttribute('cy', env.y + halfTile + state.gridOffsetY);
+       circle.setAttribute('cy', env.y + halfTile + state.yPixelOffset);
     circle.setAttribute('r', 6);
     circle.setAttribute('fill', '#67f39b');
     circle.setAttribute('stroke', '#ffffff');
     circle.setAttribute('stroke-width', 1.2);
     const label = document.createElementNS(SVG_NS, 'text');
     label.setAttribute('x', env.x + halfTile + 10);
-    label.setAttribute('y', env.y + halfTile - 8 + state.gridOffsetY);
+    label.setAttribute('y', env.y + halfTile - 8 + state.yPixelOffset);
     label.setAttribute('fill', '#eaf2ff');
     label.setAttribute('font-size', '12');
     label.textContent = 'E' + (env.env_index + 1);
@@ -449,10 +449,10 @@ function updateLavaToggle() {
 function initMap() {
   initHighlightElements();
 
-  if (el.yOffsetInput) {
-    el.yOffsetInput.value = state.yOffset;
+   if (el.yOffsetInput) {
+    el.yOffsetInput.value = state.yPixelOffset;
     el.yOffsetInput.addEventListener('change', function() {
-      state.yOffset = parseInt(this.value, 10) || 0;
+      state.yPixelOffset = parseInt(this.value, 10) || 0;
       renderZones(state.lastState);
     });
   }
@@ -494,7 +494,7 @@ function initMap() {
         const tileY = Math.floor((coords.mapY - state.gridOffsetY) / 16) * 16 + state.gridOffsetY;
         if (state.lavaHighlight) {
           state.lavaHighlight.setAttribute('x', tileX);
-          state.lavaHighlight.setAttribute('y', tileY + state.yOffset);
+          state.lavaHighlight.setAttribute('y', tileY + state.yPixelOffset);
           state.lavaHighlight.style.display = 'block';
         }
         state.selectRect.style.display = 'none';
@@ -540,7 +540,7 @@ function initMap() {
       const tileY = Math.floor((coords.mapY - state.gridOffsetY) / 16) * 16 + state.gridOffsetY;
       if (state.lavaHighlight) {
         state.lavaHighlight.setAttribute('x', tileX);
-        state.lavaHighlight.setAttribute('y', tileY + state.yOffset);
+        state.lavaHighlight.setAttribute('y', tileY + state.yPixelOffset);
         state.lavaHighlight.style.display = 'block';
       }
     }
@@ -590,7 +590,7 @@ function initMap() {
           for (let ty = tileStartY; ty <= tileEndY; ty++) {
             // Send the tile center so the server's unproject_position
             // maps to the correct game tile.
-            zones.push({ x: tx * 16 + 8, y: ty * 16 + state.yOffset + state.gridOffsetY + 8 });
+            zones.push({ x: tx * 16 + 8, y: ty * 16 + state.yPixelOffset + state.gridOffsetY + 8 });
           }
         }
         fetch('/api/zones', {

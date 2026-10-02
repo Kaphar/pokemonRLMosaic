@@ -56,6 +56,36 @@
       "required_milestone": "ITEM: Oak Parcel",
       "reward_baseline": 20.0,
       "description": "Deliver Oak's Parcel to Professor Oak in Pallet Lab"
+    },
+    {
+      "name": "Get More Pokeballs",
+      "stat_check": {"attr": "pokeball_count", "op": ">=", "value": 6},
+      "reward_baseline": 25.0,
+      "description": "Obtain additional Pokeballs after delivering the Parcel (player starts with 5)"
+    },
+    {
+      "name": "Healed Pokemon at Pokemon Center",
+      "map_check": {"map_id": 93},
+      "reward_baseline": 30.0,
+      "description": "Enter a Pokemon Center (Viridian City interior, map 0x5D) and heal"
+    },
+    {
+      "name": "Go Through Viridian Forest",
+      "event_key": "0xD7F3-2",
+      "reward_baseline": 35.0,
+      "description": "Defeat a trainer inside Viridian Forest (map 0x03)"
+    },
+    {
+      "name": "Go to Pokemon Center in Pewter City",
+      "map_check": {"map_id": 95},
+      "reward_baseline": 30.0,
+      "description": "Enter the Pewter City Pokemon Center (map 0x5F)"
+    },
+    {
+      "name": "Get First Badge",
+      "event_key": "0xD755-7",
+      "reward_baseline": 50.0,
+      "description": "Defeat Brock and obtain the Cascade Badge"
     }
   ]
 }

@@ -17,6 +17,46 @@
       "label": "Oak's Lab (return with parcel)",
       "activate_on": "ITEM: Oak Parcel",
       "deactivate_on": "Parcel Delivered"
+    },
+    {
+      "target_x": 30,
+      "target_y": 20,
+      "target_map": 1,
+      "label": "SHOP1 (buy Pokeballs)",
+      "activate_on": "Parcel Delivered",
+      "deactivate_on": "Get More Pokeballs"
+    },
+    {
+      "target_x": 20,
+      "target_y": 25,
+      "target_map": 1,
+      "label": "Viridian City Pokemon Center",
+      "activate_on": "Get More Pokeballs",
+      "deactivate_on": "Healed Pokemon at Pokemon Center"
+    },
+    {
+      "target_x": 10,
+      "target_y": 10,
+      "target_map": 51,
+      "label": "Viridian Forest entrance",
+      "activate_on": "Healed Pokemon at Pokemon Center",
+      "deactivate_on": "Go Through Viridian Forest"
+    },
+    {
+      "target_x": 20,
+      "target_y": 10,
+      "target_map": 2,
+      "label": "Pewter City",
+      "activate_on": "Go Through Viridian Forest",
+      "deactivate_on": "Get First Badge"
+    },
+    {
+      "target_x": 10,
+      "target_y": 10,
+      "target_map": 54,
+      "label": "Pewter Gym",
+      "activate_on": "Go Through Viridian Forest",
+      "deactivate_on": "Get First Badge"
     }
   ]
 }
