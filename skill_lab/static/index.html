@@ -36,6 +36,10 @@
             </div>
             <button id="toggle-lava" title="Toggle zone placement mode (L)" class="toggle-active">🔥</button>
             <button id="zone-visibility-toggle" title="Toggle zone layer visibility" class="toggle-active">👁</button>
+            <label class="y-offset-label">
+              Y offset:
+              <input type="number" id="y-offset-input" min="-50" max="50" step="1" value="0" title="Adjust vertical offset for zone rendering (pixels)" />
+            </label>
           </div>
           <div class="status-overlay" id="status">waiting…</div>
           <div class="status-overlay" id="lava-mode-status"></div>

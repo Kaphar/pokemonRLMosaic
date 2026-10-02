@@ -28,8 +28,9 @@ function update() {
     .then(function(data) {
       if (!data || !Array.isArray(data.envs)) return;
       el.status.textContent = 'live';
-      state.zoneStats = data.zone_stats || {};
+       state.zoneStats = data.zone_stats || {};
       state.availableCheckpoints = data.checkpoints || state.availableCheckpoints;
+      if (data.grid_offset_y !== undefined) state.gridOffsetY = data.grid_offset_y;
       state.lastState = data;
       renderMap(data);
       if (!state.isEditingZone) {

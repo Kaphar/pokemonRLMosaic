@@ -4,7 +4,7 @@ Zones are stored in ``zones.json`` as a list of zone objects.  Each zone has:
 
 * ``id``        – unique identifier
 * ``type``      – ``"lava"`` or ``"action_mask"``
-* ``cells``     – list of ``[x, y]`` pixel positions in the stitched map
+* ``cells``     – list of ``{"map_id": m, "x": tx, "y": ty}`` in-game coordinates
 * ``label``     – human-readable name
 * ``color``     – display color
 * ``opacity``   – display opacity (0–1)
@@ -102,7 +102,7 @@ class ZoneManager:
             if LAVA_JSON_PATH.exists():
                 with open(LAVA_JSON_PATH, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                cells = [(int(z[0]), int(z[1])) for z in data.get("lava_zones", [])]
+                    cells = [self._normalize_cell(z) for z in data.get("lava_zones", [])]
                 if cells:
                     return [self._create_zone("lava", cells, label="Lava Zone")]
 
@@ -117,7 +117,7 @@ class ZoneManager:
                 {
                     "id": zone.get("id") or f"zone_{len(normalized)}",
                     "type": zone_type,
-                    "cells": [[int(c[0]), int(c[1])] for c in zone.get("cells", [])],
+                    "cells": [self._normalize_cell(c) for c in zone.get("cells", [])],
                     "label": zone.get("label") or zone_type.capitalize(),
                     "color": zone.get("color") or _default_color(zone_type),
                     "opacity": zone.get("opacity", _default_opacity(zone_type)),
@@ -130,6 +130,39 @@ class ZoneManager:
         return normalized
 
     @staticmethod
+    def _normalize_cell(cell: Any) -> dict[str, int]:
+        """Normalize a cell to ``{"map_id": m, "x": tx, "y": ty}``.
+
+        Supports both the new dict format and the legacy ``[px, py]`` pixel
+        format (converting it via the stitched-map projection).
+        """
+        if isinstance(cell, dict) and "map_id" in cell:
+            return {
+                "map_id": int(cell["map_id"]),
+                "x": int(cell["x"]),
+                "y": int(cell["y"]),
+            }
+        if isinstance(cell, (list, tuple)) and len(cell) >= 2:
+            return ZoneManager._legacy_pixel_to_game(int(cell[0]), int(cell[1]))
+        return {"map_id": 0, "x": 0, "y": 0}
+
+    @staticmethod
+    def _legacy_pixel_to_game(px: int, py: int) -> dict[str, int]:
+        """Convert legacy pixel coordinates to game coordinates.
+
+        Falls back to map_id=0 if the projection is unavailable.
+        """
+        with suppress(Exception):
+            import sys
+            sys.path.insert(0, str(PROJECT_ROOT / "v2"))
+            from map_projection import unproject_position
+
+            result = unproject_position(px, py)
+            if result.in_bounds:
+                return {"map_id": result.map_id, "x": result.x, "y": result.y}
+        return {"map_id": 0, "x": 0, "y": 0}
+
+    @staticmethod
     def _create_zone(
         zone_type: str, cells: list, label: str | None = None, **kwargs: Any
     ) -> dict[str, Any]:
@@ -137,7 +170,7 @@ class ZoneManager:
         return {
             "id": f"zone_{uuid.uuid4().hex[:8]}",
             "type": zone_type,
-            "cells": [[int(c[0]), int(c[1])] for c in cells],
+            "cells": [self._normalize_cell(c) for c in cells],
             "label": label or zone_type.capitalize(),
             "color": kwargs.get("color") or _default_color(zone_type),
             "opacity": kwargs.get("opacity", _default_opacity(zone_type)),
@@ -196,34 +229,35 @@ class ZoneManager:
         self._save_zones()
         return True
 
-    def batch_toggle_cells(self, cells: list[list[int]], zone_id: str) -> bool:
+    def batch_toggle_cells(self, cells: list[dict[str, int]], zone_id: str) -> bool:
         """Toggle all *cells* in *zone_id* at once (add/remove), saving once.
 
-        This replaces the old per-cell ``toggle_lava_zone`` which wrote to disk
-        on every single cell — the cause of the "cells update one by one" issue.
+        Each cell is a ``{"map_id": m, "x": tx, "y": ty}`` dict.
         """
         zone = self.get_zone(zone_id)
         if zone is None:
             return False
-        cell_set: set[tuple[int, int]] = {
-            (int(c[0]), int(c[1])) for c in zone["cells"]
+        cell_set: set[tuple[int, int, int]] = {
+            (int(c["map_id"]), int(c["x"]), int(c["y"])) for c in zone["cells"]
         }
         for cell in cells:
-            key = (int(cell[0]), int(cell[1]))
+            key = (int(cell["map_id"]), int(cell["x"]), int(cell["y"]))
             if key in cell_set:
                 cell_set.discard(key)
             else:
                 cell_set.add(key)
-        zone["cells"] = [[x, y] for x, y in sorted(cell_set)]
+        zone["cells"] = [
+            {"map_id": m, "x": x, "y": y} for (m, x, y) in sorted(cell_set)
+        ]
         self._save_zones()
         return True
 
-    def set_zone_cells(self, cells: list[list[int]], zone_id: str) -> bool:
+    def set_zone_cells(self, cells: list[dict[str, int]], zone_id: str) -> bool:
         """Replace the cell list of *zone_id* entirely."""
         zone = self.get_zone(zone_id)
         if zone is None:
             return False
-        zone["cells"] = [[int(c[0]), int(c[1])] for c in cells]
+        zone["cells"] = [self._normalize_cell(c) for c in cells]
         self._save_zones()
         return True
 
@@ -232,10 +266,16 @@ class ZoneManager:
     # ------------------------------------------------------------------ #
 
     @staticmethod
-    def _position_in_cells(px: int, py: int, cells: list[list[int]]) -> bool:
-        """Return True when *(px, py)* is within 8 px of any cell."""
+    def _position_in_cells(
+         map_id: int, x: int, y: int, cells: list[dict[str, int]]
+     ) -> bool:
+        """Return True when the game position *(map_id, x, y)* matches a cell."""
         for cell in cells:
-            if abs(px - cell[0]) < 8 and abs(py - cell[1]) < 8:
+            if (
+                cell.get("map_id") == map_id
+                and cell.get("x") == x
+                and cell.get("y") == y
+            ):
                 return True
         return False
 
@@ -268,11 +308,12 @@ class ZoneManager:
 
     def get_masked_actions(
         self,
-        px: int,
-        py: int,
+        map_id: int,
+        x: int,
+        y: int,
         achieved_checkpoints: set[str] | None = None,
     ) -> list[str]:
-        """Return action names masked at *(px, py)* by active action_mask zones.
+        """Return action names masked at game position *(map_id, x, y)*.
 
         Supports two zone configurations:
 
@@ -291,7 +332,7 @@ class ZoneManager:
         for zone in self.get_active_zones(achieved_checkpoints):
             if zone["type"] != "action_mask":
                 continue
-            if not self._position_in_cells(px, py, zone["cells"]):
+            if not self._position_in_cells(map_id, x, y, zone["cells"]):
                 continue
             mask_rules = zone.get("mask_rules")
             if mask_rules:
@@ -318,8 +359,9 @@ class ZoneManager:
 
     def tick(
         self,
-        px: int,
-        py: int,
+        map_id: int,
+        x: int,
+        y: int,
         achieved_checkpoints: set[str] | None = None,
         in_battle: bool = False,
     ) -> list[str]:
@@ -332,13 +374,13 @@ class ZoneManager:
         so the inspector can display how much time the agent spent in each
         zone outside of combat.
         """
-        masked = self.get_masked_actions(px, py, achieved_checkpoints)
+        masked = self.get_masked_actions(map_id, x, y, achieved_checkpoints)
         self._masked_actions = masked
         if masked:
             self.steps_in_action_mask_zone += 1
         if not in_battle:
             for zone in self.zones:
-                if zone.get("cells") and self._position_in_cells(px, py, zone["cells"]):
+                if zone.get("cells") and self._position_in_cells(map_id, x, y, zone["cells"]):
                     zone_id = zone.get("id", "unknown")
                     self._zone_step_counts[zone_id] = self._zone_step_counts.get(zone_id, 0) + 1
         return masked

@@ -123,26 +123,24 @@ function hideCoordPopover() {
   }
 }
 
- // EDIT HERE: Ghost selection preview — renders semi-transparent 16x16 rects
- // for each tile within the selection rectangle, using the same +8 Y offset as
- // zone cells to compensate for the map stitching coordinate offset.
- function renderSelectGhost(startX, startY, endX, endY) {
-  state.selectGhost.innerHTML = '';
-  for (let tx = Math.floor(startX / 16); tx <= Math.floor(endX / 16); tx++) {
-    for (let ty = Math.floor(startY / 16); ty <= Math.floor(endY / 16); ty++) {
-      const rect = document.createElementNS(SVG_NS, 'rect');
-      rect.setAttribute('x', tx * 16);
-      rect.setAttribute('y', ty * 16 - 8);
-      rect.setAttribute('width', 16);
-      rect.setAttribute('height', 16);
-      rect.setAttribute('fill', '#ff6b6b');
-      rect.setAttribute('opacity', '0.25');
-      rect.setAttribute('stroke', '#ff6b6b');
-      rect.setAttribute('stroke-width', '0.5');
-      state.selectGhost.appendChild(rect);
+  // Render selection ghost cells for tiles intersecting a rectangle.
+  function renderSelectGhost(startX, startY, endX, endY) {
+    state.selectGhost.innerHTML = '';
+    for (let tx = Math.floor(startX / 16); tx <= Math.floor(endX / 16); tx++) {
+      for (let ty = Math.floor((startY - state.gridOffsetY) / 16); ty <= Math.floor((endY - state.gridOffsetY) / 16); ty++) {
+        const rect = document.createElementNS(SVG_NS, 'rect');
+        rect.setAttribute('x', tx * 16);
+        rect.setAttribute('y', ty * 16 + state.yOffset + state.gridOffsetY);
+        rect.setAttribute('width', 16);
+        rect.setAttribute('height', 16);
+        rect.setAttribute('fill', '#ff6b6b');
+        rect.setAttribute('opacity', '0.25');
+        rect.setAttribute('stroke', '#ff6b6b');
+        rect.setAttribute('stroke-width', '0.5');
+        state.selectGhost.appendChild(rect);
+      }
     }
   }
-}
 
 function renderZones(data) {
   const zones = data.zones || (data.lava_zones ? [{ type: 'lava', cells: data.lava_zones, label: 'Lava Zone', color: '#ff6b6b', opacity: 0.5 }] : []);
@@ -358,12 +356,10 @@ function renderMap(data) {
     const cells = zone.cells || [];
     for (const cell of cells) {
       const rect = document.createElementNS(SVG_NS, 'rect');
-      // EDIT HERE: +8 Y offset compensates for map stitching coordinate offset.
-      //  // check this, this is weird, it might lead to find out why we have an offset.
-      // Cells are stored as 16-aligned tile positions; the +8 aligns them with
-      // env circles (env.y + halfTile) on the stitched map image.
-      rect.setAttribute('x', cell[0]);
-      rect.setAttribute('y', cell[1] + 8);
+      const px = cell.px !== undefined ? cell.px : cell[0];
+      const py = cell.py !== undefined ? cell.py + state.yOffset : (cell[1] + state.yOffset);
+      rect.setAttribute('x', px);
+      rect.setAttribute('y', py);
       rect.setAttribute('width', 16);
       rect.setAttribute('height', 16);
       rect.setAttribute('fill', color);
@@ -449,6 +445,14 @@ function updateLavaToggle() {
 function initMap() {
   initHighlightElements();
 
+  if (el.yOffsetInput) {
+    el.yOffsetInput.value = state.yOffset;
+    el.yOffsetInput.addEventListener('change', function() {
+      state.yOffset = parseInt(this.value, 10) || 0;
+      renderZones(state.lastState);
+    });
+  }
+
   el.mapSvg.addEventListener('wheel', function(event) {
     event.preventDefault();
     event.stopPropagation();
@@ -462,6 +466,8 @@ function initMap() {
       state.dragStart = { x: event.clientX, y: event.clientY };
       state.clickStart = null;
       state.isPanning = false;
+      state.selectRect.style.display = 'none';
+      if (state.lavaHighlight) state.lavaHighlight.style.display = 'none';
       return;
     }
     state.clickStart = { x: event.clientX, y: event.clientY };
@@ -469,9 +475,27 @@ function initMap() {
     state.panStart = { x: event.clientX, y: event.clientY };
     el.mapSvg.classList.add('grabbing');
   });
-
   document.addEventListener('mousemove', function(event) {
+    // Store last mouse position for the 'c' key handler.
+    state.lastMousePos = { x: event.clientX, y: event.clientY };
     if (state.lavaPlacementMode && state.dragStart) {
+      const dx = event.clientX - state.dragStart.x;
+      const dy = event.clientY - state.dragStart.y;
+      const dragDist = Math.sqrt(dx * dx + dy * dy);
+      if (dragDist < 5) {
+        // Still a potential click — show hover highlight at the cursor.
+        const coords = clientToMapCoordinates(event.clientX, event.clientY);
+        const tileX = Math.floor(coords.mapX / 16) * 16;
+        // Snap Y to the projection's tile grid (origin at gridOffsetY).
+        const tileY = Math.floor((coords.mapY - state.gridOffsetY) / 16) * 16 + state.gridOffsetY;
+        if (state.lavaHighlight) {
+          state.lavaHighlight.setAttribute('x', tileX);
+          state.lavaHighlight.setAttribute('y', tileY + state.yOffset);
+          state.lavaHighlight.style.display = 'block';
+        }
+        state.selectRect.style.display = 'none';
+        return;
+      }
       const rect = el.mapSvg.getBoundingClientRect();
       const svgX = ((event.clientX - rect.left) / rect.width) * svg_w;
       const svgY = ((event.clientY - rect.top) / rect.height) * svg_h;
@@ -483,21 +507,37 @@ function initMap() {
       const startSvgY = ((state.dragStart.y - startRect.top) / startRect.height) * svg_h;
       const startViewX = (startSvgX - state.panX) * invScale;
       const startViewY = (startSvgY - state.panY) * invScale;
-      // EDIT HERE: Snap selection to 16px tile grid using Math.floor on both
-      // start and end so only tiles fully within the drag range are included.
-      // +8 Y offset matches cell rendering offset.
-      const startX = Math.floor(Math.min(startViewX, viewBoxX) / 16) * 16;
-      const startY = Math.floor(Math.min(startViewY, viewBoxY) / 16) * 16;
-      const endX = Math.floor(Math.max(startViewX, viewBoxX) / 16) * 16;
-      const endY = Math.floor(Math.max(startViewY, viewBoxY) / 16) * 16;
-      state.selectRect.setAttribute('x', startX + 8);
-      state.selectRect.setAttribute('y', startY - 8);
+      // Selection rectangle uses raw viewBox coordinates.
+      const startX = Math.min(startViewX, viewBoxX);
+      const startY = Math.min(startViewY, viewBoxY);
+      const endX = Math.max(startViewX, viewBoxX);
+      const endY = Math.max(startViewY, viewBoxY);
+      state.selectRect.setAttribute('x', startX);
+      state.selectRect.setAttribute('y', startY);
       state.selectRect.setAttribute('width', endX - startX);
       state.selectRect.setAttribute('height', endY - startY);
       state.selectRect.style.display = 'block';
-      state.lavaHighlight.style.display = 'none';
-      renderSelectGhost(startX, startY, endX, endY);
-      return;
+      if (state.lavaHighlight) state.lavaHighlight.style.display = 'none';
+      // Render ghost cells for tiles that *intersect* the selection rectangle.
+      state.selectGhost.innerHTML = '';
+      const tileStartX = Math.floor(startX / 16);
+      const tileStartY = Math.floor(startY / 16);
+      const tileEndX = Math.ceil(endX / 16);
+      const tileEndY = Math.ceil(endY / 16);
+      for (let tx = tileStartX; tx < tileEndX; tx++) {
+        for (let ty = Math.floor(tileStartY / 16); ty < Math.floor(tileEndY / 16); ty++) {
+          const rect2 = document.createElementNS(SVG_NS, 'rect');
+          rect2.setAttribute('x', tx * 16);
+          rect2.setAttribute('y', ty * 16 + state.yOffset);
+          rect2.setAttribute('width', 16);
+          rect2.setAttribute('height', 16);
+          rect2.setAttribute('fill', '#ff6b6b');
+          rect2.setAttribute('opacity', '0.25');
+          rect2.setAttribute('stroke', '#ff6b6b');
+          rect2.setAttribute('stroke-width', '0.5');
+          state.selectGhost.appendChild(rect2);
+        }
+      }
     }
     if (!state.isPanning && !state.lavaPlacementMode) return;
     if (state.isPanning) {
@@ -508,26 +548,37 @@ function initMap() {
       state.panStart = { x: event.clientX, y: event.clientY };
       applyTransform();
     }
-    if (state.lavaPlacementMode) {
-      const rect = el.mapSvg.getBoundingClientRect();
-      const svgX = ((event.clientX - rect.left) / rect.width) * svg_w;
-      const svgY = ((event.clientY - rect.top) / rect.height) * svg_h;
-      const invScale = 1 / state.zoomScale;
-      const viewBoxX = (svgX - state.panX) * invScale;
-      const viewBoxY = (svgY - state.panY) * invScale;
-      const tileX = Math.round(viewBoxX / 16) * 16;
-      // EDIT HERE: Math.floor on Y prevents selecting the tile below when mouse
-      // is near the bottom edge of a tile. +8 Y offset matches cell rendering.
-      const tileY = Math.floor(viewBoxY / 16) * 16;
-      state.lavaHighlight.setAttribute('x', tileX);
-      state.lavaHighlight.setAttribute('y', tileY + 8); // with -8 here it highlights closer to the mouse. but then the actual selection selects another cell than highlighted.
-      state.lavaHighlight.style.display = 'block';
+    if (state.lavaPlacementMode && !state.dragStart) {
+      // Hover highlight (no drag active).
+      const coords = clientToMapCoordinates(event.clientX, event.clientY);
+      const tileX = Math.floor(coords.mapX / 16) * 16;
+      const tileY = Math.floor((coords.mapY - state.gridOffsetY) / 16) * 16 + state.gridOffsetY;
+      if (state.lavaHighlight) {
+        state.lavaHighlight.setAttribute('x', tileX);
+        state.lavaHighlight.setAttribute('y', tileY + state.yOffset);
+        state.lavaHighlight.style.display = 'block';
+      }
     }
   });
 
   document.addEventListener('mouseup', function(event) {
     if (state.lavaPlacementMode && state.dragStart) {
-      if (state.selectRect.style.display !== 'none') {
+      const dx = event.clientX - state.dragStart.x;
+      const dy = event.clientY - state.dragStart.y;
+      const dragDist = Math.sqrt(dx * dx + dy * dy);
+      if (dragDist < 5) {
+        // Click — toggle the single cell under the cursor.
+        // Use the server to find the correct game tile via unproject_position.
+        const coords = clientToMapCoordinates(state.dragStart.x, state.dragStart.y);
+        fetch('/api/zones', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ x: Math.round(coords.mapX), y: Math.round(coords.mapY), zone_type: state.zonePlacingType, zone_id: state.selectedZoneId })
+        }).then(function(r) { return r.json(); }).then(function() {
+          // Zones refresh on the next /api/state poll via app.js update loop.
+        }).catch(function() {});
+      } else {
+        // Drag — toggle all cells intersected by the selection rectangle.
         const rect = el.mapSvg.getBoundingClientRect();
         const invScale = 1 / state.zoomScale;
         const startSvgX = ((state.dragStart.x - rect.left) / rect.width) * svg_w;
@@ -538,16 +589,23 @@ function initMap() {
         const endSvgY = ((event.clientY - rect.top) / rect.height) * svg_h;
         const endViewX = (endSvgX - state.panX) * invScale;
         const endViewY = (endSvgY - state.panY) * invScale;
-        // EDIT HERE: Same snapping as mousemove handler — Math.floor on both
-        // start and end to include only tiles whose top-left is within range.
-        const startX = Math.floor(Math.min(startViewX, endViewX) / 16) * 16;
-        const startY = Math.floor(Math.min(startViewY, endViewY) / 16) * 16 - 8;
-        const endX = Math.floor(Math.max(startViewX, endViewX) / 16) * 16;
-        const endY = Math.floor(Math.max(startViewY, endViewY) / 16) * 16;
+        // Send raw pixel bounds to the server; the server will unproject
+        // each representative pixel to the correct game tile.
+        const startX = Math.min(startViewX, endViewX);
+        const startY = Math.min(startViewY, endViewY);
+        const endX = Math.max(startViewX, endViewX);
+        const endY = Math.max(startViewY, endViewY);
+        // Tile grid for ghost preview (snapped to projection grid).
+        const tileStartX = Math.floor(startX / 16);
+        const tileStartY = Math.floor((startY - state.gridOffsetY) / 16) + state.gridOffsetY;
+        const tileEndX = Math.ceil(endX / 16);
+        const tileEndY = Math.ceil((endY - state.gridOffsetY) / 16) + state.gridOffsetY;
         const zones = [];
-        for (let tx = Math.floor(startX / 16); tx <= Math.floor(endX / 16); tx++) {
-          for (let ty = Math.floor(startY / 16); ty <= Math.floor(endY / 16); ty++) {
-            zones.push({ x: tx * 16, y: ty * 16 });
+        for (let tx = tileStartX; tx < tileEndX; tx++) {
+          for (let ty = Math.floor(tileStartY / 16); ty < Math.floor(tileEndY / 16); ty++) {
+            // Send the tile center so the server's unproject_position
+            // maps to the correct game tile.
+            zones.push({ x: tx * 16 + 8, y: ty * 16 + 8 });
           }
         }
         fetch('/api/zones', {
@@ -555,21 +613,7 @@ function initMap() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ zones: zones, zone_type: state.zonePlacingType, zone_id: state.selectedZoneId })
         }).then(function(r) { return r.json(); }).then(function(data) {
-        }).catch(function() {});
-      } else {
-        const rect = el.mapSvg.getBoundingClientRect();
-        const svgX = ((event.clientX - rect.left) / rect.width) * svg_w;
-        const svgY = ((event.clientY - rect.top) / rect.height) * svg_h;
-        const invScale = 1 / state.zoomScale;
-        const viewBoxX = (svgX - state.panX) * invScale;
-        const viewBoxY = (svgY - state.panY) * invScale;
-        const tileX = Math.round(viewBoxX / 16) * 16;
-        const tileY = Math.round(viewBoxY / 16) * 16;
-        fetch('/api/zones', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ x: tileX, y: tileY, zone_type: state.zonePlacingType, zone_id: state.selectedZoneId })
-        }).then(function(r) { return r.json(); }).then(function() {
+          // Zones refresh on the next /api/state poll via app.js update loop.
         }).catch(function() {});
       }
       state.dragStart = null;

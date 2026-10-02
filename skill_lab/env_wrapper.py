@@ -680,23 +680,20 @@ class SkillLabWrapper(gymnasium.Wrapper):
             int(pokemon.get("ivSpAttack", 0)),
         )
 
-    def _project_agent_position(self) -> tuple[float, float]:
-        """Return the agent's current pixel position on the stitched map.
+    def _get_agent_game_position(self) -> tuple[int, int, int]:
+        """Return the agent's current game coordinates ``(map_id, x, y)``.
 
-        Delegates to ``RedGymEnv.get_game_coords`` + ``project_position`` when
-        available.  Falls back to ``(nan, nan)`` if the position cannot be read.
+        Delegates to ``RedGymEnv.get_game_coords`` when available.
         """
         unwrapped = self.env.unwrapped
         get_coords = getattr(unwrapped, "get_game_coords", None)
-        project = getattr(unwrapped, "project_position", None)
-        if get_coords is not None and project is not None:
+        if get_coords is not None:
             try:
                 x_pos, y_pos, map_n = get_coords()
-                px, py = project(int(x_pos), int(y_pos), int(map_n))
-                return (float(px), float(py))
+                return (int(map_n), int(x_pos), int(y_pos))
             except Exception:
                 pass
-        return (float("nan"), float("nan"))
+        return (0, 0, 0)
 
     def _update_zone_masking(self) -> None:
         """Refresh active action-mask zones and update tracking counters.
@@ -707,10 +704,7 @@ class SkillLabWrapper(gymnasium.Wrapper):
         """
         try:
             self.zone_manager.reload()
-            px, py = self._project_agent_position()
-            if math.isnan(px) or math.isnan(py):
-                self._current_masked_actions = []
-                return
+            map_id, x_pos, y_pos = self._get_agent_game_position()
             achieved = (
                 self.checkpoint_tracker.achieved
                 if self.checkpoint_tracker
@@ -718,7 +712,7 @@ class SkillLabWrapper(gymnasium.Wrapper):
             )
             in_battle = self.game_state.in_battle()
             self._current_masked_actions = self.zone_manager.tick(
-                int(px), int(py), achieved, in_battle=in_battle
+                int(map_id), int(x_pos), int(y_pos), achieved, in_battle=in_battle
             )
         except Exception as _e:
             import traceback as _tb

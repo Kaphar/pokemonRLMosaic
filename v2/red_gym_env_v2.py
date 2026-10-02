@@ -431,11 +431,12 @@ class RedGymEnv(Env):
         return (result.pixel_x, result.pixel_y)
 
     @staticmethod
-    def _load_lava_zones() -> list[tuple[int, int]]:
+    def _load_lava_zones() -> list[tuple[int, int, int]]:
         """Load lava zone cells from ``zones.json`` (preferred) or legacy ``lava.json``.
 
-        The ``zones.json`` file stores typed zones; only ``"lava"``-type zones
-        are returned here so the existing lava-penalty logic is unchanged.
+        Returns a list of ``(map_id, x, y)`` game-coordinate tuples for all
+        ``lava``-type zones.  The legacy ``lava.json`` format is converted via
+        reverse projection.
         """
         try:
             from contextlib import suppress
@@ -443,33 +444,43 @@ class RedGymEnv(Env):
                 if ZONES_JSON_PATH.exists():
                     with open(ZONES_JSON_PATH, "r", encoding="utf-8") as f:
                         data = json.load(f)
-                    cells: list[tuple[int, int]] = []
+                    cells: list[tuple[int, int, int]] = []
                     for zone in data.get("zones", []):
                         if zone.get("type") == "lava":
                             for c in zone.get("cells", []):
-                                cells.append((int(c[0]), int(c[1])))
+                                if isinstance(c, dict) and "map_id" in c:
+                                    cells.append((int(c["map_id"]), int(c["x"]), int(c["y"])))
+                                elif isinstance(c, (list, tuple)) and len(c) >= 2:
+                                    # Legacy pixel format — reverse project
+                                    from map_projection import unproject_position
+                                    result = unproject_position(int(c[0]), int(c[1]))
+                                    cells.append((result.map_id, result.x, result.y))
                     return cells
-            # Legacy fallback
+            # Legacy fallback — convert pixel coords to game coords
             with suppress(Exception):
                 if LAVA_JSON_PATH.exists():
                     with open(LAVA_JSON_PATH, "r", encoding="utf-8") as f:
                         data = json.load(f)
-                    return [(int(z[0]), int(z[1])) for z in data.get("lava_zones", [])]
+                    cells = []
+                    for z in data.get("lava_zones", []):
+                        from map_projection import unproject_position
+                        result = unproject_position(int(z[0]), int(z[1]))
+                        cells.append((result.map_id, result.x, result.y))
+                    return cells
         except Exception:
             pass
         return []
 
-    def _in_lava_zone(self) -> tuple[bool, tuple[int, int]] | tuple[bool, None]:
+    def _in_lava_zone(self) -> tuple[bool, tuple[int, int, int]] | tuple[bool, None]:
         """Check if the agent's current position is inside a lava zone.
 
-        Returns (True, (x, y)) if inside, (False, None) otherwise.
+        Returns ``(True, (map_id, x, y))`` if inside, ``(False, None)`` otherwise.
         """
         try:
             x_pos, y_pos, map_n = self.get_game_coords()
-            px, py = self.project_position(x_pos, y_pos, map_n)
-            for zx, zy in self.lava_zones:
-                if abs(px - zx) < 8 and abs(py - zy) < 8:
-                    return True, (zx, zy)
+            for zmap, zx, zy in self.lava_zones:
+                if map_n == zmap and x_pos == zx and y_pos == zy:
+                    return True, (zmap, zx, zy)
         except Exception:
             pass
         return False, None

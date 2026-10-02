@@ -71,6 +71,24 @@ body {
   z-index: 10;
 }
 
+.y-offset-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.y-offset-label input {
+  width: 60px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(0, 0, 0, 0.3);
+  color: white;
+  text-align: center;
+}
+
 .map-controls button {
   width: 36px;
   height: 36px;

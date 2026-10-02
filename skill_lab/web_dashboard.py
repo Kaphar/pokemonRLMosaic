@@ -117,10 +117,17 @@ try:
     from v2.map_projection import (
         project_position as _project_position_impl,
         unproject_position as _unproject_position_impl,
+        GLOBAL_OFFSET_Y as _GLOBAL_OFFSET_Y,
+        DEFAULT_MAP_HEIGHT as _DEFAULT_MAP_HEIGHT,
+        PIXELS_PER_TILE as _PIXELS_PER_TILE,
     )
+    _MAP_GRID_OFFSET_Y = _DEFAULT_MAP_HEIGHT - _GLOBAL_OFFSET_Y  # = 3669
+    _HAS_MAP_PROJECTION = True
 except Exception:
     _project_position_impl = None
     _unproject_position_impl = None
+    _MAP_GRID_OFFSET_Y = 0
+    _HAS_MAP_PROJECTION = False
 
 
 class BrowserMapDashboard:
@@ -170,6 +177,7 @@ class BrowserMapDashboard:
             "lava_zones": [],  # legacy alias, populated from zones for backward compat
             "map_width": self.map_width,
             "map_height": self.map_height,
+            "grid_offset_y": _MAP_GRID_OFFSET_Y if _HAS_MAP_PROJECTION else 0,
             "last_updated": 0.0,
         }
         self._zone_manager: ZoneManager | None = None
@@ -234,13 +242,23 @@ class BrowserMapDashboard:
         # re-entrant Lock deadlock (_current_env also uses self._lock).
         checkpoint_names = self._get_checkpoint_names()
         with self._lock:
-            self.state["zones"] = self._zone_manager.list_zones()
+            zones = self._zone_manager.list_zones()
+            # Augment each cell with pixel coordinates for frontend rendering
+            for zone in zones:
+                for cell in zone.get("cells", []):
+                    if "map_id" in cell and "px" not in cell:
+                        px, py = self._project_position(
+                            int(cell["x"]), int(cell["y"]), int(cell["map_id"])
+                        )
+                        cell["px"] = px
+                        cell["py"] = py
+            self.state["zones"] = zones
             self.state["zone_stats"] = self._zone_manager.get_stats()
             # Legacy alias for frontend backward-compat
             lava_cells = [
-                [c[0], c[1]] if isinstance(c, list) else [c[0], c[1]]
-                for z in self.state["zones"] if z.get("type") == "lava"
-                for c in z.get("cells", [])
+                {"map_id": c.get("map_id", 0), "x": c.get("x", 0), "y": c.get("y", 0), "px": c.get("px", 0), "py": c.get("py", 0)}
+                for w in self.state["zones"] if w.get("type") == "lava"
+                for c in w.get("cells", [])
             ]
             self.state["lava_zones"] = lava_cells
             self.state["checkpoints"] = checkpoint_names
@@ -280,7 +298,10 @@ class BrowserMapDashboard:
                 if LAVA_JSON_PATH.exists():
                     with LAVA_JSON_PATH.open("r", encoding="utf-8") as f:
                         data = json.load(f)
-                    cells = [(int(z[0]), int(z[1])) for z in data.get("lava_zones", [])]
+                    cells = [
+                        {"map_id": 0, "x": int(z[0]), "y": int(z[1])}
+                        for z in data.get("lava_zones", [])
+                    ]
                     with self._lock:
                         self.state["lava_zones"] = cells
             except Exception:
@@ -1343,31 +1364,33 @@ class BrowserMapDashboard:
     def add_lava_zone(self, x: int, y: int) -> None:
         if self._zone_manager is None:
             with self._lock:
-                zone = (int(x), int(y))
+                zone = {"map_id": 0, "x": int(x), "y": int(y)}
                 if zone not in self.state["lava_zones"]:
                     self.state["lava_zones"].append(zone)
             return
+        game = self.unproject_position(int(x), int(y))
+        cell = {"map_id": game["map_id"], "x": game["x"], "y": game["y"]}
         zone_id = self._ensure_lava_zone()
-        with self._lock:
-            cur = int(round((self._zone_manager.get_zone(zone_id) or {}).get("cells", []).__len__() and 0))
-        self._zone_manager.batch_toggle_cells([[int(x), int(y)]], zone_id)
+        self._zone_manager.batch_toggle_cells([cell], zone_id)
         self._sync_zones_to_state()
 
     def remove_lava_zone(self, x: int, y: int) -> None:
         if self._zone_manager is None:
             with self._lock:
-                zone = (int(x), int(y))
+                zone = {"map_id": 0, "x": int(x), "y": int(y)}
                 self.state["lava_zones"] = [z for z in self.state["lava_zones"] if z != zone]
             return
+        game = self.unproject_position(int(x), int(y))
+        cell = {"map_id": game["map_id"], "x": game["x"], "y": game["y"]}
         zone_id = self._ensure_lava_zone()
-        self._zone_manager.batch_toggle_cells([[int(x), int(y)]], zone_id)
+        self._zone_manager.batch_toggle_cells([cell], zone_id)
         self._sync_zones_to_state()
 
     def toggle_lava_zone(self, x: int, y: int) -> None:
         """Toggle a single cell on/off the lava zone."""
         if self._zone_manager is None:
             with self._lock:
-                zone = (int(x), int(y))
+                zone = {"map_id": 0, "x": int(x), "y": int(y)}
                 if zone in self.state["lava_zones"]:
                     self.state["lava_zones"] = [z for z in self.state["lava_zones"] if z != zone]
                     print(f"[LAVA DEBUG] Removed zone {zone}, count={len(self.state['lava_zones'])}", flush=True)
@@ -1376,8 +1399,10 @@ class BrowserMapDashboard:
                     print(f"[LAVA DEBUG] Added zone {zone}, count={len(self.state['lava_zones'])}", flush=True)
             self._save_lava_zones()
             return
+        game = self.unproject_position(int(x), int(y))
+        cell = {"map_id": game["map_id"], "x": game["x"], "y": game["y"]}
         zone_id = self._ensure_lava_zone()
-        self._zone_manager.batch_toggle_cells([[int(x), int(y)]], zone_id)
+        self._zone_manager.batch_toggle_cells([cell], zone_id)
         self._sync_zones_to_state()
         count = len((self._zone_manager.get_zone(zone_id) or {}).get("cells", []))
         print(f"[LAVA DEBUG] After toggle: zone_id={zone_id}, cells count={count}", flush=True)
@@ -1449,6 +1474,34 @@ class BrowserMapDashboard:
                     return
                 if parsed.path == "/api/config":
                     result = dashboard.get_config_state()
+                    data = json.dumps(result).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("Content-Length", str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+                    return
+                if parsed.path == "/api/project-coords":
+                    query = parse_qs(parsed.query)
+                    map_id = int(query.get("map_id", ["0"])[0])
+                    x = int(query.get("x", ["0"])[0])
+                    y = int(query.get("y", ["0"])[0])
+                    px, py = dashboard._project_position(x, y, map_id)
+                    result = {"map_id": map_id, "x": x, "y": y, "pixel_x": px, "pixel_y": py}
+                    data = json.dumps(result).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("Content-Length", str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+                    return
+                if parsed.path == "/api/project-pixel":
+                    query = parse_qs(parsed.query)
+                    pixel_x = int(query.get("x", ["0"])[0])
+                    pixel_y = int(query.get("y", ["0"])[0])
+                    result = dashboard.unproject_position(pixel_x, pixel_y)
                     data = json.dumps(result).encode("utf-8")
                     self.send_response(200)
                     self.send_header("Content-Type", "application/json")
@@ -1701,15 +1754,23 @@ class BrowserMapDashboard:
                     else:
                         with dashboard._lock:
                             dashboard.state["lava_zones"] = [
-                                (int(z[0]), int(z[1])) for z in payload["zones"][0].get("cells", [])
+                                {"map_id": 0, "x": int(z.get("x", 0)), "y": int(z.get("y", 0))} if not isinstance(z, dict) or "map_id" not in z
+                                else {"map_id": int(z["map_id"]), "x": int(z["x"]), "y": int(z["y"])}
+                                for z in payload["zones"][0].get("cells", [])
                             ]
                         dashboard._save_lava_zones()
                 elif "zones" in payload:
                     zones = payload["zones"]
-                    cells = [[int(z["x"]), int(z["y"])] for z in zones]
-                    zone_type = payload.get("zone_type", "lava")
-                    zone_id = payload.get("zone_id")
                     if dashboard._zone_manager is not None:
+                        cells = []
+                        for z in zones:
+                            if isinstance(z, dict) and "map_id" in z:
+                                cells.append({"map_id": int(z["map_id"]), "x": int(z["x"]), "y": int(z["y"])})
+                            else:
+                                game = dashboard.unproject_position(int(z["x"]), int(z["y"]))
+                                cells.append({"map_id": game["map_id"], "x": game["x"], "y": game["y"]})
+                        zone_type = payload.get("zone_type", "lava")
+                        zone_id = payload.get("zone_id")
                         if not zone_id:
                             zone_id = dashboard._ensure_zone(zone_type)
                         if zone_id:
@@ -1717,7 +1778,13 @@ class BrowserMapDashboard:
                             dashboard._sync_zones_to_state()
                     else:
                         for zone in zones:
-                            dashboard.toggle_lava_zone(int(zone["x"]), int(zone["y"]))
+                            if isinstance(zone, dict) and "map_id" in zone:
+                                dashboard.state["lava_zones"].append({"map_id": int(zone["map_id"]), "x": int(zone["x"]), "y": int(zone["y"])})
+                            else:
+                                pixel_x, pixel_y = int(zone["x"]), int(zone["y"])
+                                game = dashboard.unproject_position(pixel_x, pixel_y)
+                                dashboard.state["lava_zones"].append({"map_id": game["map_id"], "x": game["x"], "y": game["y"]})
+                        dashboard._save_lava_zones()
                 else:
                     x = int(payload.get("x", 0))
                     y = int(payload.get("y", 0))
@@ -1725,10 +1792,12 @@ class BrowserMapDashboard:
                     zone_id = payload.get("zone_id")
                     print(f"[ZONE DEBUG] Toggle request: x={x}, y={y}, type={zone_type}, zone_id={zone_id}", flush=True)
                     if dashboard._zone_manager is not None:
+                        game = dashboard.unproject_position(x, y)
+                        cell = {"map_id": game["map_id"], "x": game["x"], "y": game["y"]}
                         if not zone_id:
                             zone_id = dashboard._ensure_zone(zone_type)
                         if zone_id:
-                            dashboard._zone_manager.batch_toggle_cells([[x, y]], zone_id)
+                            dashboard._zone_manager.batch_toggle_cells([cell], zone_id)
                             dashboard._sync_zones_to_state()
                     else:
                         dashboard.toggle_lava_zone(x, y)
