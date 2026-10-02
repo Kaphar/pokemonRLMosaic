@@ -152,11 +152,11 @@ function renderZones(data) {
   el.zoneList.innerHTML = '';
   zones.forEach(function(zone) {
     const div = document.createElement('div');
-    div.className = 'zone-item' + (zone.id === state.selectedZoneId ? ' selected' : '');
+    div.className = 'zone-item' + (zone.id === state.selectedZoneId ? ' selected' : '') + (zone.disabled ? ' disabled' : '');
     div.dataset.zoneId = zone.id || '';
 
-    const badgeColor = zone.type === 'action_mask' ? '#4a9eff' : '#ff6b6b';
-    const badgeText = zone.type === 'action_mask' ? 'MASK' : 'LAVA';
+    const badgeColor = zone.type === 'action_mask' ? '#4a9eff' : (zone.type === 'action_bonus_reward' ? '#ffd166' : '#ff6b6b');
+    const badgeText = zone.type === 'action_mask' ? 'MASK' : (zone.type === 'action_bonus_reward' ? 'BONUS' : 'LAVA');
 
     const labelSpan = document.createElement('span');
     labelSpan.className = 'zone-label';
@@ -190,6 +190,20 @@ function renderZones(data) {
     rightDiv.style.alignItems = 'center';
     rightDiv.style.gap = '4px';
     rightDiv.appendChild(badge);
+
+    // Disable toggle button for this zone
+    const toggleBtn = document.createElement('button');
+    toggleBtn.className = 'zone-btn-sm';
+    toggleBtn.title = zone.disabled ? 'Enable zone' : 'Disable zone';
+    toggleBtn.style.fontSize = '0.7rem';
+    toggleBtn.style.width = '22px';
+    toggleBtn.style.height = '22px';
+    toggleBtn.textContent = zone.disabled ? '⊘' : '✓';
+    toggleBtn.onclick = function(e) {
+      e.stopPropagation();
+      toggleZoneDisabled(zone.id, !zone.disabled);
+    };
+    rightDiv.appendChild(toggleBtn);
 
     div.appendChild(leftDiv);
     div.appendChild(rightDiv);
@@ -279,6 +293,21 @@ function selectZone(zoneId, zones) {
   renderZones(state.lastState);
 }
 
+function toggleZoneDisabled(zoneId, disabled) {
+  const zones = state.lastState.zones || [];
+  const zi = zones.findIndex(z => z.id === zoneId);
+  if (zi >= 0) {
+    zones[zi] = Object.assign({}, zones[zi], { disabled: disabled });
+    state.lastState = Object.assign({}, state.lastState, { zones: zones });
+  }
+  fetch('/api/zone-update', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ zone_id: zoneId, field: 'disabled', value: disabled })
+  }).catch(function() {});
+  renderZones(state.lastState);
+}
+
 function _populateMilestoneOptions(selectEl, selected) {
   if (!selectEl) return;
   const checkpoints = state.availableCheckpoints || [];
@@ -310,16 +339,35 @@ function updateZoneDetail(zoneId, zones) {
     return;
   }
   el.zoneDetail.classList.add('expanded');
+  if (el.zoneDetailTypeSelect) {
+    el.zoneDetailTypeSelect.value = zone.type || 'lava';
+  }
   if (el.zoneDetailType) el.zoneDetailType.textContent = zone.type || '-';
   if (el.zoneDetailCells) el.zoneDetailCells.textContent = String((zone.cells || []).length);
+
+  const typeDefaults = {
+    'lava': { color: '#ff6b6b', opacity: 0.5 },
+    'action_mask': { color: '#4a9eff', opacity: 0.25 },
+    'action_bonus_reward': { color: '#ffd166', opacity: 0.35 },
+  };
+  const defaults = typeDefaults[zone.type] || { color: '#ff6b6b', opacity: 0.5 };
   if (el.zoneDetailColor) {
-    el.zoneDetailColor.value = (zone.color || (zone.type === 'action_mask' ? '#4a9eff' : '#ff6b6b')).replace('#', '');
+    el.zoneDetailColor.value = (zone.color || defaults.color).replace('#', '');
   }
   if (el.zoneDetailOpacity) {
-    var defaultOpacity = zone.type === 'action_mask' ? 0.25 : 0.5;
-    el.zoneDetailOpacity.value = zone.opacity != null ? zone.opacity : defaultOpacity;
+    el.zoneDetailOpacity.value = zone.opacity != null ? zone.opacity : defaults.opacity;
   }
+
+  // Toggle visibility of action mask / reward actions rows based on zone type
+  if (el.zoneDetailActionRow) {
+    el.zoneDetailActionRow.style.display = zone.type === 'action_mask' ? 'flex' : 'none';
+  }
+  if (el.zoneDetailRewardActionsRow) {
+    el.zoneDetailRewardActionsRow.style.display = zone.type === 'action_bonus_reward' ? 'flex' : 'none';
+  }
+
   _populateActionOptions(el.zoneDetailAction, Array.isArray(zone.action) ? zone.action : (zone.action ? [zone.action] : []));
+  _populateActionOptions(el.zoneDetailRewardActions, Array.isArray(zone.reward_actions) ? zone.reward_actions : (zone.reward_actions ? [zone.reward_actions] : []));
   _populateMilestoneOptions(el.zoneDetailActivateOn, zone.activate_on);
   _populateMilestoneOptions(el.zoneDetailDeactivateOn, zone.deactivate_on);
 }
@@ -347,6 +395,18 @@ function renderMap(data) {
   el.envLayer.innerHTML = '';
   el.lavaLayer.innerHTML = '';
 
+  const selectedZoneCells = new Set();
+  if (state.selectedZoneId) {
+    const selZone = (data.zones || []).find(z => z.id === state.selectedZoneId);
+    if (selZone && selZone.cells) {
+      for (const cell of selZone.cells) {
+        const px = cell.px !== undefined ? cell.px : cell[0];
+        const py = cell.py !== undefined ? cell.py : cell[1];
+        selectedZoneCells.add(px + ':' + py);
+      }
+    }
+  }
+
   // Render structured zones from data.zones (preferred) or legacy data.lava_zones
   var zones = data.zones || [];
   if (!zones.length && data.lava_zones) {
@@ -355,19 +415,25 @@ function renderMap(data) {
   for (const zone of zones) {
     const zoneType = zone.type || 'lava';
     if (!state.zoneVisibility[zoneType]) continue;
-    const color = zone.color || (zoneType === 'action_mask' ? '#4a9eff' : '#ff6b6b');
-    const opacity = zone.opacity != null ? zone.opacity : (zoneType === 'action_mask' ? 0.3 : 0.5);
+    if (state.zoneDisabled) continue;
+    const color = zone.color || (zoneType === 'action_mask' ? '#4a9eff' : (zoneType === 'action_bonus_reward' ? '#ffd166' : '#ff6b6b'));
+    const opacity = zone.opacity != null ? zone.opacity : (zoneType === 'action_mask' ? 0.3 : (zoneType === 'action_bonus_reward' ? 0.35 : 0.5));
     const cells = zone.cells || [];
     for (const cell of cells) {
       const rect = document.createElementNS(SVG_NS, 'rect');
       const px = cell.px !== undefined ? cell.px : cell[0];
-      const py = cell.py !== undefined ? cell.py + state.yPixelOffset : (cell[1] + state.yPixelOffset);
+      const py = cell.py !== undefined ? cell.py : cell[1];
+      const isCellInSelected = selectedZoneCells.has(px + ':' + py);
       rect.setAttribute('x', px);
-      rect.setAttribute('y', py);
+      rect.setAttribute('y', py + state.yPixelOffset);
       rect.setAttribute('width', 16);
       rect.setAttribute('height', 16);
       rect.setAttribute('fill', color);
       rect.setAttribute('opacity', opacity);
+      if (isCellInSelected) {
+        rect.setAttribute('stroke', '#ffffff');
+        rect.setAttribute('stroke-width', '1.5');
+      }
       el.lavaLayer.appendChild(rect);
     }
   }
@@ -436,7 +502,7 @@ function updateLavaToggle() {
   if (state.lavaPlacementMode) {
     var zone = state.lastState.zones ? state.lastState.zones.find(function(z) { return z.id === state.selectedZoneId; }) : null;
     var type = (zone && zone.type) || state.zonePlacingType || 'lava';
-    var modeText = type === 'action_mask' ? 'ACTION MASK' : 'ZONE';
+    var modeText = type === 'action_mask' ? 'ACTION MASK' : (type === 'action_bonus_reward' ? 'BONUS REWARD' : 'ZONE');
     el.lavaModeStatus.textContent = modeText + ' PLACEMENT MODE - click to place/remove zones';
     el.mapSvg.style.cursor = 'crosshair';
   } else {
@@ -629,7 +695,6 @@ function initMap() {
       event.preventDefault();
       resetZoom();
     }
-    console.log(event)
     if (event.key === 'c') {
       event.preventDefault();
       if (state.lastMousePos) {
@@ -669,13 +734,37 @@ function initMap() {
   el.zoomInBtn.addEventListener('click', function() { setZoom(1.15); });
   el.zoomOutBtn.addEventListener('click', function() { setZoom(0.85); });
   el.zoomResetBtn.addEventListener('click', function() { resetZoom(); });
-  el.toggleLavaBtn.addEventListener('click', updateLavaToggle);
+  if (el.toggleLavaBtn) {
+    el.toggleLavaBtn.addEventListener('click', updateLavaToggle);
+  }
+
+  if (el.zoneDisableAllBtn) {
+    el.zoneDisableAllBtn.addEventListener('click', function() {
+      state.zoneDisabled = !state.zoneDisabled;
+      this.classList.toggle('toggle-active', state.zoneDisabled);
+      this.title = state.zoneDisabled ? 'Enable all zones' : 'Disable all zones';
+      this.textContent = state.zoneDisabled ? '✓' : '⊘';
+      const zones = state.lastState.zones || [];
+      for (let i = 0; i < zones.length; i++) {
+        zones[i] = Object.assign({}, zones[i], { disabled: state.zoneDisabled });
+      }
+      state.lastState = Object.assign({}, state.lastState, { zones: zones });
+      fetch('/api/zone-update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ zone_id: '', field: 'disabled', value: state.zoneDisabled })
+      }).catch(function() {});
+      renderZones(state.lastState);
+      renderMap(state.lastState);
+    });
+  }
   if (el.zoneVisibilityToggle) {
     el.zoneVisibilityToggle.addEventListener('click', function() {
-      const anyVisible = state.zoneVisibility.lava || state.zoneVisibility.action_mask;
+      const anyVisible = state.zoneVisibility.lava || state.zoneVisibility.action_mask || state.zoneVisibility.action_bonus_reward;
       const newVisible = !anyVisible;
       state.zoneVisibility.lava = newVisible;
       state.zoneVisibility.action_mask = newVisible;
+      state.zoneVisibility.action_bonus_reward = newVisible;
       this.classList.toggle('toggle-active', anyVisible === false);
     });
   }
@@ -729,6 +818,37 @@ function initMap() {
       saveZoneConfig('action', selected.length === 1 ? selected[0] : selected);
     });
   }
+  if (el.zoneDetailRewardActions) {
+    el.zoneDetailRewardActions.addEventListener('change', function() {
+      const selected = Array.from(this.selectedOptions).map(function(o) { return o.value; });
+      const zone = state.lastState.zones ? state.lastState.zones.find(z => z.id === state.selectedZoneId) : null;
+      if (!zone) return;
+      saveZoneConfig('reward_actions', selected.length === 1 ? selected[0] : selected);
+    });
+  }
+  if (el.zoneDetailTypeSelect) {
+    el.zoneDetailTypeSelect.addEventListener('change', function() {
+      const newType = this.value;
+      saveZoneConfig('type', newType);
+      const zones = state.lastState.zones || [];
+      const zi = zones.findIndex(z => z.id === state.selectedZoneId);
+      if (zi >= 0) {
+        zones[zi] = Object.assign({}, zones[zi], { type: newType });
+        state.lastState = Object.assign({}, state.lastState, { zones: zones });
+        // Re-apply default color/opacity based on the new type
+        const typeDefaults = {
+          'lava': { color: '#ff6b6b', opacity: 0.5 },
+          'action_mask': { color: '#4a9eff', opacity: 0.25 },
+          'action_bonus_reward': { color: '#ffd166', opacity: 0.35 },
+        };
+        const defaults = typeDefaults[newType] || { color: '#ff6b6b', opacity: 0.5 };
+        if (!zones[zi].color) saveZoneConfig('color', defaults.color);
+        if (zones[zi].opacity == null) saveZoneConfig('opacity', defaults.opacity);
+        renderZones(state.lastState);
+        renderMap(state.lastState);
+      }
+    });
+  }
   if (el.zoneDetailActivateOn) {
     el.zoneDetailActivateOn.addEventListener('change', function() {
       saveZoneConfig('activate_on', this.value || null);
@@ -770,7 +890,7 @@ function initMap() {
   if (state.lavaPlacementMode) {
     var _zone = state.lastState.zones ? state.lastState.zones.find(function(z) { return z.id === state.selectedZoneId; }) : null;
     var _type = (_zone && _zone.type) || state.zonePlacingType || 'lava';
-    var _modeText = _type === 'action_mask' ? 'ACTION MASK' : 'ZONE';
+    var _modeText = _type === 'action_mask' ? 'ACTION MASK' : (_type === 'action_bonus_reward' ? 'BONUS REWARD' : 'ZONE');
     el.lavaModeStatus.textContent = _modeText + ' PLACEMENT MODE - click to place/remove zones';
     el.mapSvg.style.cursor = 'crosshair';
   } else {

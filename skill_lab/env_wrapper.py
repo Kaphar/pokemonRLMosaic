@@ -1148,10 +1148,37 @@ class SkillLabWrapper(gymnasium.Wrapper):
                 print(f"{self._colored_env_label()} [STAG] "
                       f"Stagnation penalty {stag_penalty:.2f} "
                       f"(stats: {self.stagnation_tracker.get_stats()})",
-                      flush=True)
+                       flush=True)
 
-        # ========================================
-        # EARLY TERMINATION: Check starter status
+        # --- Action Bonus Reward zones ---
+        # When the agent performs an action listed in a zone's reward_actions
+        # while standing inside that zone, grant a small bonus reward.
+        original_action_name = ZONE_ACTION_NAMES[original_action] if original_action < len(ZONE_ACTION_NAMES) else None
+        if original_action_name and self.zone_manager is not None:
+            try:
+                map_id, x_pos, y_pos = self._get_agent_game_position()
+                achieved = (
+                    self.checkpoint_tracker.achieved
+                    if self.checkpoint_tracker
+                    else None
+                )
+                in_battle = self.game_state.in_battle()
+                bonus_actions = self.zone_manager.get_bonus_reward_actions(
+                    int(map_id), int(x_pos), int(y_pos), achieved
+                )
+                if original_action_name in bonus_actions:
+                    bonus_reward = self.effective_rewards.get("action_bonus_reward", 0.5)
+                    if bonus_reward > 0:
+                        reward += bonus_reward
+                        self._log_reward("action_bonus_reward", bonus_reward,
+                                         f"Bonus action '{original_action_name}' in reward zone")
+                        info["action_bonus_reward"] = bonus_reward
+                        print(f"{self._colored_env_label()} Bonus reward! "
+                              f"{original_action_name} in bonus zone +{bonus_reward:.2f}",
+                              flush=True)
+            except Exception as _e:
+                print(f"[{self.env_name}] Bonus reward error: {_e}", flush=True)
+
         # ========================================
         if not self.objective_met:
             status, species = self._check_starter_status()

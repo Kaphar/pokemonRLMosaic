@@ -3,7 +3,7 @@
 Zones are stored in ``zones.json`` as a list of zone objects.  Each zone has:
 
 * ``id``        – unique identifier
-* ``type``      – ``"lava"`` or ``"action_mask"``
+* ``type``      – ``"lava"``, ``"action_mask"``, or ``"action_bonus_reward"``
 * ``cells``     – list of ``{"map_id": m, "x": tx, "y": ty}`` in-game coordinates
 * ``label``     – human-readable name
 * ``color``     – display color
@@ -11,6 +11,7 @@ Zones are stored in ``zones.json`` as a list of zone objects.  Each zone has:
 * ``action``     – (action_mask only) action name to mask, e.g. ``"Down"``
 * ``activate_on``   – (action_mask only) checkpoint name that activates the zone
 * ``deactivate_on`` – (action_mask only) checkpoint name that deactivates the zone
+* ``reward_actions`` – (action_bonus_reward only) list of actions that grant a reward when performed in the zone
 
 Backward compatibility: if ``zones.json`` does not exist the manager falls back
 to reading the legacy ``lava.json`` flat list and converts it into a single
@@ -36,12 +37,14 @@ ACTION_NAMES = ["Down", "Left", "Right", "Up", "A", "B", "Start", "Select"]
 ZONE_TYPE_COLORS: dict[str, str] = {
     "lava": "#ff6b6b",
     "action_mask": "#4a9eff",
+    "action_bonus_reward": "#ffd166",
 }
 
 #: Default display opacity per zone type (lower so overlapping zones are visible).
 ZONE_TYPE_OPACITIES: dict[str, float] = {
     "lava": 0.4,
     "action_mask": 0.25,
+    "action_bonus_reward": 0.35,
 }
 
 #: Checkpoint names known to the default milestone set — used to populate
@@ -125,6 +128,8 @@ class ZoneManager:
                     "activate_on": zone.get("activate_on"),
                     "deactivate_on": zone.get("deactivate_on"),
                     "mask_rules": zone.get("mask_rules", []),
+                    "reward_actions": zone.get("reward_actions"),
+                    "disabled": zone.get("disabled", False),
                 }
             )
         return normalized
@@ -178,6 +183,8 @@ class ZoneManager:
             "activate_on": kwargs.get("activate_on"),
             "deactivate_on": kwargs.get("deactivate_on"),
             "mask_rules": kwargs.get("mask_rules", []),
+            "reward_actions": kwargs.get("reward_actions"),
+            "disabled": kwargs.get("disabled", False),
         }
 
     def _save_zones(self) -> None:
@@ -292,6 +299,8 @@ class ZoneManager:
         """
         if zone.get("mask_rules"):
             return True
+        if zone.get("disabled"):
+            return False
         activate_on = zone.get("activate_on")
         deactivate_on = zone.get("deactivate_on")
         if activate_on is not None and activate_on not in achieved_checkpoints:
@@ -357,6 +366,31 @@ class ZoneManager:
         """True when the agent was last seen inside an active action_mask zone."""
         return bool(self._masked_actions)
 
+    def get_bonus_reward_actions(
+        self,
+        map_id: int,
+        x: int,
+        y: int,
+        achieved_checkpoints: set[str] | None = None,
+    ) -> list[str]:
+        """Return the union of ``reward_actions`` for all active action_bonus_reward zones at the position.
+
+        Only zones whose ``activate_on`` / ``deactivate_on`` gates are satisfied
+        (via :meth:`_is_zone_active`) are considered.
+        """
+        if achieved_checkpoints is None:
+            achieved_checkpoints = set()
+        rewarded: list[str] = []
+        for zone in self.get_active_zones(achieved_checkpoints):
+            if zone.get("type") != "action_bonus_reward":
+                continue
+            if not self._position_in_cells(map_id, x, y, zone.get("cells", [])):
+                continue
+            for action in zone.get("reward_actions") or []:
+                if action not in rewarded:
+                    rewarded.append(action)
+        return rewarded
+
     def tick(
         self,
         map_id: int,
@@ -402,6 +436,11 @@ class ZoneManager:
             "zone_count": len(self.zones),
             "zone_types": [z["type"] for z in self.zones],
             "zone_step_counts": dict(self._zone_step_counts),
+            "zone_reward_actions": {
+                z["id"]: z.get("reward_actions", [])
+                for z in self.zones
+                if z.get("type") == "action_bonus_reward"
+            },
         }
 
     def reset_stats(self) -> None:

@@ -17,7 +17,7 @@ from urllib.parse import parse_qs, urlparse
 import webbrowser
 
 try:
-    from skill_lab.zones import ZoneManager, KNOWN_CHECKPOINTS as _KNOWN_CHECKPOINTS
+    from skill_lab.zones import ZoneManager, KNOWN_CHECKPOINTS as _KNOWN_CHECKPOINTS, ACTION_NAMES
     _HAS_ZONES = True
 except ImportError:
     _HAS_ZONES = False
@@ -174,6 +174,7 @@ class BrowserMapDashboard:
             "zones": [],
             "zone_stats": {},
             "checkpoints": list(_KNOWN_CHECKPOINTS),
+            "action_names": list(ACTION_NAMES),
             "lava_zones": [],  # legacy alias, populated from zones for backward compat
             "map_width": self.map_width,
             "map_height": self.map_height,
@@ -1699,16 +1700,29 @@ class BrowserMapDashboard:
                         return
                     zone_id = payload.get("zone_id", "")
                     if dashboard._zone_manager is not None:
-                        zone = dashboard._zone_manager.get_zone(zone_id)
-                        if zone is not None:
-                            if "label" in payload and payload["label"] is not None:
-                                zone["label"] = payload["label"]
-                            if "field" in payload and "value" in payload:
-                                field = payload["field"]
-                                value = payload["value"]
-                                zone[field] = value
+                        field = payload.get("field")
+                        value = payload.get("value")
+                        if field is not None and value is not None and not zone_id:
+                            # Apply field to all zones (e.g. bulk disable/enable)
+                            for z in dashboard._zone_manager.zones:
+                                if field in ("type", "color", "opacity", "action",
+                                             "activate_on", "deactivate_on",
+                                             "mask_rules", "reward_actions",
+                                             "label", "disabled"):
+                                    z[field] = value
                             dashboard._zone_manager._save_zones()
                             dashboard._sync_zones_to_state()
+                        else:
+                            zone = dashboard._zone_manager.get_zone(zone_id)
+                            if zone is not None:
+                                if "label" in payload and payload["label"] is not None:
+                                    zone["label"] = payload["label"]
+                                if "field" in payload and "value" in payload:
+                                    field = payload["field"]
+                                    value = payload["value"]
+                                    zone[field] = value
+                                dashboard._zone_manager._save_zones()
+                                dashboard._sync_zones_to_state()
                     resp_data = {"ok": True}
                     self.send_response(200)
                     self.send_header("Content-Type", "application/json")

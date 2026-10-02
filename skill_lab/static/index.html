@@ -47,14 +47,21 @@
         <div class="zone-panel">
           <div class="zone-panel-header">
             <span>Zones</span>
-            <button id="add-zone-btn" title="Add a new zone" class="zone-btn-sm">+</button>
+            <div style="display: flex; gap: 4px; align-items: center;">
+              <button id="add-zone-btn" title="Add a new zone" class="zone-btn-sm">+</button>
+              <button id="zone-disable-all-btn" title="Disable all zones" class="zone-btn-sm">⊘</button>
+            </div>
           </div>
           <div class="zone-list" id="zone-list"></div>
           <div class="zone-detail" id="zone-detail">
             <div class="zone-detail-hidden" id="zone-detail-content">
               <div class="zone-detail-row">
                 <label>Type</label>
-                <span id="zone-detail-type"></span>
+                <select id="zone-detail-type-select">
+                  <option value="lava">Lava Zone</option>
+                  <option value="action_mask">Action Mask</option>
+                  <option value="action_bonus_reward">Action Bonus Reward</option>
+                </select>
               </div>
               <div class="zone-detail-row">
                 <label>Cells</label>
@@ -68,7 +75,11 @@
                 <label>Opacity</label>
                 <input type="range" id="zone-detail-opacity" min="0" max="1" step="0.05" value="0.5" />
               </div>
-              <div class="zone-detail-row">
+              <div class="zone-detail-row" id="zone-detail-reward-actions-row">
+                <label>Reward Actions (Ctrl/Cmd+click for multi-select)</label>
+                <select id="zone-detail-reward-actions" multiple size="4"></select>
+              </div>
+              <div class="zone-detail-row" id="zone-detail-action-row">
                 <label>Masks Actions (Ctrl/Cmd+click for multi-select)</label>
                 <select id="zone-detail-action" multiple size="4"></select>
               </div>

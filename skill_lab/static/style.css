@@ -130,6 +130,8 @@ body {
 .zone-item { padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; color: var(--text); display: flex; align-items: center; justify-content: space-between; }
 .zone-item:hover { background: rgba(255, 255, 255, 0.06); }
 .zone-item.selected { background: rgba(110, 234, 255, 0.12); border: 1px solid rgba(110, 234, 255, 0.3); }
+.zone-item.disabled { opacity: 0.5; filter: grayscale(80%); }
+.zone-detail-row select { background: rgba(15, 22, 34, 0.6); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 4px; padding: 3px 6px; color: var(--text); font-size: 0.75rem; }
 .zone-item .zone-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 6px; }
 .zone-item .zone-label.editing { background: rgba(255, 255, 255, 0.1); }
 .zone-item .zone-type-badge { font-size: 0.65rem; padding: 1px 6px; border-radius: 3px; opacity: 0.7; }

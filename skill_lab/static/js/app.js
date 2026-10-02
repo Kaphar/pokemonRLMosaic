@@ -29,6 +29,9 @@ function update() {
       if (!data || !Array.isArray(data.envs)) return;
       el.status.textContent = 'live';
        state.zoneStats = data.zone_stats || {};
+       if (data.action_names && Array.isArray(data.action_names)) {
+         state.actionNames = data.action_names;
+       }
       state.availableCheckpoints = data.checkpoints || state.availableCheckpoints;
       if (data.grid_offset_y !== undefined) state.gridOffsetY = data.grid_offset_y;
       state.lastState = data;
